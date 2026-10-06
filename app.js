@@ -9,7 +9,12 @@
   let mode = 'basic';
   let names = { [WHITE]: 'White', [BLACK]: 'Black' };
   let viewNames = names;
-  let sans = [];
+  let sans = [];               // every move played (standard notation)
+  let fullMoves = [];          // every move played (plain objects, for redo + replay)
+  let viewPly = 0;             // how many of those moves the board is showing
+  let opts = { autoFlip: true, hints: true };
+  let flipTimer = null;
+  let toastTimer = null;
   let initialSecrets = { [WHITE]: -1, [BLACK]: -1 };
 
   let phase = 'menu';          // menu | names | pick-w | pick-b | play | over | replay
@@ -35,6 +40,8 @@
   const glyph = (p) => FILLED[p & 7] + '︎';
   const isWhite = (p) => (p & 24) === WHITE;
   const VALUE = { 1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0 };
+  // pawn moves get a P so every line reads  <piece><square>  e.g. Nf3, Pe4, Pxd5
+  const fmt = (san) => (/^[a-h]/.test(san) ? 'P' + (san.includes('x') ? san.slice(san.indexOf('x')) : san) : san);
   const cname = (c) => (c === WHITE ? 'White' : 'Black');
   const nameOf = (c) => viewNames[c] || cname(c);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -112,7 +119,7 @@
     const last = lastH ? lastH.move : null;
     const picking = phase === 'pick-w' || phase === 'pick-b';
     const pickColor = phase === 'pick-w' ? WHITE : BLACK;
-    const legalSet = new Map(legalTargets.map((m) => [m.to, m]));
+    const legalSet = new Map(opts.hints ? legalTargets.map((m) => [m.to, m]) : []);
     boardEl.classList.toggle('picking', picking);
 
     for (const key in squareEls) {
@@ -227,23 +234,27 @@
   /* ------------------------------------------------------------- move list */
   function renderMoves(list, cur) {
     moveListEl.innerHTML = '';
+    let pair = null;
     list.forEach((san, i) => {
       if (i % 2 === 0) {
-        const n = document.createElement('span');
-        n.className = 'num';
-        n.textContent = i / 2 + 1 + '.';
-        moveListEl.appendChild(n);
+        pair = document.createElement('div');
+        pair.className = 'pair';
+        moveListEl.appendChild(pair);
       }
       const b = document.createElement('button');
-      b.className = 'move' + (i === cur - 1 ? ' current' : '');
+      b.className = 'move ' + (i % 2 === 0 ? 'w' : 'b') + (i === cur - 1 ? ' current' : '');
       b.dataset.ply = i;
-      b.textContent = san;
-      moveListEl.appendChild(b);
+      b.textContent = Math.floor(i / 2) + 1 + '. ' + fmt(san);
+      pair.appendChild(b);
     });
     const cEl = moveListEl.querySelector('.current');
     if (cEl) {
-      movesScroll.scrollLeft = cEl.offsetLeft - movesScroll.clientWidth / 2;
-      movesScroll.scrollTop = cEl.offsetTop - movesScroll.clientHeight / 2;
+      const pr = cEl.parentElement;
+      movesScroll.scrollLeft = pr.offsetLeft - movesScroll.clientWidth / 2;
+      movesScroll.scrollTop = pr.offsetTop - movesScroll.clientHeight / 2;
+    } else if (list.length) {
+      movesScroll.scrollLeft = movesScroll.scrollWidth;
+      movesScroll.scrollTop = movesScroll.scrollHeight;
     } else {
       movesScroll.scrollLeft = 0;
       movesScroll.scrollTop = 0;
@@ -266,6 +277,10 @@
     let cls = '';
     if (G.inCheck(G.turn)) { text += ' — check'; cls = 'check'; }
     const h = G.history[G.history.length - 1];
+    if (G === game && viewPly < sans.length) {
+      setStatus(viewPly ? `Viewing move ${viewPly} of ${sans.length} (${fmt(sans[viewPly - 1])})` : 'Viewing the start position', 'dim');
+      return;
+    }
     if (G.mode === 'secret' && h && h.wasSecretMove) {
       const who = G.turn === WHITE ? BLACK : WHITE;
       text = nameOf(who) + ' revealed a Secret Queen. ' + text;
@@ -278,7 +293,10 @@
     $('#pick-bar').classList.toggle('hidden', !pickPhase);
     $('#controls').classList.toggle('hidden', pickPhase || phase === 'replay');
     $('#replay-controls').classList.toggle('hidden', phase !== 'replay');
-    $('#undo-btn').disabled = !game.history.length || (phase !== 'play' && phase !== 'over');
+    const nav = phase === 'play' || phase === 'over';
+    $('#undo-btn').disabled = !nav || viewPly === 0;
+    $('#redo-btn').disabled = !nav || viewPly >= sans.length;
+    $('#flip-btn').disabled = opts.autoFlip;
     document.querySelector('.layout').classList.toggle('replaying', phase === 'replay');
   }
 
@@ -300,6 +318,9 @@
     G = game;
     viewNames = names;
     sans = [];
+    fullMoves = [];
+    viewPly = 0;
+    clearTimeout(flipTimer);
     selected = -1;
     legalTargets = [];
     pickSel = -1;
@@ -334,11 +355,66 @@
     const inp = $('#name-in');
     const ok = () => {
       names[color] = inp.value.trim() || cname(color);
-      if (white) askName(BLACK); else { closeSheet(); afterNames(); }
+      if (white) askName(BLACK); else askSettings();
     };
     $('#n-ok').onclick = ok;
     $('#n-cancel').onclick = () => { closeSheet(); phase = 'menu'; renderSavedList(); showPage('menu'); };
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+  }
+
+  function askYN(question, sub, cb) {
+    openSheet(`<h2>${esc(question)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h2>
+      <div class="row"><button class="btn" id="yn-n">No</button><button class="btn primary" id="yn-y">Yes</button></div>`);
+    const done = (v) => { document.removeEventListener('keydown', kd); cb(v); };
+    const kd = (e) => {
+      const k = e.key.toLowerCase();
+      if (k === 'y') done(true); else if (k === 'n') done(false);
+    };
+    document.addEventListener('keydown', kd);
+    $('#yn-y').onclick = () => done(true);
+    $('#yn-n').onclick = () => done(false);
+  }
+
+  function askSettings() {
+    askYN('Flip the board to the player whose turn it is?', 'Handy for passing one phone back and forth.', (flip) => {
+      opts.autoFlip = flip;
+      askYN('Show legal move hints?', 'Dots on the squares a piece can move to.', (hints) => {
+        opts.hints = hints;
+        closeSheet();
+        afterNames();
+      });
+    });
+  }
+
+  /* orientation: auto-flip puts the player to move at the bottom */
+  function setFlipped(f, animate) {
+    if (f === flipped) return;
+    const apply = () => { flipped = f; buildBoard(); renderAll(); boardEl.classList.remove('fading'); };
+    if (!animate) { apply(); return; }
+    boardEl.classList.add('fading');
+    setTimeout(apply, 170);
+  }
+
+  function syncFlip(animate, delay) {
+    clearTimeout(flipTimer);
+    if (!opts.autoFlip) return;
+    flipTimer = setTimeout(() => {
+      if (phase !== 'play' && phase !== 'over') return;
+      if (viewPly < sans.length) return;
+      setFlipped(game.turn === BLACK, animate);
+    }, delay || 0);
+  }
+
+  function showToast(text) {
+    const t = $('#toast');
+    t.textContent = text;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+    const r = $('#redo-btn');
+    r.classList.remove('nudge');
+    void r.offsetWidth;
+    r.classList.add('nudge');
   }
 
   function afterNames() {
@@ -351,6 +427,7 @@
     phase = color === WHITE ? 'pick-w' : 'pick-b';
     const other = color === WHITE ? BLACK : WHITE;
     pickSel = -1;
+    setFlipped(opts.autoFlip && color === BLACK, false);
     renderAll();
     $('#pick-confirm').disabled = true;
     setStatus('');
@@ -381,6 +458,7 @@
   function beginPlay() {
     phase = 'play';
     coverEl.classList.add('hidden');
+    setFlipped(opts.autoFlip && game.turn === BLACK, false);
     renderAll();
     renderMoves(sans, sans.length);
     updateStatus();
@@ -401,6 +479,10 @@
         setStatus(pickSel < 0 ? `${nameOf(color)}: tap one of your pawns` : 'Tap Confirm to lock it in');
         renderBoard();
       }
+      return;
+    }
+    if (phase === 'play' && viewPly < sans.length) {
+      showToast('You are viewing an earlier move. Press Redo to get back to the current position before playing.');
       return;
     }
     if (phase !== 'play' || pendingPromo) return;
@@ -438,6 +520,8 @@
     const canMove = game.hasLegalMove();
     const full = san + (check ? (canMove ? '+' : '#') : '');
     sans.push(full);
+    fullMoves.push({ from: m.from, to: m.to, flags: m.flags, promo: m.promo || 0, q: m.q || 0 });
+    viewPly = sans.length;
     selected = -1;
     legalTargets = [];
 
@@ -447,7 +531,7 @@
     if (h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, sans.length);
 
-    if (!canMove) endGame(mover, check); else updateStatus();
+    if (!canMove) endGame(mover, check); else { updateStatus(); syncFlip(true, 380); }
   }
 
   function showPromotion(move) {
@@ -481,9 +565,13 @@
       ? { title: nameOf(mover) + ' wins', sub: 'Checkmate', result: mover === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: 'Stalemate', result: '1/2-1/2' };
     updateControls();
-    setStatus('', mate ? '' : '', `${esc(over.title)} · ${esc(over.sub)} <button id="st-opts">Options</button>`);
-    $('#st-opts').onclick = showOverSheet;
+    overStatus();
     setTimeout(() => { if (phase === 'over' && sheetBg.classList.contains('hidden')) showOverSheet(); }, 800);
+  }
+
+  function overStatus() {
+    setStatus('', '', `${esc(over.title)} · ${esc(over.sub)} <button id="st-opts">Options</button>`);
+    $('#st-opts').onclick = () => showOverSheet();
   }
 
   function showOverSheet(savedNote) {
@@ -531,7 +619,7 @@
       mode,
       names: { w: names[WHITE], b: names[BLACK] },
       secrets: { w: initialSecrets[WHITE], b: initialSecrets[BLACK] },
-      moves: game.history.map((h) => ({ from: h.move.from, to: h.move.to, flags: h.move.flags, promo: h.move.promo || 0, q: h.move.q || 0 })),
+      moves: fullMoves.map((m) => Object.assign({}, m)),
       sans: sans.slice(),
       result: over ? over.title + ' · ' + over.sub : '',
     };
@@ -544,24 +632,40 @@
     renderAll();
   });
 
-  $('#undo-btn').addEventListener('click', () => {
-    if (!game.history.length || (phase !== 'play' && phase !== 'over')) return;
-    const m = game.history[game.history.length - 1].move;
-    game.unmakeMove();
-    sans.pop();
-    over = null;
-    phase = 'play';
+  /* undo / redo only move the view through the game; nobody can play until it is back at the latest move */
+  function navigate(dir) {
+    if (phase !== 'play' && phase !== 'over') return;
+    let m;
+    if (dir < 0) {
+      if (viewPly === 0) return;
+      m = fullMoves[viewPly - 1];
+      game.unmakeMove();
+      viewPly--;
+    } else {
+      if (viewPly >= fullMoves.length) return;
+      m = fullMoves[viewPly];
+      game.makeMove(m);
+      viewPly++;
+    }
     closeSheet();
     selected = -1;
     legalTargets = [];
+    const atLive = viewPly === fullMoves.length;
+    phase = atLive && over ? 'over' : 'play';
     renderAll();
-    animateMove(m, true);
-    renderMoves(sans, sans.length);
-    if (sans.length) updateStatus(); else updateStatus();
-  });
+    animateMove(m, dir < 0);
+    const h = game.history[game.history.length - 1];
+    if (dir > 0 && h && h.wasSecretMove) popReveal(m.to);
+    renderMoves(sans, viewPly);
+    if (phase === 'over') overStatus(); else updateStatus();
+    if (atLive) syncFlip(true, 300);
+  }
+
+  $('#undo-btn').addEventListener('click', () => navigate(-1));
+  $('#redo-btn').addEventListener('click', () => navigate(1));
 
   $('#reset-btn').addEventListener('click', () => {
-    if (phase === 'play' && game.history.length) {
+    if (phase === 'play' && sans.length) {
       confirmSheet('Start a new game?', 'New game', () => startGame(mode, true));
     } else {
       startGame(mode, true);
@@ -571,7 +675,7 @@
   $('#back-btn').addEventListener('click', () => {
     if (phase === 'replay') { exitReplay(); return; }
     const leave = () => { phase = 'menu'; closeSheet(); renderSavedList(); showPage('menu'); };
-    if (phase === 'play' && game.history.length) confirmSheet('Leave this game?', 'Leave', leave); else leave();
+    if ((phase === 'play' && sans.length)) confirmSheet('Leave this game?', 'Leave', leave); else leave();
   });
 
   /* ----------------------------------------------------------------- replay */
@@ -580,7 +684,7 @@
   function startReplay(data, from) {
     pauseReplay();
     closeSheet();
-    replay = { data, idx: 0, speed: 1, timer: null, from };
+    replay = { data, idx: 0, speed: 1, timer: null, from, prevFlipped: flipped };
     rgame.mode = data.mode;
     rgame.reset();
     rgame.secretQueen = { [WHITE]: data.secrets.w, [BLACK]: data.secrets.b };
@@ -609,7 +713,7 @@
     if (idx === 0) { setStatus('Start position', 'dim'); return; }
     if (idx === data.moves.length && data.result) { setStatus(data.result); return; }
     const check = G.inCheck(G.turn);
-    setStatus(`Move ${Math.ceil(idx / 2)} · ${data.sans[idx - 1]}`, check ? 'check' : '');
+    setStatus(`Move ${Math.ceil(idx / 2)} · ${fmt(data.sans[idx - 1])}`, check ? 'check' : '');
   }
 
   function syncReplayUI() {
@@ -672,6 +776,7 @@
 
   function exitReplay() {
     const from = replay.from;
+    const pf = replay.prevFlipped;
     pauseReplay();
     replay = null;
     G = game;
@@ -679,11 +784,11 @@
     $('#mode-title').textContent = mode === 'secret' ? 'Secret Queen' : 'Classic';
     if (from === 'over') {
       phase = 'over';
+      flipped = pf;
       buildBoard();
       renderAll();
       renderMoves(sans, sans.length);
-      setStatus('', '', `${esc(over.title)} · ${esc(over.sub)} <button id="st-opts">Options</button>`);
-      $('#st-opts').onclick = showOverSheet;
+      overStatus();
       showOverSheet();
     } else {
       phase = 'menu';
