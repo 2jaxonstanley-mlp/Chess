@@ -372,7 +372,7 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 .controls { display: flex; gap: .5rem; padding: .3rem 0; }
 .is-tas { --extra: 52px; }
 .controls { gap: .4rem; flex-wrap: wrap; }
-.controls.tas .btn { flex: 1 1 28%; }
+.controls.tas .btn { flex: 1 1 22%; font-size: .95rem; padding: .6rem .1rem; }
 .btn.big { padding: 1rem; font-size: 1.15rem; }
 .controls .btn { flex: 1; min-width: 0; padding: .6rem .2rem; }
 .btn.nudge { animation: nudge-btn .5s ease 2; background: #fff; color: #111; }
@@ -527,3 +527,11 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 }
 .square.hint-to::after { background: rgba(34, 211, 238, .4); }
 @keyframes hint-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* TAS: both-sides toggle + glowing hint button */
+.btn.on { background: #fff; color: #111; }
+.btn.glow { background: #22d3ee; color: #04222a; animation: glow 1.3s ease-in-out infinite; }
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, .75); }
+  50% { box-shadow: 0 0 14px 4px rgba(34, 211, 238, .95); }
+}

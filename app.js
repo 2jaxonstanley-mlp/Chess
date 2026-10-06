@@ -20,6 +20,10 @@
   let aiBusy = false;          // the computer is "thinking"
   let posKeys = [];            // position key after each ply (index 0 = start), for repetition
   let hintMove = null;         // TAS hint currently shown
+  let hintAvail = false;       // a forced mate exists right now (makes the Hint button glow)
+  let hintCache = null;        // { key, result } from the last mate check
+  let hintToken = 0;
+  let playBoth = false;        // TAS: you play the computer's turns too, so it stays still
   let initialSecrets = { [WHITE]: -1, [BLACK]: -1 };
 
   let phase = 'menu';          // menu | names | pick-w | pick-b | play | over | replay
@@ -48,6 +52,7 @@
   // pawn moves get a P so every line reads  <piece><square>  e.g. Nf3, Pe4, Pxd5
   const fmt = (san) => (/^[a-h]/.test(san) ? 'P' + (san.includes('x') ? san.slice(san.indexOf('x')) : san) : san);
   const isTas = () => mode === 'tas';
+  const humanTurn = () => !ai || playBoth || game.turn === ai.human;
   const engineMode = (m) => (m === 'secret' ? 'secret' : 'basic');
   const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS' };
   const LEVEL_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', hardest: 'Hardest' };
@@ -301,19 +306,24 @@
     setStatus(text, cls);
   }
 
-  /* TAS undo/redo: always land on a position where it is the human's turn */
-  function tasTarget(dir) {
-    const p = ai && ai.human === BLACK ? 1 : 0;
-    if (dir < 0) {
-      let k = viewPly - 1;
-      if (k < 0) return -1;
-      if (k % 2 !== p) k--;
-      return k >= p ? k : -1;
-    }
-    if (viewPly >= fullMoves.length) return -1;
-    let k = viewPly + 1;
-    if (k % 2 !== p) k++;
-    return Math.min(k, fullMoves.length);
+  function updateHintGlow() {
+    $('#hint-btn').classList.toggle('glow', hintAvail && !hintMove && phase === 'play' && !aiBusy);
+  }
+
+  /* look for a forced mate for the side to move, so the Hint button can glow */
+  function refreshHint() {
+    const tok = ++hintToken;
+    hintAvail = false;
+    hintCache = null;
+    updateHintGlow();
+    if (!isTas() || phase !== 'play' || aiBusy || !humanTurn()) return;
+    setTimeout(() => {
+      if (tok !== hintToken || phase !== 'play' || aiBusy) return;
+      const result = findMate(game);
+      hintCache = { key: positionKey(game), result };
+      hintAvail = !!result;
+      updateHintGlow();
+    }, 120);
   }
 
   function updateControls() {
@@ -326,14 +336,14 @@
     $('#hint-btn').classList.toggle('hidden', !tas);
     $('#save-btn').classList.toggle('hidden', !tas);
     const nav = (phase === 'play' || phase === 'over') && !aiBusy;
-    if (tas) {
-      $('#undo-btn').disabled = !nav || tasTarget(-1) < 0;
-      $('#redo-btn').disabled = !nav || tasTarget(1) < 0;
-    } else {
-      $('#undo-btn').disabled = !nav || viewPly === 0;
-      $('#redo-btn').disabled = !nav || viewPly >= sans.length;
-    }
-    $('#hint-btn').disabled = !(phase === 'play' && !aiBusy && ai && game.turn === ai.human);
+    $('#undo-btn').disabled = !nav || viewPly === 0;
+    $('#redo-btn').disabled = !nav || viewPly >= sans.length;
+    $('#hint-btn').disabled = !(phase === 'play' && !aiBusy && ai && humanTurn());
+    $('#both-btn').classList.toggle('hidden', !tas);
+    $('#both-btn').classList.toggle('on', playBoth);
+    $('#both-btn').setAttribute('aria-pressed', playBoth ? 'true' : 'false');
+    $('#both-btn').disabled = !(phase === 'play' || phase === 'over');
+    updateHintGlow();
     $('#save-btn').disabled = !sans.length;
     $('#flip-btn').disabled = opts.autoFlip;
     document.querySelector('.layout').classList.toggle('replaying', phase === 'replay');
@@ -391,6 +401,10 @@
     aiToken++;
     aiBusy = false;
     hintMove = null;
+    hintAvail = false;
+    hintCache = null;
+    hintToken++;
+    playBoth = false;
     clearTimeout(flipTimer);
     selected = -1;
     legalTargets = [];
@@ -595,6 +609,7 @@
     renderMoves(sans, sans.length);
     updateStatus();
     maybeAI();
+    refreshHint();
   }
 
   /* ----------------------------------------------------------- the computer */
@@ -603,7 +618,7 @@
   }
 
   function maybeAI() {
-    if (!ai || phase !== 'play' || game.turn !== ai.color) return;
+    if (!ai || playBoth || phase !== 'play' || game.turn !== ai.color) return;
     if (!isTas() && viewPly < sans.length) return;
     const token = ++aiToken;
     aiBusy = true;
@@ -652,7 +667,10 @@
       return;
     }
     if (phase !== 'play' || pendingPromo || aiBusy) return;
-    if (ai && game.turn !== ai.human) return;
+    if (ai && !humanTurn()) {
+      if (isTas()) showToast("It's the computer's move here. Press Redo, or switch on Both sides to play it yourself.", false);
+      return;
+    }
 
     const p = game.board[s];
     const own = p && (p & 24) === game.turn;
@@ -727,7 +745,7 @@
     else if (posKeys.filter((k) => k === posKeys[viewPly]).length >= 3) end = 'repeat';
 
     if (end) endGame(end, mover);
-    else { updateStatus(); syncFlip(true, 380); maybeAI(); }
+    else { updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
   }
 
   function showPromotion(move) {
@@ -836,7 +854,7 @@
      the latest move. TAS: undo / redo are real, and playing from an earlier point drops the old future. */
   function navigate(dir) {
     if ((phase !== 'play' && phase !== 'over') || aiBusy) return;
-    const target = isTas() ? tasTarget(dir) : viewPly + dir;
+    const target = viewPly + dir;
     if (target < 0 || target > fullMoves.length || target === viewPly) return;
     let m = null;
     while (viewPly > target) { m = fullMoves[viewPly - 1]; game.unmakeMove(); viewPly--; }
@@ -854,21 +872,21 @@
     renderMoves(sans, viewPly);
     if (phase === 'over') overStatus(); else updateStatus();
     if (atLive) { syncFlip(true, 300); maybeAI(); }
+    refreshHint();
   }
 
   $('#undo-btn').addEventListener('click', () => navigate(-1));
   $('#redo-btn').addEventListener('click', () => navigate(1));
   $('#save-btn').addEventListener('click', () => { if (sans.length) showSaveSheet(); });
 
-  /* TAS hint: is there a forced mate in 1 or 2, and where to go */
+  /* TAS hint: is there a forced mate in 1 or 2, and exactly where to go */
   $('#hint-btn').addEventListener('click', () => {
-    if (phase !== 'play' || aiBusy || !ai || game.turn !== ai.human) return;
-    setStatus('', 'dim', 'Looking for a forced mate…');
-    setTimeout(() => {
-      const r = findMate(game);
+    if (phase !== 'play' || aiBusy || !ai || !humanTurn()) return;
+    const show = (r) => {
       if (!r) {
         hintMove = null;
         renderBoard();
+        updateHintGlow();
         setStatus('No forced mate in 1 or 2 here.', 'dim');
         return;
       }
@@ -879,8 +897,27 @@
       legalTargets = [];
       hintMove = r.move;
       renderBoard();
-      setStatus(r.n === 1 ? `Checkmate in 1: ${fmt(san)}` : `Forced mate in 2 — start with ${fmt(san)}`);
-    }, 60);
+      updateHintGlow();
+      const where = `${alg(r.move.from)} → ${alg(r.move.to)}`;
+      setStatus(r.n === 1 ? `Checkmate in 1: ${fmt(san)} (${where})` : `Forced mate in 2 — start with ${fmt(san)} (${where})`);
+    };
+    if (hintCache && hintCache.key === positionKey(game)) { show(hintCache.result); return; }
+    setStatus('', 'dim', 'Looking for a forced mate…');
+    setTimeout(() => show(findMate(game)), 40);
+  });
+
+  /* TAS: take the computer's turns yourself. While this is on the computer never moves. */
+  $('#both-btn').addEventListener('click', () => {
+    if (!isTas() || !ai || (phase !== 'play' && phase !== 'over')) return;
+    playBoth = !playBoth;
+    if (playBoth) { aiToken++; aiBusy = false; }
+    hintMove = null;
+    if (phase === 'play') updateStatus(); else overStatus();
+    renderBoard();
+    updateControls();
+    if (!playBoth) maybeAI();
+    refreshHint();
+    showToast(playBoth ? 'Both sides are yours now. The computer will not move.' : 'The computer plays its own turns again.', false);
   });
 
   $('#reset-btn').addEventListener('click', () => {
