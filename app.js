@@ -55,7 +55,7 @@
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
   const engineMode = (m) => (m === 'secret' ? 'secret' : 'basic');
   const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS' };
-  const LEVEL_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', hardest: 'Hardest' };
+  const LEVEL_LABEL = { dumb: 'Dumb', easy: 'Easy', medium: 'Medium', hard: 'Hard', hardest: 'Hardest' };
   const cname = (c) => (c === WHITE ? 'White' : 'Black');
   const nameOf = (c) => viewNames[c] || cname(c);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -376,6 +376,7 @@
   function askDifficulty(m) {
     openSheet(`<h2>Choose difficulty</h2>
       <div class="stack">
+        <button class="btn big" data-lv="dumb">Dumb</button>
         <button class="btn big" data-lv="easy">Easy</button>
         <button class="btn big" data-lv="medium">Medium</button>
         <button class="btn big" data-lv="hard">Hard</button>
