@@ -15,6 +15,11 @@
   let opts = { autoFlip: true, hints: true };
   let flipTimer = null;
   let toastTimer = null;
+  let ai = null;               // { level, color (computer), human } when playing the computer
+  let aiToken = 0;             // bumps to cancel a pending computer move
+  let aiBusy = false;          // the computer is "thinking"
+  let posKeys = [];            // position key after each ply (index 0 = start), for repetition
+  let hintMove = null;         // TAS hint currently shown
   let initialSecrets = { [WHITE]: -1, [BLACK]: -1 };
 
   let phase = 'menu';          // menu | names | pick-w | pick-b | play | over | replay
@@ -42,6 +47,10 @@
   const VALUE = { 1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0 };
   // pawn moves get a P so every line reads  <piece><square>  e.g. Nf3, Pe4, Pxd5
   const fmt = (san) => (/^[a-h]/.test(san) ? 'P' + (san.includes('x') ? san.slice(san.indexOf('x')) : san) : san);
+  const isTas = () => mode === 'tas';
+  const engineMode = (m) => (m === 'secret' ? 'secret' : 'basic');
+  const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS' };
+  const LEVEL_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', hardest: 'Hardest' };
   const cname = (c) => (c === WHITE ? 'White' : 'Black');
   const nameOf = (c) => viewNames[c] || cname(c);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -61,7 +70,8 @@
   }
 
   /* ------------------------------------------------------------------ sheet */
-  function openSheet(html) {
+  function openSheet(html, dismissible) {
+    sheetBg.dataset.dismiss = dismissible ? '1' : '';
     const wasHidden = sheetBg.classList.contains('hidden');
     sheet.innerHTML = html;
     sheetBg.classList.remove('hidden');
@@ -74,6 +84,7 @@
     if (inp) setTimeout(() => { inp.focus(); inp.select(); }, 60);
   }
   function closeSheet() { sheetBg.classList.add('hidden'); sheet.innerHTML = ''; }
+  sheetBg.addEventListener('click', (e) => { if (e.target === sheetBg && sheetBg.dataset.dismiss === '1') closeSheet(); });
 
   function confirmSheet(title, okLabel, cb) {
     openSheet(`<h2>${esc(title)}</h2>
@@ -135,6 +146,8 @@
       el.classList.toggle('capture', !!lm && (!!p || lm.flags === 2));
       el.classList.toggle('pickable', picking && p === (pickColor | PAWN));
       el.classList.toggle('secret', phase === 'replay' && G.isSecretDisguised(s));
+      el.classList.toggle('hint-from', !!hintMove && hintMove.from === s);
+      el.classList.toggle('hint-to', !!hintMove && hintMove.to === s);
 
       // piece
       let pe = el._piece;
@@ -277,7 +290,7 @@
     let cls = '';
     if (G.inCheck(G.turn)) { text += ' — check'; cls = 'check'; }
     const h = G.history[G.history.length - 1];
-    if (G === game && viewPly < sans.length) {
+    if (G === game && !isTas() && viewPly < sans.length) {
       setStatus(viewPly ? `Viewing move ${viewPly} of ${sans.length} (${fmt(sans[viewPly - 1])})` : 'Viewing the start position', 'dim');
       return;
     }
@@ -288,14 +301,40 @@
     setStatus(text, cls);
   }
 
+  /* TAS undo/redo: always land on a position where it is the human's turn */
+  function tasTarget(dir) {
+    const p = ai && ai.human === BLACK ? 1 : 0;
+    if (dir < 0) {
+      let k = viewPly - 1;
+      if (k < 0) return -1;
+      if (k % 2 !== p) k--;
+      return k >= p ? k : -1;
+    }
+    if (viewPly >= fullMoves.length) return -1;
+    let k = viewPly + 1;
+    if (k % 2 !== p) k++;
+    return Math.min(k, fullMoves.length);
+  }
+
   function updateControls() {
     const pickPhase = phase === 'pick-w' || phase === 'pick-b';
+    const tas = isTas();
     $('#pick-bar').classList.toggle('hidden', !pickPhase);
     $('#controls').classList.toggle('hidden', pickPhase || phase === 'replay');
+    $('#controls').classList.toggle('tas', tas);
     $('#replay-controls').classList.toggle('hidden', phase !== 'replay');
-    const nav = phase === 'play' || phase === 'over';
-    $('#undo-btn').disabled = !nav || viewPly === 0;
-    $('#redo-btn').disabled = !nav || viewPly >= sans.length;
+    $('#hint-btn').classList.toggle('hidden', !tas);
+    $('#save-btn').classList.toggle('hidden', !tas);
+    const nav = (phase === 'play' || phase === 'over') && !aiBusy;
+    if (tas) {
+      $('#undo-btn').disabled = !nav || tasTarget(-1) < 0;
+      $('#redo-btn').disabled = !nav || tasTarget(1) < 0;
+    } else {
+      $('#undo-btn').disabled = !nav || viewPly === 0;
+      $('#redo-btn').disabled = !nav || viewPly >= sans.length;
+    }
+    $('#hint-btn').disabled = !(phase === 'play' && !aiBusy && ai && game.turn === ai.human);
+    $('#save-btn').disabled = !sans.length;
     $('#flip-btn').disabled = opts.autoFlip;
     document.querySelector('.layout').classList.toggle('replaying', phase === 'replay');
   }
@@ -308,18 +347,50 @@
 
   /* ------------------------------------------------------------- menu/start */
   document.querySelectorAll('.mode').forEach((b) => {
-    b.addEventListener('click', () => startGame(b.dataset.mode, false));
+    b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
+
+  function chooseMode(m) {
+    if (m === 'tas') { askDifficulty(m); return; }   // TAS is single player only
+    openSheet(`<h2>How many players?</h2>
+      <div class="stack">
+        <button class="btn big" id="pl-1">1 player</button>
+        <button class="btn big" id="pl-2">2 players</button>
+        <button class="btn" id="pl-x">Cancel</button>
+      </div>`, true);
+    $('#pl-1').onclick = () => askDifficulty(m);
+    $('#pl-2').onclick = () => { closeSheet(); startGame(m, false, null); };
+    $('#pl-x').onclick = closeSheet;
+  }
+
+  function askDifficulty(m) {
+    openSheet(`<h2>Choose difficulty</h2>
+      <div class="stack">
+        <button class="btn big" data-lv="easy">Easy</button>
+        <button class="btn big" data-lv="medium">Medium</button>
+        <button class="btn big" data-lv="hard">Hard</button>
+        <button class="btn big" data-lv="hardest">Hardest</button>
+        <button class="btn" id="df-x">Cancel</button>
+      </div>`, true);
+    sheet.querySelectorAll('[data-lv]').forEach((b) => {
+      b.onclick = () => { closeSheet(); startGame(m, false, b.dataset.lv); };
+    });
+    $('#df-x').onclick = closeSheet;
+  }
 
   function freshGame(m) {
     mode = m;
-    game.mode = m;
+    game.mode = engineMode(m);
     game.reset();
     G = game;
     viewNames = names;
     sans = [];
     fullMoves = [];
+    posKeys = [];
     viewPly = 0;
+    aiToken++;
+    aiBusy = false;
+    hintMove = null;
     clearTimeout(flipTimer);
     selected = -1;
     legalTargets = [];
@@ -330,13 +401,17 @@
     replay = null;
     initialSecrets = { [WHITE]: -1, [BLACK]: -1 };
     coverEl.classList.add('hidden');
-    $('#mode-title').textContent = m === 'secret' ? 'Secret Queen' : 'Classic';
+    document.documentElement.classList.toggle('is-tas', m === 'tas');
+    $('#mode-title').textContent = MODE_LABEL[m];
   }
 
-  function startGame(m, keepNames) {
+  function startGame(m, keepNames, level) {
     freshGame(m);
     phase = 'names';
-    if (!keepNames) names = { [WHITE]: 'White', [BLACK]: 'Black' };
+    if (!keepNames) {
+      names = { [WHITE]: 'White', [BLACK]: 'Black' };
+      ai = level ? { level, color: BLACK, human: WHITE } : null;
+    }
     viewNames = names;
     showPage('game');
     buildBoard();
@@ -344,8 +419,12 @@
     renderMoves([], 0);
     setStatus('');
     closeSheet();
-    if (keepNames) afterNames(); else askName(WHITE);
+    if (keepNames) afterNames();
+    else if (ai) askSoloName();
+    else askName(WHITE);
   }
+
+  function backToMenu() { closeSheet(); aiToken++; aiBusy = false; phase = 'menu'; renderSavedList(); showPage('menu'); }
 
   function askName(color) {
     const white = color === WHITE;
@@ -358,8 +437,45 @@
       if (white) askName(BLACK); else askSettings();
     };
     $('#n-ok').onclick = ok;
-    $('#n-cancel').onclick = () => { closeSheet(); phase = 'menu'; renderSavedList(); showPage('menu'); };
+    $('#n-cancel').onclick = backToMenu;
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+  }
+
+  /* single player: your name, which side, then hints */
+  function askSoloName() {
+    openSheet(`<h2>What is your name?</h2>
+      <input id="name-in" type="text" maxlength="16" placeholder="Player" autocomplete="off" autocapitalize="words" enterkeyhint="next">
+      <div class="row"><button class="btn" id="n-cancel">Cancel</button><button class="btn primary" id="n-ok">Next</button></div>`);
+    const inp = $('#name-in');
+    const ok = () => askSide(inp.value.trim() || 'Player');
+    $('#n-ok').onclick = ok;
+    $('#n-cancel').onclick = backToMenu;
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+  }
+
+  function askSide(name) {
+    openSheet(`<h2>Play as</h2>
+      <div class="stack">
+        <button class="btn big" data-side="w">White</button>
+        <button class="btn big" data-side="b">Black</button>
+        <button class="btn big" data-side="r">Random</button>
+      </div>`);
+    sheet.querySelectorAll('[data-side]').forEach((b) => {
+      b.onclick = () => {
+        let side = b.dataset.side;
+        if (side === 'r') side = Math.random() < 0.5 ? 'w' : 'b';
+        ai.human = side === 'w' ? WHITE : BLACK;
+        ai.color = ai.human === WHITE ? BLACK : WHITE;
+        names = { [ai.human]: name, [ai.color]: 'Computer (' + LEVEL_LABEL[ai.level] + ')' };
+        viewNames = names;
+        opts.autoFlip = false;
+        askYN('Show legal move hints?', 'Dots on the squares a piece can move to.', (hints) => {
+          opts.hints = hints;
+          closeSheet();
+          afterNames();
+        });
+      };
+    });
   }
 
   function askYN(question, sub, cb) {
@@ -405,12 +521,13 @@
     }, delay || 0);
   }
 
-  function showToast(text) {
+  function showToast(text, nudge = true) {
     const t = $('#toast');
     t.textContent = text;
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+    if (!nudge) return;
     const r = $('#redo-btn');
     r.classList.remove('nudge');
     void r.offsetWidth;
@@ -419,7 +536,7 @@
 
   function afterNames() {
     renderBars();
-    if (mode === 'secret') pickHandoff(WHITE); else beginPlay();
+    if (mode === 'secret') pickHandoff(ai ? ai.human : WHITE); else beginPlay();
   }
 
   /* ------------------------------------------------ secret queen selection */
@@ -427,6 +544,14 @@
     phase = color === WHITE ? 'pick-w' : 'pick-b';
     const other = color === WHITE ? BLACK : WHITE;
     pickSel = -1;
+    if (ai) {   // against the computer there is nobody to look away
+      setFlipped(ai.human === BLACK, false);
+      renderAll();
+      $('#pick-confirm').disabled = true;
+      coverEl.classList.add('hidden');
+      setStatus(`${nameOf(color)}: tap one of your pawns`);
+      return;
+    }
     setFlipped(opts.autoFlip && color === BLACK, false);
     renderAll();
     $('#pick-confirm').disabled = true;
@@ -446,6 +571,12 @@
     const color = phase === 'pick-w' ? WHITE : BLACK;
     game.secretQueen[color] = pickSel;
     pickSel = -1;
+    if (ai) {
+      game.secretQueen[ai.color] = pickSecretPawn(ai.color);
+      initialSecrets = { [WHITE]: game.secretQueen[WHITE], [BLACK]: game.secretQueen[BLACK] };
+      beginPlay();
+      return;
+    }
     if (color === WHITE) {
       pickHandoff(BLACK);
     } else {
@@ -458,10 +589,45 @@
   function beginPlay() {
     phase = 'play';
     coverEl.classList.add('hidden');
-    setFlipped(opts.autoFlip && game.turn === BLACK, false);
+    setFlipped(ai ? ai.human === BLACK : opts.autoFlip && game.turn === BLACK, false);
+    posKeys = [positionKey(game)];
     renderAll();
     renderMoves(sans, sans.length);
     updateStatus();
+    maybeAI();
+  }
+
+  /* ----------------------------------------------------------- the computer */
+  function thinkingStatus() {
+    setStatus('', 'dim', 'Thinking<span class="dots"><i>.</i><i>.</i><i>.</i></span>');
+  }
+
+  function maybeAI() {
+    if (!ai || phase !== 'play' || game.turn !== ai.color) return;
+    if (!isTas() && viewPly < sans.length) return;
+    const token = ++aiToken;
+    aiBusy = true;
+    hintMove = null;
+    selected = -1;
+    legalTargets = [];
+    renderBoard();
+    updateControls();
+    thinkingStatus();
+    const t0 = Date.now();
+    const minWait = 2000 + Math.random() * 500;   // always at least 2 seconds, however fast the search is
+    const seen = new Map();
+    posKeys.slice(0, viewPly + 1).forEach((k) => seen.set(k, (seen.get(k) || 0) + 1));
+    setTimeout(() => {
+      if (token !== aiToken) return;
+      searchMove(game, ai.level, ai.color, seen, (m) => {
+        if (token !== aiToken) return;
+        setTimeout(() => {
+          if (token !== aiToken) return;
+          aiBusy = false;
+          if (m) doMove(m); else updateControls();
+        }, Math.max(0, minWait - (Date.now() - t0)));
+      });
+    }, 80);
   }
 
   boardEl.addEventListener('click', (e) => {
@@ -481,11 +647,12 @@
       }
       return;
     }
-    if (phase === 'play' && viewPly < sans.length) {
+    if (phase === 'play' && !isTas() && viewPly < sans.length) {
       showToast('You are viewing an earlier move. Press Redo to get back to the current position before playing.');
       return;
     }
-    if (phase !== 'play' || pendingPromo) return;
+    if (phase !== 'play' || pendingPromo || aiBusy) return;
+    if (ai && game.turn !== ai.human) return;
 
     const p = game.board[s];
     const own = p && (p & 24) === game.turn;
@@ -507,12 +674,33 @@
   }
 
   function select(s) {
+    hintMove = null;
     selected = s;
     legalTargets = game.legalMovesFrom(s);
     renderBoard();
   }
 
+  function insufficientMaterial() {
+    const left = [];
+    for (let s = 0; s < 128; s++) {
+      if (s & 0x88) { s += 7; continue; }
+      const p = game.board[s];
+      if (p && (p & 7) !== KING) left.push(p & 7);
+    }
+    return left.length === 0 || (left.length === 1 && (left[0] === KNIGHT || left[0] === BISHOP));
+  }
+
   function doMove(m) {
+    if (isTas() && viewPly < sans.length) {
+      // TAS: playing from an earlier point throws away the old future (redo is off until you undo again)
+      sans.length = viewPly;
+      fullMoves.length = viewPly;
+      posKeys.length = viewPly + 1;
+      over = null;
+      phase = 'play';
+      closeSheet();
+    }
+    hintMove = null;
     const san = game.moveToSan(m);
     const mover = game.turn;
     game.makeMove(m);
@@ -522,6 +710,7 @@
     sans.push(full);
     fullMoves.push({ from: m.from, to: m.to, flags: m.flags, promo: m.promo || 0, q: m.q || 0 });
     viewPly = sans.length;
+    posKeys.push(positionKey(game));
     selected = -1;
     legalTargets = [];
 
@@ -531,7 +720,14 @@
     if (h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, sans.length);
 
-    if (!canMove) endGame(mover, check); else { updateStatus(); syncFlip(true, 380); }
+    let end = null;
+    if (!canMove) end = check ? 'mate' : 'stalemate';
+    else if (insufficientMaterial()) end = 'material';
+    else if (game.halfmove >= 100) end = 'fifty';
+    else if (posKeys.filter((k) => k === posKeys[viewPly]).length >= 3) end = 'repeat';
+
+    if (end) endGame(end, mover);
+    else { updateStatus(); syncFlip(true, 380); maybeAI(); }
   }
 
   function showPromotion(move) {
@@ -559,11 +755,12 @@
   }
 
   /* --------------------------------------------------------------- end game */
-  function endGame(mover, mate) {
+  function endGame(type, mover) {
     phase = 'over';
-    over = mate
+    const why = { stalemate: 'Stalemate', material: 'Insufficient material', fifty: '50-move rule', repeat: 'Threefold repetition' };
+    over = type === 'mate'
       ? { title: nameOf(mover) + ' wins', sub: 'Checkmate', result: mover === WHITE ? '1-0' : '0-1' }
-      : { title: 'Draw', sub: 'Stalemate', result: '1/2-1/2' };
+      : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
     updateControls();
     overStatus();
     setTimeout(() => { if (phase === 'over' && sheetBg.classList.contains('hidden')) showOverSheet(); }, 800);
@@ -578,7 +775,7 @@
     openSheet(`<h2>${esc(over.title)}<span class="sub">${esc(over.sub)}</span></h2>
       <div class="stack">
         <button class="btn primary" id="ov-watch">Watch replay</button>
-        <button class="btn" id="ov-save" ${savedNote === true ? 'disabled' : ''}>${savedNote === true ? 'Replay saved' : 'Save replay'}</button>
+        <button class="btn" id="ov-save" ${savedNote === true ? 'disabled' : ''}>${savedNote === true ? (isTas() ? 'TAS saved' : 'Replay saved') : (isTas() ? 'Save TAS' : 'Save replay')}</button>
         <div class="row"><button class="btn" id="ov-new">New game</button><button class="btn" id="ov-close">Close</button></div>
       </div>
       <p class="note">${savedNote === true ? 'Find it on the main menu.' : ''}</p>`);
@@ -589,7 +786,7 @@
   }
 
   function showSaveSheet() {
-    openSheet(`<h2>Save replay</h2>
+    openSheet(`<h2>${isTas() ? 'Save TAS' : 'Save replay'}</h2>
       <label for="sv-w">White</label>
       <input id="sv-w" type="text" maxlength="16" autocomplete="off">
       <label for="sv-b">Black</label>
@@ -604,10 +801,11 @@
       list.unshift(buildReplayData());
       store.set(list.slice(0, 30));
       renderBars();
-      showOverSheet(true);
+      if (over) showOverSheet(true);
+      else { closeSheet(); showToast('Saved as a TAS. Find it on the main menu.', false); }
     };
     $('#sv-ok').onclick = save;
-    $('#sv-cancel').onclick = () => showOverSheet();
+    $('#sv-cancel').onclick = () => { if (over) showOverSheet(); else closeSheet(); };
     sheet.querySelectorAll('input').forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); }));
   }
 
@@ -616,7 +814,9 @@
       v: 1,
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       date: Date.now(),
-      mode,
+      mode: engineMode(mode),
+      tas: isTas(),
+      level: ai ? ai.level : null,
       names: { w: names[WHITE], b: names[BLACK] },
       secrets: { w: initialSecrets[WHITE], b: initialSecrets[BLACK] },
       moves: fullMoves.map((m) => Object.assign({}, m)),
@@ -632,22 +832,17 @@
     renderAll();
   });
 
-  /* undo / redo only move the view through the game; nobody can play until it is back at the latest move */
+  /* Two-player and computer games: undo / redo only move the view, nobody can play until it is back at
+     the latest move. TAS: undo / redo are real, and playing from an earlier point drops the old future. */
   function navigate(dir) {
-    if (phase !== 'play' && phase !== 'over') return;
-    let m;
-    if (dir < 0) {
-      if (viewPly === 0) return;
-      m = fullMoves[viewPly - 1];
-      game.unmakeMove();
-      viewPly--;
-    } else {
-      if (viewPly >= fullMoves.length) return;
-      m = fullMoves[viewPly];
-      game.makeMove(m);
-      viewPly++;
-    }
+    if ((phase !== 'play' && phase !== 'over') || aiBusy) return;
+    const target = isTas() ? tasTarget(dir) : viewPly + dir;
+    if (target < 0 || target > fullMoves.length || target === viewPly) return;
+    let m = null;
+    while (viewPly > target) { m = fullMoves[viewPly - 1]; game.unmakeMove(); viewPly--; }
+    while (viewPly < target) { m = fullMoves[viewPly]; game.makeMove(m); viewPly++; }
     closeSheet();
+    hintMove = null;
     selected = -1;
     legalTargets = [];
     const atLive = viewPly === fullMoves.length;
@@ -658,11 +853,35 @@
     if (dir > 0 && h && h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, viewPly);
     if (phase === 'over') overStatus(); else updateStatus();
-    if (atLive) syncFlip(true, 300);
+    if (atLive) { syncFlip(true, 300); maybeAI(); }
   }
 
   $('#undo-btn').addEventListener('click', () => navigate(-1));
   $('#redo-btn').addEventListener('click', () => navigate(1));
+  $('#save-btn').addEventListener('click', () => { if (sans.length) showSaveSheet(); });
+
+  /* TAS hint: is there a forced mate in 1 or 2, and where to go */
+  $('#hint-btn').addEventListener('click', () => {
+    if (phase !== 'play' || aiBusy || !ai || game.turn !== ai.human) return;
+    setStatus('', 'dim', 'Looking for a forced mate…');
+    setTimeout(() => {
+      const r = findMate(game);
+      if (!r) {
+        hintMove = null;
+        renderBoard();
+        setStatus('No forced mate in 1 or 2 here.', 'dim');
+        return;
+      }
+      let san = game.moveToSan(r.move);
+      if (r.n === 1) san += '#';
+      else { game.makeMove(r.move); if (game.inCheck(game.turn)) san += '+'; game.unmakeMove(); }
+      selected = -1;
+      legalTargets = [];
+      hintMove = r.move;
+      renderBoard();
+      setStatus(r.n === 1 ? `Checkmate in 1: ${fmt(san)}` : `Forced mate in 2 — start with ${fmt(san)}`);
+    }, 60);
+  });
 
   $('#reset-btn').addEventListener('click', () => {
     if (phase === 'play' && sans.length) {
@@ -674,7 +893,7 @@
 
   $('#back-btn').addEventListener('click', () => {
     if (phase === 'replay') { exitReplay(); return; }
-    const leave = () => { phase = 'menu'; closeSheet(); renderSavedList(); showPage('menu'); };
+    const leave = backToMenu;
     if ((phase === 'play' && sans.length)) confirmSheet('Leave this game?', 'Leave', leave); else leave();
   });
 
@@ -696,7 +915,7 @@
     pickSel = -1;
     flipped = false;
     coverEl.classList.add('hidden');
-    $('#mode-title').textContent = 'Replay';
+    $('#mode-title').textContent = data.tas ? 'TAS replay' : 'Replay';
     $('#scrub').max = data.moves.length;
     $('#scrub').value = 0;
     $('#rp-speed').textContent = '1x';
@@ -781,7 +1000,7 @@
     replay = null;
     G = game;
     viewNames = names;
-    $('#mode-title').textContent = mode === 'secret' ? 'Secret Queen' : 'Classic';
+    $('#mode-title').textContent = MODE_LABEL[mode];
     if (from === 'over') {
       phase = 'over';
       flipped = pf;
@@ -828,7 +1047,7 @@
       const li = document.createElement('li');
       const when = new Date(r.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
       li.innerHTML = `<div class="info"><div class="title">${esc(r.names.w)} vs ${esc(r.names.b)}</div>
-        <div class="meta">${when} · ${r.mode === 'secret' ? 'Secret Queen' : 'Classic'} · ${Math.ceil(r.moves.length / 2)} moves</div></div>
+        <div class="meta">${when} · ${r.tas ? 'TAS' : r.mode === 'secret' ? 'Secret Queen' : 'Classic'} · ${Math.ceil(r.moves.length / 2)} moves</div></div>
         <button class="btn primary w">Watch</button><button class="btn d">Delete</button>`;
       li.querySelector('.w').onclick = () => startReplay(r, 'menu');
       const del = li.querySelector('.d');

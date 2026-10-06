@@ -30,6 +30,10 @@
             <span class="mode-name">Secret Queen</span>
             <span class="mode-desc">Each player secretly picks a pawn that can move like a queen.</span>
           </button>
+          <button class="mode" data-mode="tas">
+            <span class="mode-name">TAS</span>
+            <span class="mode-desc">Single player against the computer, with undo, redo and mate hints.</span>
+          </button>
         </div>
 
         <div id="saved" class="saved hidden">
@@ -79,6 +83,8 @@
             <button id="flip-btn" class="btn">Flip</button>
             <button id="undo-btn" class="btn">Undo</button>
             <button id="redo-btn" class="btn">Redo</button>
+            <button id="hint-btn" class="btn hidden">Hint</button>
+            <button id="save-btn" class="btn hidden">Save TAS</button>
             <button id="reset-btn" class="btn">New game</button>
           </div>
 
@@ -113,6 +119,7 @@
   </div>
 
   <script src="chess.js"></script>
+  <script src="ai.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

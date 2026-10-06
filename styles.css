@@ -370,7 +370,10 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 .pick-bar .btn { min-width: 60%; }
 
 .controls { display: flex; gap: .5rem; padding: .3rem 0; }
-.controls { gap: .4rem; }
+.is-tas { --extra: 52px; }
+.controls { gap: .4rem; flex-wrap: wrap; }
+.controls.tas .btn { flex: 1 1 28%; }
+.btn.big { padding: 1rem; font-size: 1.15rem; }
 .controls .btn { flex: 1; min-width: 0; padding: .6rem .2rem; }
 .btn.nudge { animation: nudge-btn .5s ease 2; background: #fff; color: #111; }
 @keyframes nudge-btn { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
@@ -487,11 +490,11 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 
 /* ---------- larger screens ---------- */
 @media (max-width: 899px) {
-  :root { --bs: max(280px, min(100vw - 8px, 100dvh - 335px, 640px)); }
+  :root { --bs: max(280px, min(100vw - 8px, 100dvh - 335px - var(--extra, 0px), 640px)); }
 }
 
 @media (min-width: 900px) {
-  :root { --bs: max(360px, min(100vh - 300px, 100dvh - 300px, 100vw - 420px, 720px)); }
+  :root { --bs: max(360px, min(100vh - 300px - var(--extra, 0px), 100dvh - 300px - var(--extra, 0px), 100vw - 420px, 720px)); }
   .layout { flex-direction: row; justify-content: center; align-items: flex-start; gap: 1.5rem; padding: .5rem 1rem 1rem; }
   .side { width: 250px; margin-top: 40px; background: var(--panel); border-radius: 8px; padding: .9rem; height: var(--bs); display: flex; flex-direction: column; }
   .side h3 { display: block; }
@@ -504,3 +507,23 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* thinking dots + TAS hint highlight */
+.dots i { font-style: normal; animation: dot-blink 1.2s infinite both; }
+.dots i:nth-child(2) { animation-delay: .2s; }
+.dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes dot-blink { 0%, 80%, 100% { opacity: .15; } 40% { opacity: 1; } }
+
+.square.hint-from::after,
+.square.hint-to::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 4px #22d3ee;
+  background: rgba(34, 211, 238, .22);
+  pointer-events: none;
+  z-index: 2;
+  animation: hint-pulse 1.1s ease-in-out infinite;
+}
+.square.hint-to::after { background: rgba(34, 211, 238, .4); }
+@keyframes hint-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
