@@ -692,7 +692,7 @@
   }
 
   function select(s) {
-    hintMove = null;
+    if (hintMove && hintMove.from !== s) hintMove = null;   // tapping the hinted piece keeps the hint visible
     selected = s;
     legalTargets = game.legalMovesFrom(s);
     renderBoard();
@@ -879,31 +879,40 @@
   $('#redo-btn').addEventListener('click', () => navigate(1));
   $('#save-btn').addEventListener('click', () => { if (sans.length) showSaveSheet(); });
 
-  /* TAS hint: is there a forced mate in 1 or 2, and exactly where to go */
+  /* TAS hint: the best move for the side to move (and it says so when that move is a forced mate) */
   $('#hint-btn').addEventListener('click', () => {
     if (phase !== 'play' || aiBusy || !ai || !humanTurn()) return;
-    const show = (r) => {
-      if (!r) {
-        hintMove = null;
-        renderBoard();
-        updateHintGlow();
-        setStatus('No forced mate in 1 or 2 here.', 'dim');
-        return;
-      }
-      let san = game.moveToSan(r.move);
-      if (r.n === 1) san += '#';
-      else { game.makeMove(r.move); if (game.inCheck(game.turn)) san += '+'; game.unmakeMove(); }
+    const key = positionKey(game);
+    const show = (m, label) => {
+      if (!m) return;
+      let san = game.moveToSan(m);
+      game.makeMove(m);
+      if (game.inCheck(game.turn)) san += game.hasLegalMove() ? '+' : '#';
+      game.unmakeMove();
       selected = -1;
       legalTargets = [];
-      hintMove = r.move;
+      hintMove = m;
       renderBoard();
       updateHintGlow();
-      const where = `${alg(r.move.from)} → ${alg(r.move.to)}`;
-      setStatus(r.n === 1 ? `Checkmate in 1: ${fmt(san)} (${where})` : `Forced mate in 2 — start with ${fmt(san)} (${where})`);
+      setStatus(`${label}: ${fmt(san)} (${alg(m.from)} → ${alg(m.to)})`);
     };
-    if (hintCache && hintCache.key === positionKey(game)) { show(hintCache.result); return; }
-    setStatus('', 'dim', 'Looking for a forced mate…');
-    setTimeout(() => show(findMate(game)), 40);
+    const mate = hintCache && hintCache.key === key ? hintCache.result : findMate(game);
+    if (mate) { show(mate.move, mate.n === 1 ? 'Checkmate in 1' : 'Forced mate in 2'); return; }
+
+    const tok = ++aiToken;       // blocks play while the search runs, and is cancelled by anything that resets the game
+    aiBusy = true;
+    updateControls();
+    thinkingStatus();
+    const t0 = Date.now();
+    searchMove(game, 'hint', game.turn, null, (m) => {
+      if (tok !== aiToken) return;
+      setTimeout(() => {
+        if (tok !== aiToken) return;
+        aiBusy = false;
+        updateControls();
+        if (phase === 'play' && positionKey(game) === key) show(m, 'Best move');
+      }, Math.max(0, 900 - (Date.now() - t0)));
+    });
   });
 
   /* TAS: take the computer's turns yourself. While this is on the computer never moves. */

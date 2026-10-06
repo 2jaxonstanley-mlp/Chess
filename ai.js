@@ -210,6 +210,7 @@
     medium:  { maxDepth: 2, time: 500,  q: 2, noise: 14,  blunder: 0 },
     hard:    { maxDepth: 4, time: 900,  q: 4, noise: 0,   blunder: 0 },
     hardest: { maxDepth: 12, time: 2300, q: 6, noise: 0,  blunder: 0 },
+    hint:    { maxDepth: 12, time: 1600, q: 6, noise: 0,  blunder: 0 },   // TAS best-move hint
   };
 
   /**
