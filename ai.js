@@ -357,11 +357,138 @@
     easy:    { maxDepth: 1, time: 300,  q: 0, noise: 120, blunder: 0.18 },
     medium:  { maxDepth: 2, time: 500,  q: 2, noise: 14,  blunder: 0 },
     hard:    { maxDepth: 4, time: 900,  q: 4, noise: 0,   blunder: 0, book: true },
-    hardest: { maxDepth: 30, time: 4200, q: 8, noise: 0,  blunder: 0 },
-    hint:    { maxDepth: 30, time: 3200, q: 8, noise: 0,  blunder: 0 },   // TAS best-move hint
+    insane:  { maxDepth: 30, time: 4200, q: 8, noise: 0,  blunder: 0 },
+    // Godly: searches 5 full moves (10 plies), keeps its 3 best moves and picks one at random 3/6, 2/6, 1/6
+    godly:   { maxDepth: 10, time: 7000, q: 8, noise: 0,  blunder: 0, multi: 5, pick: 3, weights: [3, 2, 1], castle: 120, guard: true, window: 200 },
+    hint:    { maxDepth: 30, time: 3800, q: 8, noise: 0,  blunder: 0, multi: 3, pick: 3 },   // TAS: the 3 best moves
   };
   window.__aiLevels = LEVELS;
   window.__aiLastDepth = () => lastDepth;
+
+
+  /* ---------------------------------------------------------------- multi-line search (3 best moves) */
+  const PVAL = [0, 100, 320, 335, 500, 900, 0];
+
+  /** How exposed our pieces are after the move just played on c: loose pieces that can be taken now (or after one more enemy move). */
+  function exposure(c, me) {
+    const foe = me === WHITE ? BLACK : WHITE;
+    const mine = [];
+    for (let s = 0; s < 128; s++) {
+      if (s & 0x88) { s += 7; continue; }
+      const p = c.board[s];
+      if (p && (p & 24) === me && (p & 7) !== 6) mine.push(s);
+    }
+    const loose = (s) => c.attacked(s, foe) && !c.attacked(s, me);
+    let pen = 0;
+    const hitNow = new Set();
+    for (const s of mine) {
+      if (loose(s)) { pen += PVAL[c.board[s] & 7] * 0.3; hitNow.add(s); }
+    }
+    // pieces that become loose after any one enemy move (could be taken within 2 moves)
+    const threatened = new Set();
+    for (const e of c.legalMoves()) {
+      c.makeMove(e);
+      for (const s of mine) {
+        if (hitNow.has(s) || threatened.has(s) || c.board[s] === 0 || (c.board[s] & 24) !== me) continue;
+        if (loose(s)) threatened.add(s);
+      }
+      c.unmakeMove();
+    }
+    for (const s of threatened) pen += PVAL[c.board[s] & 7] * 0.08;
+    return pen;
+  }
+
+  /** Iterative-deepening search that keeps the best `cfg.multi` root moves. cb([{ move, score }]) best first, moves valid in g. */
+  function multiSearch(g, cfg, color, seen, cb) {
+    const enemy = color === WHITE ? BLACK : WHITE;
+    const c = cloneForSearch(g, enemy);
+    const rootMoves = c.legalMoves();
+    const K = Math.min(cfg.multi, rootMoves.length);
+    history.fill(0);
+    killers.forEach((k) => { k[0] = 0; k[1] = 0; });
+    if (g.mode === 'secret') ttDepth.fill(-1);
+    const t0 = now();
+    deadline = t0 + cfg.time;
+    nodes = 0; aborted = false; lastDepth = 0;
+
+    let top = rootMoves.slice(0, K).map((m) => ({ m, sc: 0 }));
+    let prevScores = new Map();
+    let depth = 1;
+
+    const done = () => {
+      let list = top.map((t) => ({ m: t.m, sc: t.sc }));
+      let castle = null;
+      if (cfg.castle && list.length && list[0].sc < MATE - 100) {
+        // castle whenever it is possible and doesn't cost more than `cfg.castle` centipawns against the best line
+        castle = list.find((t) => (t.m.flags === 4 || t.m.flags === 8) && t.sc >= list[0].sc - cfg.castle) || null;
+      }
+      if (cfg.guard) {
+        // keep pieces protected: finalists that leave a piece loose (now or after one more move) are marked down
+        list = list.map((t) => {
+          if (Math.abs(t.sc) >= MATE - 100) return t;
+          c.makeMove(t.m);
+          const sc = t.sc - exposure(c, color);
+          c.unmakeMove();
+          return { m: t.m, sc };
+        });
+        list.sort((a, b) => b.sc - a.sc);
+      }
+      if (castle) list = [{ m: castle.m, sc: castle.sc, forced: true }];
+      const out = [];
+      for (const t of list.slice(0, cfg.pick)) {
+        const real = g.legalMovesFrom(t.m.from).find((x) => x.to === t.m.to && x.promo === t.m.promo);
+        if (real) out.push({ move: real, score: t.sc, forced: !!t.forced });
+      }
+      cb(out);
+    };
+
+    const iterate = () => {
+      const used = now() - t0;
+      if (depth > cfg.maxDepth || (depth > 3 && used > cfg.time * 0.45)) { done(); return; }
+      aborted = false;
+      const ordered = rootMoves.slice().sort((a, b) => (prevScores.get(b) ?? -INF) - (prevScores.get(a) ?? -INF));
+      const found = [];
+      let cut = -INF;                   // score of the K-th best so far
+      const scoreMap = new Map();
+      for (const m of ordered) {
+        c.makeMove(m);
+        const seenCount = (seen && seen.get(boardKey(c))) || 0;
+        let sc;
+        if (seenCount >= 2) sc = 0;
+        else sc = -negamax(c, depth - 1, -INF, -cut, 1, cfg.q, true);
+        c.unmakeMove();
+        if (aborted) break;
+        if (seenCount === 1) sc -= 25;
+        scoreMap.set(m, sc);
+        if (found.length < K || sc > cut) {
+          found.push({ m, sc });
+          found.sort((a, b) => b.sc - a.sc);
+          if (found.length > K) found.pop();
+          if (found.length === K) cut = found[K - 1].sc;
+        }
+      }
+      if (aborted) { done(); return; }          // keep the last finished depth
+      top = found;
+      prevScores = scoreMap;
+      lastDepth = depth;
+      if (found[0].sc > MATE - 100 && depth >= 3) { done(); return; }
+      depth++;
+      setTimeout(iterate, 0);
+    };
+    setTimeout(iterate, 0);
+  }
+
+  /** The best moves for the side to move: cb([{ move, score }]) best first. */
+  window.searchTop = function (g, level, color, seen, cb) {
+    const cfg = LEVELS[level] || LEVELS.hint;
+    const c = cloneForSearch(g, color === WHITE ? BLACK : WHITE);
+    const all = c.legalMoves();
+    if (all.length <= 1) {
+      cb(all.map((m) => ({ move: g.legalMovesFrom(m.from).find((x) => x.to === m.to && x.promo === m.promo) || m, score: 0 })));
+      return;
+    }
+    multiSearch(g, cfg, color, seen, cb);
+  };
 
   /**
    * Find the computer's move. Calls cb(move) (a move object valid in the real game `g`) when done.
@@ -386,6 +513,19 @@
     if (!rootMoves.length) { finish(null); return; }
     if (rootMoves.length === 1) { finish(rootMoves[0]); return; }
 
+    if (cfg.multi) {
+      multiSearch(g, cfg, color, seen, (list) => {
+        if (!list.length) { finish(null); return; }
+        const best = list[0].score;
+        let pool = list.filter((t, i) => i === 0 || cfg.window == null || t.score >= best - cfg.window);
+        if (best > MATE - 100 || list[0].forced) pool = [list[0]];            // a forced mate is always played
+        const w = pool.map((t, i) => (cfg.weights && cfg.weights[i]) || 1);
+        let r = Math.random() * w.reduce((a, b) => a + b, 0), pick = pool[0];
+        for (let i = 0; i < pool.length; i++) { r -= w[i]; if (r < 0) { pick = pool[i]; break; } }
+        finish(pick.move);
+      });
+      return;
+    }
     if (cfg.book) {
       const bm = bookMove(g);
       if (bm) { cb(bm); return; }

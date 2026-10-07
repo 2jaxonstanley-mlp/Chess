@@ -19,7 +19,7 @@
   let aiToken = 0;             // bumps to cancel a pending computer move
   let aiBusy = false;          // the computer is "thinking"
   let posKeys = [];            // position key after each ply (index 0 = start), for repetition
-  let hintMove = null;         // TAS hint currently shown
+  let hintMoves = [];          // TAS hint currently shown (up to 3 moves, best first)
   let hintAvail = false;       // a forced mate exists right now (makes the Hint button glow)
   let hintCache = null;        // { key, result } from the last mate check
   let hintToken = 0;
@@ -55,7 +55,7 @@
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
   const engineMode = (m) => (m === 'secret' ? 'secret' : 'basic');
   const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS' };
-  const LEVEL_LABEL = { dumb: 'Dumb', easy: 'Easy', medium: 'Medium', hard: 'Hard', hardest: 'Hardest' };
+  const LEVEL_LABEL = { dumb: 'Dumb', easy: 'Easy', medium: 'Medium', hard: 'Hard', insane: 'Insane', godly: 'Godly' };
   const cname = (c) => (c === WHITE ? 'White' : 'Black');
   const nameOf = (c) => viewNames[c] || cname(c);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -151,8 +151,16 @@
       el.classList.toggle('capture', !!lm && (!!p || lm.flags === 2));
       el.classList.toggle('pickable', picking && p === (pickColor | PAWN));
       el.classList.toggle('secret', phase === 'replay' && G.isSecretDisguised(s));
-      el.classList.toggle('hint-from', !!hintMove && hintMove.from === s);
-      el.classList.toggle('hint-to', !!hintMove && hintMove.to === s);
+      const hf = hintMoves.some((m) => m.from === s), ht = hintMoves.some((m) => m.to === s);
+      el.classList.toggle('hint-from', hf);
+      el.classList.toggle('hint-to', ht);
+      const nums = [];
+      hintMoves.forEach((m, i) => { if ((m.from === s || m.to === s) && !nums.includes(i + 1)) nums.push(i + 1); });
+      let hb = el._hb;
+      if (nums.length) {
+        if (!hb) { hb = document.createElement('span'); hb.className = 'hbadge'; el.appendChild(hb); el._hb = hb; }
+        hb.textContent = nums.join('/');
+      } else if (hb) { hb.remove(); el._hb = null; }
 
       // piece
       let pe = el._piece;
@@ -307,7 +315,7 @@
   }
 
   function updateHintGlow() {
-    $('#hint-btn').classList.toggle('glow', hintAvail && !hintMove && phase === 'play' && !aiBusy);
+    $('#hint-btn').classList.toggle('glow', hintAvail && !hintMoves.length && phase === 'play' && !aiBusy);
   }
 
   /* look for a forced mate for the side to move, so the Hint button can glow */
@@ -380,7 +388,8 @@
         <button class="btn big" data-lv="easy">Easy</button>
         <button class="btn big" data-lv="medium">Medium</button>
         <button class="btn big" data-lv="hard">Hard</button>
-        <button class="btn big" data-lv="hardest">Hardest</button>
+        <button class="btn big" data-lv="insane">Insane</button>
+        <button class="btn big" data-lv="godly">Godly</button>
         <button class="btn" id="df-x">Cancel</button>
       </div>`, true);
     sheet.querySelectorAll('[data-lv]').forEach((b) => {
@@ -401,7 +410,7 @@
     viewPly = 0;
     aiToken++;
     aiBusy = false;
-    hintMove = null;
+    hintMoves = [];
     hintAvail = false;
     hintCache = null;
     hintToken++;
@@ -623,7 +632,7 @@
     if (!isTas() && viewPly < sans.length) return;
     const token = ++aiToken;
     aiBusy = true;
-    hintMove = null;
+    hintMoves = [];
     selected = -1;
     legalTargets = [];
     renderBoard();
@@ -693,7 +702,7 @@
   }
 
   function select(s) {
-    if (hintMove && hintMove.from !== s) hintMove = null;   // tapping the hinted piece keeps the hint visible
+    if (hintMoves.length && !hintMoves.some((m) => m.from === s)) hintMoves = [];   // tapping the hinted piece keeps the hint visible
     selected = s;
     legalTargets = game.legalMovesFrom(s);
     renderBoard();
@@ -719,7 +728,7 @@
       phase = 'play';
       closeSheet();
     }
-    hintMove = null;
+    hintMoves = [];
     const san = game.moveToSan(m);
     const mover = game.turn;
     game.makeMove(m);
@@ -861,7 +870,7 @@
     while (viewPly > target) { m = fullMoves[viewPly - 1]; game.unmakeMove(); viewPly--; }
     while (viewPly < target) { m = fullMoves[viewPly]; game.makeMove(m); viewPly++; }
     closeSheet();
-    hintMove = null;
+    hintMoves = [];
     selected = -1;
     legalTargets = [];
     const atLive = viewPly === fullMoves.length;
@@ -880,38 +889,44 @@
   $('#redo-btn').addEventListener('click', () => navigate(1));
   $('#save-btn').addEventListener('click', () => { if (sans.length) showSaveSheet(); });
 
-  /* TAS hint: the best move for the side to move (and it says so when that move is a forced mate) */
+  /* TAS hint: the 3 best moves for the side to move, numbered 1-3 on the board */
   $('#hint-btn').addEventListener('click', () => {
     if (phase !== 'play' || aiBusy || !ai || !humanTurn()) return;
     const key = positionKey(game);
-    const show = (m, label) => {
-      if (!m) return;
+    const sanOf = (m) => {
       let san = game.moveToSan(m);
       game.makeMove(m);
       if (game.inCheck(game.turn)) san += game.hasLegalMove() ? '+' : '#';
       game.unmakeMove();
+      return fmt(san);
+    };
+    const show = (list, mate) => {
+      if (!list.length) return;
       selected = -1;
       legalTargets = [];
-      hintMove = m;
+      hintMoves = list.slice(0, 3);
       renderBoard();
       updateHintGlow();
-      setStatus(`${label}: ${fmt(san)} (${alg(m.from)} → ${alg(m.to)})`);
+      const lead = mate ? (mate.n === 1 ? 'Checkmate in 1' : 'Forced mate in 2') + ': ' : (list.length > 1 ? 'Best 3 moves: ' : 'Best move: ');
+      setStatus(lead + hintMoves.map((m, i) => `${i + 1}. ${sanOf(m)}`).join('   '));
     };
     const mate = hintCache && hintCache.key === key ? hintCache.result : findMate(game);
-    if (mate) { show(mate.move, mate.n === 1 ? 'Checkmate in 1' : 'Forced mate in 2'); return; }
 
     const tok = ++aiToken;       // blocks play while the search runs, and is cancelled by anything that resets the game
     aiBusy = true;
     updateControls();
     thinkingStatus();
     const t0 = Date.now();
-    searchMove(game, 'hint', game.turn, null, (m) => {
+    searchTop(game, 'hint', game.turn, null, (res) => {
       if (tok !== aiToken) return;
       setTimeout(() => {
         if (tok !== aiToken) return;
         aiBusy = false;
         updateControls();
-        if (phase === 'play' && positionKey(game) === key) show(m, 'Best move');
+        if (phase !== 'play' || positionKey(game) !== key) return;
+        let list = res.map((r) => r.move);
+        if (mate) list = [mate.move, ...list.filter((m) => !(m.from === mate.move.from && m.to === mate.move.to && m.promo === mate.move.promo))];
+        show(list, mate);
       }, Math.max(0, 900 - (Date.now() - t0)));
     });
   });
@@ -921,7 +936,7 @@
     if (!isTas() || !ai || (phase !== 'play' && phase !== 'over')) return;
     playBoth = !playBoth;
     if (playBoth) { aiToken++; aiBusy = false; }
-    hintMove = null;
+    hintMoves = [];
     if (phase === 'play') updateStatus(); else overStatus();
     renderBoard();
     updateControls();
