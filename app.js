@@ -18,6 +18,8 @@
   let ai = null;               // { level, color (computer), human } when playing the computer
   let aiToken = 0;             // bumps to cancel a pending computer move
   let aiBusy = false;          // the computer is "thinking"
+  let bots = null;             // 0-player games: { [WHITE]: level, [BLACK]: level }, the computer plays both sides
+  let paused = false;          // 0-player games: waiting for Resume
   let posKeys = [];            // position key after each ply (index 0 = start), for repetition
   let hintMoves = [];          // TAS hint currently shown (up to 3 moves, best first)
   let hintAvail = false;       // a forced mate exists right now (makes the Hint button glow)
@@ -348,6 +350,9 @@
     $('#redo-btn').disabled = !nav || viewPly >= sans.length;
     $('#hint-btn').disabled = !(phase === 'play' && !aiBusy && ai && humanTurn());
     $('#both-btn').classList.toggle('hidden', !tas);
+    $('#pause-btn').classList.toggle('hidden', !bots || phase !== 'play');
+    $('#pause-btn').textContent = paused ? 'Resume' : 'Pause';
+    $('#pause-btn').classList.toggle('on', paused);
     $('#both-btn').classList.toggle('on', playBoth);
     $('#both-btn').setAttribute('aria-pressed', playBoth ? 'true' : 'false');
     $('#both-btn').disabled = !(phase === 'play' || phase === 'over');
@@ -372,13 +377,54 @@
     if (m === 'tas') { askDifficulty(m); return; }   // TAS is single player only
     openSheet(`<h2>How many players?</h2>
       <div class="stack">
+        <button class="btn big" id="pl-0">0 players</button>
         <button class="btn big" id="pl-1">1 player</button>
         <button class="btn big" id="pl-2">2 players</button>
         <button class="btn" id="pl-x">Cancel</button>
       </div>`, true);
+    $('#pl-0').onclick = () => askBot(m, WHITE, null);
     $('#pl-1').onclick = () => askDifficulty(m);
     $('#pl-2').onclick = () => { closeSheet(); startGame(m, false, null); };
     $('#pl-x').onclick = closeSheet;
+  }
+
+  /* 0 players: pick a computer level for White, then for Black, and watch them play */
+  function askBot(m, color, whiteLevel) {
+    const white = color === WHITE;
+    openSheet(`<h2>${white ? 'White' : 'Black'} computer</h2>
+      <div class="stack">
+        <button class="btn big" data-lv="dumb">Dumb</button>
+        <button class="btn big" data-lv="easy">Easy</button>
+        <button class="btn big" data-lv="medium">Medium</button>
+        <button class="btn big" data-lv="hard">Hard</button>
+        <button class="btn big" data-lv="insane">Insane</button>
+        <button class="btn big" data-lv="godly">Godly</button>
+        <button class="btn" id="df-x">Cancel</button>
+      </div>`, true);
+    sheet.querySelectorAll('[data-lv]').forEach((b) => {
+      b.onclick = () => {
+        if (white) askBot(m, BLACK, b.dataset.lv);
+        else { closeSheet(); startBots(m, whiteLevel, b.dataset.lv); }
+      };
+    });
+    $('#df-x').onclick = closeSheet;
+  }
+
+  function startBots(m, wl, bl) {
+    freshGame(m);
+    phase = 'names';
+    ai = null;
+    bots = { [WHITE]: wl, [BLACK]: bl };
+    names = { [WHITE]: 'Computer (' + LEVEL_LABEL[wl] + ')', [BLACK]: 'Computer (' + LEVEL_LABEL[bl] + ')' };
+    viewNames = names;
+    opts.autoFlip = false;
+    showPage('game');
+    buildBoard();
+    renderAll();
+    renderMoves([], 0);
+    setStatus('');
+    closeSheet();
+    afterNames();
   }
 
   function askDifficulty(m) {
@@ -415,6 +461,7 @@
     hintCache = null;
     hintToken++;
     playBoth = false;
+    paused = false;
     clearTimeout(flipTimer);
     selected = -1;
     legalTargets = [];
@@ -435,6 +482,7 @@
     if (!keepNames) {
       names = { [WHITE]: 'White', [BLACK]: 'Black' };
       ai = level ? { level, color: BLACK, human: WHITE } : null;
+      bots = null;
     }
     viewNames = names;
     showPage('game');
@@ -560,6 +608,15 @@
 
   function afterNames() {
     renderBars();
+    if (bots) {   // two computers: they each pick a random secret pawn, then play
+      if (mode === 'secret') {
+        game.secretQueen[WHITE] = pickSecretPawn(WHITE);
+        game.secretQueen[BLACK] = pickSecretPawn(BLACK);
+        initialSecrets = { [WHITE]: game.secretQueen[WHITE], [BLACK]: game.secretQueen[BLACK] };
+      }
+      beginPlay();
+      return;
+    }
     if (mode === 'secret') pickHandoff(ai ? ai.human : WHITE); else beginPlay();
   }
 
@@ -628,7 +685,8 @@
   }
 
   function maybeAI() {
-    if (!ai || playBoth || phase !== 'play' || game.turn !== ai.color) return;
+    const level = bots ? bots[game.turn] : (ai && !playBoth && game.turn === ai.color ? ai.level : null);
+    if (!level || phase !== 'play' || paused) return;
     if (!isTas() && viewPly < sans.length) return;
     const token = ++aiToken;
     aiBusy = true;
@@ -639,12 +697,12 @@
     updateControls();
     thinkingStatus();
     const t0 = Date.now();
-    const minWait = 2000 + Math.random() * 500;   // always at least 2 seconds, however fast the search is
+    const minWait = bots ? 1200 + Math.random() * 400 : 2000 + Math.random() * 500;   // never instant, however fast the search is
     const seen = new Map();
     posKeys.slice(0, viewPly + 1).forEach((k) => seen.set(k, (seen.get(k) || 0) + 1));
     setTimeout(() => {
       if (token !== aiToken) return;
-      searchMove(game, ai.level, ai.color, seen, (m) => {
+      searchMove(game, level, game.turn, seen, (m) => {
         if (token !== aiToken) return;
         setTimeout(() => {
           if (token !== aiToken) return;
@@ -672,6 +730,7 @@
       }
       return;
     }
+    if (bots && phase === 'play') return;   // nobody to move for: the computers are playing
     if (phase === 'play' && !isTas() && viewPly < sans.length) {
       showToast('You are viewing an earlier move. Press Redo to get back to the current position before playing.');
       return;
@@ -929,6 +988,15 @@
         show(list, mate);
       }, Math.max(0, 900 - (Date.now() - t0)));
     });
+  });
+
+  /* 0 players: pause and resume the match */
+  $('#pause-btn').addEventListener('click', () => {
+    if (!bots || phase !== 'play') return;
+    paused = !paused;
+    updateControls();
+    if (!paused) maybeAI();
+    else if (!aiBusy) setStatus('Paused');
   });
 
   /* TAS: take the computer's turns yourself. While this is on the computer never moves. */
