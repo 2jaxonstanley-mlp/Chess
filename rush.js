@@ -21,7 +21,7 @@
   const KN = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
   const DG = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
   const OR = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const START = 4;                                   // e1
+  const STARTS = { q: [3, 4], r: [0, 7], b: [2, 5], n: [1, 6] };   // White begins with two of its piece on the back rank
   const rnd = (n) => Math.floor(Math.random() * n);
   const pick = (a) => a[rnd(a.length)];
   const sqName = (s) => 'abcdefgh'[s & 7] + ((s >> 3) + 1);
@@ -71,7 +71,7 @@
     return out;
   }
 
-  function findWhite(cells) { for (let i = 0; i < 64; i++) if (cells[i] && cells[i].c === W) return i; return -1; }
+  function whiteSquares(cells) { const o = []; for (let i = 0; i < 64; i++) if (cells[i] && cells[i].c === W) o.push(i); return o; }
   function blackSquares(cells) { const o = []; for (let i = 0; i < 64; i++) if (cells[i] && cells[i].c === B) o.push(i); return o; }
   function attackedByBlack(cells, s) { for (const b of blackSquares(cells)) if (gen(cells, b, true).includes(s)) return true; return false; }
 
@@ -96,22 +96,28 @@
 
   /** From White's point of view. `toMove` matters: Black can only save one attacked piece per turn. */
   function evalState(cells, toMove) {
-    const ws = findWhite(cells);
-    if (ws < 0) return 0;
-    const bl = blackSquares(cells), wt = gen(cells, ws);
-    let e = 0, hit = 0, attacked = false;
+    const wss = whiteSquares(cells);
+    if (!wss.length) return 0;
+    const bl = blackSquares(cells), wt = new Set();
+    for (const w of wss) for (const x of gen(cells, w)) wt.add(x);
+    let e = 0, hit = 0;
     const vals = [];
     for (const b of bl) {
-      if (wt.includes(b)) { hit++; vals.push(VALUE[cells[b].t]); }
-      e -= 2 * Math.max(Math.abs((b & 7) - (ws & 7)), Math.abs((b >> 3) - (ws >> 3)));
-      if (!attacked && gen(cells, b, true).includes(ws)) attacked = true;
+      if (wt.has(b)) { hit++; vals.push(VALUE[cells[b].t]); }
+      let d = 9;
+      for (const w of wss) d = Math.min(d, Math.max(Math.abs((b & 7) - (w & 7)), Math.abs((b >> 3) - (w >> 3))));
+      e -= 2 * d;
     }
     vals.sort((a, c) => c - a);
     // a capture is available right now / two attacked pieces: Black saves the best one, White takes the other
     if (toMove === W) e += hit ? 150 + 250 * vals[0] : 0;
     else e += hit >= 2 ? 150 + 250 * vals[1] : hit === 1 ? (150 + 250 * vals[0]) * 0.15 : 0;
-    if (attacked) e -= UNIT * COST[cells[ws].t] * (toMove === B ? 1 : 0.35);                   // Black can take White
-    return e;
+    // White pieces Black could take
+    const threats = new Set();
+    for (const b of bl) for (const x of gen(cells, b, true)) if (wss.includes(x)) threats.add(x);
+    let danger = 0;
+    for (const w of threats) danger += UNIT * COST[cells[w].t] * (toMove === B ? 1 : 0.35);
+    return e - danger;
   }
 
   function ab(cells, side, depth, alpha, beta, acc) {
@@ -205,15 +211,16 @@
 
   function spawnBlack(cells) {
     const t = pick(['p', 'p', 'p', 'n', 'n', 'b', 'b', 'r', 'r']);
-    const ws = findWhite(cells);
-    const atk = ws >= 0 ? new Set(gen(cells, ws)) : new Set();
+    const wss = whiteSquares(cells);
+    const atk = new Set();
+    for (const w of wss) for (const x of gen(cells, w)) atk.add(x);
     const ok = [];
     for (const q of emptySquares(cells)) {
       const rank = q >> 3;
       if (rank < (t === 'p' ? 2 : 1) || (t === 'p' && rank > 6)) continue;
       if (atk.has(q)) continue;
       cells[q] = { c: B, t };
-      const hitsWhite = ws >= 0 && gen(cells, q, true).includes(ws);
+      const hitsWhite = gen(cells, q, true).some((x) => wss.includes(x));
       cells[q] = null;
       if (!hitsWhite) ok.push(q);
     }
@@ -238,7 +245,7 @@
     clearInterval(timerId); clearTimeout(aiTimer);
     const cells = new Array(64).fill(null);
     g = { cells, piece: cfg.piece, turn: W, score: 0, taken: 0, caps: [], t0: 0, ended: false, selected: -1, targets: [], last: null, ai: false };
-    cells[START] = { c: W, t: g.piece };
+    STARTS[g.piece].forEach((s) => { cells[s] = { c: W, t: g.piece }; });
     for (let i = 0; i < 4; i++) spawnBlack(cells);
     g.init = cells.map((c, i) => (c ? { sq: i, c: c.c, t: c.t } : null)).filter(Boolean);
     g.log = [];
@@ -313,6 +320,29 @@
     setTimeout(() => { pe.style.transition = ''; de.style.zIndex = ''; }, 280);
   }
 
+  /** A copy of a piece that shrinks away on `sq` (a captured piece), optionally sliding there first from `from`. */
+  function ghost(sq, p, from) {
+    const el = els[sq];
+    if (!el || !p) return;
+    const gh = document.createElement('div');
+    gh.className = 'ghost';
+    const pe = document.createElement('span');
+    pe.className = 'piece ' + p.c;
+    pe.textContent = GLYPH[p.t];
+    gh.appendChild(pe);
+    el.appendChild(gh);
+    if (from !== undefined && els[from]) {
+      const a = els[from].getBoundingClientRect(), b = el.getBoundingClientRect();
+      pe.style.transition = 'none';
+      pe.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px)`;
+      void pe.offsetWidth;
+      pe.style.transition = 'transform .24s cubic-bezier(.2,.8,.2,1)';
+      pe.style.transform = '';
+      setTimeout(() => gh.classList.add('out'), 220);
+    } else gh.classList.add('out');
+    setTimeout(() => gh.remove(), 700);
+  }
+
   function setStatus(text, cls) {
     const el = $('#rush-status');
     el.className = 'status' + (cls ? ' ' + cls : '');
@@ -382,7 +412,7 @@
     const side = mover.c;
     cells[to] = mover; cells[from] = null;
     g.last = [from, to];
-    let popSq = -1, slideTo = to, msg = '';
+    let popSq = -1, slideTo = to, msg = '', walkOff = false;
     const ev = { f: from, t: to, at: g.t0 ? Math.round(performance.now() - g.t0) : 0 };
     let nextTurn = side === W ? B : W;
     if (side === W && cap) {
@@ -401,6 +431,7 @@
     } else if (side === B && mover.t === 'p' && (to >> 3) === 0) {
       cells[to] = null;                                // the pawn walked off the board; a new piece appears
       ev.rm = 1;
+      walkOff = true;
       popSq = spawnBlack(cells);
       if (popSq >= 0) ev.sp = [popSq, cells[popSq].t];
       slideTo = -1;
@@ -408,7 +439,7 @@
     if (nextTurn === B && !allMoves(cells, B).length) nextTurn = W;
     g.turn = nextTurn;
     if (g.log) g.log.push(ev);
-    return { popSq, slideTo, msg };
+    return { popSq, slideTo, msg, walkOff, mover: { c: mover.c, t: mover.t }, cap: cap ? { c: cap.c, t: cap.t } : null };
   }
 
   function play(from, to) {
@@ -419,6 +450,8 @@
     const res = applyMove(from, to);
     render(res.popSq);
     if (res.slideTo >= 0) slide(from, res.slideTo);
+    if (res.cap && res.cap.c !== res.mover.c) ghost(to, res.cap);                 // the captured piece shrinks away
+    if (res.walkOff) ghost(to, res.mover, from);                                  // a pawn that walks off the board
     updateHud();
     if (res.msg) toast(res.msg);
     setStatus();
@@ -553,7 +586,12 @@
     $('#rush-scrub').value = rp.idx;
     setStatus(rp.idx ? 'Move ' + rp.idx + ' of ' + (rp.frames.length - 1) : 'Start position', 'dim');
     $('#rr-play').textContent = rp.playing ? 'Pause' : 'Play';
-    if (animate && f.last && rp.idx === prev + 1) slide(f.last[0], f.last[1]);
+    if (animate && f.last && rp.idx === prev + 1) {
+      const was = rp.frames[prev].cells[f.last[1]];
+      slide(f.last[0], f.last[1]);
+      if (was && f.cells[f.last[1]] && was.c !== f.cells[f.last[1]].c) ghost(f.last[1], was);
+      else if (!f.cells[f.last[1]] && rp.frames[prev].cells[f.last[0]]) ghost(f.last[1], rp.frames[prev].cells[f.last[0]], f.last[0]);
+    }
   }
 
   function rpStop() { rp.playing = false; clearInterval(rp.timer); rp.timer = null; $('#rr-play').textContent = 'Play'; }
@@ -615,7 +653,7 @@
   }
 
   function askPiece(who, cb) {
-    LP.openSheet(`<h2>${esc(who)}, choose your piece<span class="sub">You are White. Score points by capturing in 2:30. If your piece is taken you lose points.</span></h2>
+    LP.openSheet(`<h2>${esc(who)}, choose your piece<span class="sub">You are White. You get two of them. Score points by capturing in 2:30. If one is taken you lose points.</span></h2>
       <div class="rush-pieces">
         ${['q', 'r', 'b', 'n'].map((t) => `<button class="btn big" data-pc="${t}"><span class="rp-g">${GLYPH[t]}</span>${PNAME[t]}<span class="rp-c">loses ${COST[t]} if taken</span></button>`).join('')}
       </div>`);
@@ -739,7 +777,7 @@
     cfg = { players: 0, names: { w: 'W', b: 'B' } };
     const cells = new Array(64).fill(null);
     g = { cells, piece, turn: W, score: 0, taken: 0, caps: [], t0: 0, ended: false, last: null };
-    cells[START] = { c: W, t: piece };
+    STARTS[piece].forEach((s) => { cells[s] = { c: W, t: piece }; });
     for (let i = 0; i < 4; i++) spawnBlack(cells);
     let wMoves = 0;
     while (wMoves < turns) {

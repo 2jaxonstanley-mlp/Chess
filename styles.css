@@ -504,9 +504,8 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
   .sheet { border-radius: 14px; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
-}
+/* animations are always on (the slide and pop effects are part of how the game reads) */
+
 
 /* thinking dots + TAS hint highlight */
 .dots i { font-style: normal; animation: dot-blink 1.2s infinite both; }
@@ -570,3 +569,7 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 #rush .captured { margin-left: auto; }
 #rush #rush-top-captured { font-size: .95rem; color: var(--muted); }
 .rush-pieces .rp-c { font-size: .85rem; font-weight: 400; color: var(--muted); }
+
+.ghost { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
+.ghost.out { animation: ghost-out .38s ease-in forwards; }
+@keyframes ghost-out { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.3); } }
