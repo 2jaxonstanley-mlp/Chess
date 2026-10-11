@@ -369,7 +369,7 @@
   }
 
   /* ------------------------------------------------------------- menu/start */
-  document.querySelectorAll('.mode').forEach((b) => {
+  document.querySelectorAll('.mode:not([data-mode="rush"])').forEach((b) => {
     b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
 
@@ -1176,10 +1176,11 @@
     list.forEach((r) => {
       const li = document.createElement('li');
       const when = new Date(r.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      const label = r.kind === 'rush' ? 'Capture Rush · ' + (r.pts ? (r.score < 0 ? '\u2212' + Math.abs(r.score) : r.score) + ' points' : r.score + ' captured') : (r.tas ? 'TAS' : r.mode === 'secret' ? 'Secret Queen' : 'Classic') + ' · ' + Math.ceil(r.moves.length / 2) + ' moves';
       li.innerHTML = `<div class="info"><div class="title">${esc(r.names.w)} vs ${esc(r.names.b)}</div>
-        <div class="meta">${when} · ${r.tas ? 'TAS' : r.mode === 'secret' ? 'Secret Queen' : 'Classic'} · ${Math.ceil(r.moves.length / 2)} moves</div></div>
+        <div class="meta">${when} · ${label}</div></div>
         <button class="btn primary w">Watch</button><button class="btn d">Delete</button>`;
-      li.querySelector('.w').onclick = () => startReplay(r, 'menu');
+      li.querySelector('.w').onclick = () => (r.kind === 'rush' ? window.Rush.watch(r) : startReplay(r, 'menu'));
       const del = li.querySelector('.d');
       let armed = null;
       del.onclick = () => {
@@ -1197,4 +1198,5 @@
 
   renderSavedList();
   buildBoard();
+  window.LP = { openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList };
 })();

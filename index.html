@@ -34,6 +34,10 @@
             <span class="mode-name">TAS</span>
             <span class="mode-desc">Single player against the computer, with undo, redo and mate hints.</span>
           </button>
+          <button class="mode" data-mode="rush">
+            <span class="mode-name">Capture Rush</span>
+            <span class="mode-desc">White has 2:30 to score points by capturing pieces while Black keeps spawning more.</span>
+          </button>
         </div>
 
         <div id="saved" class="saved hidden">
@@ -114,6 +118,52 @@
       </div>
     </section>
 
+    <!-- CAPTURE RUSH -->
+    <section id="rush" class="page">
+      <header class="game-header">
+        <button id="rush-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span class="mode-title">Capture Rush</span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="layout">
+        <div class="board-col">
+          <div class="rush-hud">
+            <span id="rush-time" class="rush-time">2:30</span>
+            <span class="rush-scorebox"><span id="rush-score" class="rush-score">0</span><span id="rush-score-label" class="rush-score-label">points</span></span>
+          </div>
+          <div class="rush-bar"><div id="rush-fill" class="rush-fill"></div></div>
+          <div class="player-bar" id="rush-top">
+            <span class="dot b"></span>
+            <span class="pname" id="rush-top-name"></span>
+            <span class="captured" id="rush-top-captured"></span>
+          </div>
+          <div class="board-wrap">
+            <div id="rush-board" class="board"></div>
+            <div id="rush-toast" class="toast" role="status"></div>
+          </div>
+          <div class="player-bar" id="rush-bottom">
+            <span class="dot w"></span>
+            <span class="pname" id="rush-bottom-name"></span>
+            <span class="captured" id="rush-bottom-captured"></span>
+          </div>
+          <div id="rush-status" class="status">&nbsp;</div>
+          <div class="controls"><button id="rush-reset" class="btn">New round</button></div>
+          <div id="rush-replay" class="replay-controls hidden">
+            <input id="rush-scrub" type="range" min="0" max="0" value="0" aria-label="Replay position">
+            <div class="replay-row">
+              <button id="rr-start" class="btn icon" aria-label="Start">&#9198;&#xFE0E;</button>
+              <button id="rr-prev" class="btn icon" aria-label="Previous move">&#9664;&#xFE0E;</button>
+              <button id="rr-play" class="btn primary play" aria-label="Play or pause">Play</button>
+              <button id="rr-next" class="btn icon" aria-label="Next move">&#9654;&#xFE0E;</button>
+              <button id="rr-end" class="btn icon" aria-label="End">&#9197;&#xFE0E;</button>
+              <button id="rr-speed" class="btn speed" aria-label="Speed">1x</button>
+            </div>
+            <button id="rr-exit" class="btn wide">Close replay</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- SHEET (names, hand-off, game over, save) -->
     <div id="sheet-bg" class="sheet-bg hidden">
       <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
@@ -123,5 +173,6 @@
   <script src="chess.js"></script>
   <script src="ai.js"></script>
   <script src="app.js"></script>
+  <script src="rush.js"></script>
 </body>
 </html>

@@ -553,3 +553,20 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
   text-align: center;
   pointer-events: none;
 }
+
+/* ---------- Capture Rush ---------- */
+.rush-hud { display: flex; justify-content: space-between; align-items: baseline; padding: .1rem .4rem .15rem; }
+.rush-time { font-size: 2.2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.rush-time.low { color: #ff9a9d; }
+.rush-scorebox { display: flex; align-items: baseline; gap: .4rem; }
+.rush-score { font-size: 2.2rem; font-weight: 700; line-height: 1.1; }
+.rush-score-label { font-size: .95rem; color: var(--muted); }
+.rush-bar { height: 4px; background: rgba(255, 255, 255, .14); border-radius: 2px; overflow: hidden; margin-bottom: .2rem; }
+.rush-fill { height: 100%; width: 100%; background: #fff; transition: width .12s linear; }
+.rush-note { color: var(--muted); margin: 0 0 1rem; }
+.rush-pieces { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.rush-pieces .btn { display: flex; flex-direction: column; align-items: center; gap: .1rem; }
+.rush-pieces .rp-g { font-size: 2.4rem; line-height: 1.1; }
+#rush .captured { margin-left: auto; }
+#rush #rush-top-captured { font-size: .95rem; color: var(--muted); }
+.rush-pieces .rp-c { font-size: .85rem; font-weight: 400; color: var(--muted); }
