@@ -1,8 +1,10 @@
 /**
- * Capture Rush: White has one piece (queen, rook, bishop or knight) and 2 minutes 30 seconds to capture as
- * many Black pieces as it can. Black keeps up to four pieces on the board, new ones appear whenever one is
- * taken, and Black can take White's piece (it comes back, but that costs White its turn).
- * The clock starts when White makes its first move. There are no kings and no check in this mode.
+ * Capture Rush: White has two of one piece type (queen, rook, bishop or knight) and 2 minutes 30 seconds
+ * to capture as many Black pieces as it can. Captures score double points. Black starts with 1 piece and
+ * grows (gains one every 2–3 Black turns, or immediately when a piece is taken while Black has ≤ 3).
+ * Spawns never appear on occupied squares or in positions that attack White. Black can take White's piece
+ * (it comes back, but that costs White its turn). The clock starts when White makes its first move.
+ * There are no kings and no check in this mode.
  * Runs on its own page and board; it only borrows the sheet/page helpers from app.js (window.LP).
  */
 (() => {
@@ -13,7 +15,7 @@
   let TOTAL = 150000;
   const W = 'w', B = 'b';
   const GLYPH = { p: '♟︎', n: '♞︎', b: '♝︎', r: '♜︎', q: '♛︎' };
-  // Points: every capture scores the captured piece's value. If White's own piece is taken, White loses points by its value (queen 9, rook 5, bishop 3, knight 3).
+  // Points: every capture scores DOUBLE the captured piece's value. If White's own piece is taken, White loses points by its value (queen 9, rook 5, bishop 3, knight 3).
   const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
   const COST = { q: 9, r: 5, b: 3, n: 3 };
   const fmtPts = (n) => (n < 0 ? '\u2212' + Math.abs(n) : String(n));
@@ -110,8 +112,9 @@
     }
     vals.sort((a, c) => c - a);
     // a capture is available right now / two attacked pieces: Black saves the best one, White takes the other
-    if (toMove === W) e += hit ? 150 + 250 * vals[0] : 0;
-    else e += hit >= 2 ? 150 + 250 * vals[1] : hit === 1 ? (150 + 250 * vals[0]) * 0.15 : 0;
+    // (values already reflect double scoring)
+    if (toMove === W) e += hit ? 150 + 500 * vals[0] : 0;
+    else e += hit >= 2 ? 150 + 500 * vals[1] : hit === 1 ? (150 + 500 * vals[0]) * 0.15 : 0;
     // White pieces Black could take
     const threats = new Set();
     for (const b of bl) for (const x of gen(cells, b, true)) if (wss.includes(x)) threats.add(x);
@@ -132,7 +135,7 @@
       const mover = cells[m.from], cap = cells[m.to];
       cells[m.to] = mover; cells[m.from] = null;
       let add = 0, terminal = false;
-      if (side === W && cap) add = 150 + 250 * VALUE[cap.t];
+      if (side === W && cap) add = 150 + 500 * VALUE[cap.t];   // double points
       if (side === B && cap) { add = -UNIT * COST[cap.t]; terminal = true; }
       if (side === B && mover.t === 'p' && (m.to >> 3) === 0) cells[m.to] = null;
       const v = terminal ? acc + add : ab(cells, side === W ? B : W, depth - 1, alpha, beta, acc + add);
@@ -244,9 +247,9 @@
     token++;
     clearInterval(timerId); clearTimeout(aiTimer);
     const cells = new Array(64).fill(null);
-    g = { cells, piece: cfg.piece, turn: W, score: 0, taken: 0, caps: [], t0: 0, ended: false, selected: -1, targets: [], last: null, ai: false };
+    g = { cells, piece: cfg.piece, turn: W, score: 0, taken: 0, caps: [], t0: 0, ended: false, selected: -1, targets: [], last: null, ai: false, bTurns: 0, nextGrowth: 2 + rnd(2) };
     STARTS[g.piece].forEach((s) => { cells[s] = { c: W, t: g.piece }; });
-    for (let i = 0; i < 4; i++) spawnBlack(cells);
+    spawnBlack(cells);   // Black starts with only 1 piece
     g.init = cells.map((c, i) => (c ? { sq: i, c: c.c, t: c.t } : null)).filter(Boolean);
     g.log = [];
     flipped = cfg.players === 1 && cfg.human === B;
@@ -308,16 +311,30 @@
   }
 
   function slide(src, dst) {
-    const de = els[dst], se = els[src], pe = de && de._piece;
-    if (!pe || !se) return;
-    const a = se.getBoundingClientRect(), b = de.getBoundingClientRect();
+    const de = els[dst], se = els[src];
+    if (!de || !se) return;
+    const pe = de._piece;
+    if (!pe) return;
+    // Clear any leftover transform / transition so the starting offset is applied cleanly every time
     pe.style.transition = 'none';
-    pe.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px)`;
+    pe.style.transform = '';
+    void pe.offsetWidth;
+    const a = se.getBoundingClientRect(), b = de.getBoundingClientRect();
+    const dx = a.left - b.left, dy = a.top - b.top;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+    pe.style.transform = `translate(${dx}px, ${dy}px)`;
     de.style.zIndex = 6;
     void pe.offsetWidth;
-    pe.style.transition = 'transform .24s cubic-bezier(.2,.8,.2,1)';
-    pe.style.transform = '';
-    setTimeout(() => { pe.style.transition = ''; de.style.zIndex = ''; }, 280);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        pe.style.transition = 'transform .24s cubic-bezier(.2,.8,.2,1)';
+        pe.style.transform = '';
+        setTimeout(() => {
+          pe.style.transition = '';
+          de.style.zIndex = '';
+        }, 280);
+      });
+    });
   }
 
   /** A copy of a piece that shrinks away on `sq` (a captured piece), optionally sliding there first from `from`. */
@@ -336,10 +353,16 @@
       pe.style.transition = 'none';
       pe.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px)`;
       void pe.offsetWidth;
-      pe.style.transition = 'transform .24s cubic-bezier(.2,.8,.2,1)';
-      pe.style.transform = '';
-      setTimeout(() => gh.classList.add('out'), 220);
-    } else gh.classList.add('out');
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          pe.style.transition = 'transform .24s cubic-bezier(.2,.8,.2,1)';
+          pe.style.transform = '';
+          setTimeout(() => gh.classList.add('out'), 220);
+        });
+      });
+    } else {
+      gh.classList.add('out');
+    }
     setTimeout(() => gh.remove(), 700);
   }
 
@@ -416,9 +439,14 @@
     const ev = { f: from, t: to, at: g.t0 ? Math.round(performance.now() - g.t0) : 0 };
     let nextTurn = side === W ? B : W;
     if (side === W && cap) {
-      g.score += VALUE[cap.t]; g.caps.push(cap.t);
-      popSq = spawnBlack(cells);
-      if (popSq >= 0) ev.sp = [popSq, cells[popSq].t];
+      // Double points for White captures
+      g.score += VALUE[cap.t] * 2;
+      g.caps.push(cap.t);
+      // Only respawn if Black is at or under 3 pieces after the capture
+      if (blackSquares(cells).length <= 3) {
+        popSq = spawnBlack(cells);
+        if (popSq >= 0) ev.sp = [popSq, cells[popSq].t];
+      }
       msg = nameOf(W) + ' captured a ' + { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen' }[cap.t];
     } else if (side === B && cap) {
       g.taken++;
@@ -429,11 +457,14 @@
       nextTurn = B;                                    // coming back costs White its turn
       msg = nameOf(B) + ' took ' + nameOf(W) + "'s piece. It respawns, Black moves again";
     } else if (side === B && mover.t === 'p' && (to >> 3) === 0) {
-      cells[to] = null;                                // the pawn walked off the board; a new piece appears
+      cells[to] = null;                                // the pawn walked off the board
       ev.rm = 1;
       walkOff = true;
-      popSq = spawnBlack(cells);
-      if (popSq >= 0) ev.sp = [popSq, cells[popSq].t];
+      // Treat like a loss for Black count: replace only if ≤ 3 remaining
+      if (blackSquares(cells).length <= 3) {
+        popSq = spawnBlack(cells);
+        if (popSq >= 0) ev.sp = [popSq, cells[popSq].t];
+      }
       slideTo = -1;
     }
     if (nextTurn === B && !allMoves(cells, B).length) nextTurn = W;
@@ -448,12 +479,34 @@
     g.selected = -1; g.targets = [];
     if (side === W && !g.t0) { g.t0 = performance.now(); clearInterval(timerId); timerId = setInterval(tickClock, 100); }
     const res = applyMove(from, to);
-    render(res.popSq);
+
+    // After a Black move, grow Black's army every 2–3 turns (while under 4 pieces)
+    let growthSq = -1;
+    if (side === B) {
+      g.bTurns = (g.bTurns || 0) + 1;
+      if (g.bTurns >= (g.nextGrowth || 2) && blackSquares(g.cells).length < 4) {
+        growthSq = spawnBlack(g.cells);
+        if (growthSq >= 0) {
+          // Record the extra spawn on the last event so replays stay accurate
+          if (g.log && g.log.length) {
+            const lastEv = g.log[g.log.length - 1];
+            lastEv.sp = [growthSq, g.cells[growthSq].t];
+            lastEv.grow = 1;
+          }
+          g.bTurns = 0;
+          g.nextGrowth = 2 + rnd(2);
+        }
+      }
+    }
+
+    const revealSq = res.popSq >= 0 ? res.popSq : growthSq;
+    render(revealSq);
     if (res.slideTo >= 0) slide(from, res.slideTo);
     if (res.cap && res.cap.c !== res.mover.c) ghost(to, res.cap);                 // the captured piece shrinks away
     if (res.walkOff) ghost(to, res.mover, from);                                  // a pawn that walks off the board
     updateHud();
     if (res.msg) toast(res.msg);
+    else if (growthSq >= 0) toast(nameOf(B) + ' gains a piece');
     setStatus();
     scheduleAI();
   }
@@ -544,7 +597,7 @@
     for (const e of d.events) {
       const mover = cells[e.f], cap = cells[e.t];
       cells[e.t] = mover; cells[e.f] = null;
-      if (mover.c === W && cap) { score += VALUE[cap.t]; caps.push(cap.t); }
+      if (mover.c === W && cap) { score += VALUE[cap.t] * 2; caps.push(cap.t); }  // double points
       if (mover.c === B && cap) { taken++; score -= COST[d.piece]; }
       if (e.rm) cells[e.t] = null;
       if (e.rw !== undefined) cells[e.rw] = { c: W, t: d.piece };
