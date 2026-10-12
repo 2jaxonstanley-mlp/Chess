@@ -462,7 +462,6 @@
       g.score -= COST[g.piece];   // White's piece was taken
       popSq = respawnWhite(cells);
       ev.rw = popSq;
-      slideTo = -1;
       msg = nameOf(B) + ' took ' + nameOf(W) + "'s piece. It respawns";
     }
     let promoSq = -1;
