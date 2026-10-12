@@ -265,6 +265,8 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 }
 .square.selected .piece { transform: scale(1.1); }
 .piece.reveal { animation: pop .45s var(--ease); }
+.piece.spawn { animation: spawn .4s cubic-bezier(.2,.9,.3,1.2); }
+@keyframes spawn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
 @keyframes pop { 0% { transform: scale(.5); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
 
 /* replay marker on secret pawns */

@@ -137,7 +137,7 @@
       let add = 0, terminal = false;
       if (side === W && cap) add = 150 + 500 * VALUE[cap.t];   // double points
       if (side === B && cap) { add = -UNIT * COST[cap.t]; terminal = true; }
-      if (side === B && mover.t === 'p' && (m.to >> 3) === 0) cells[m.to] = null;
+      if (side === B && mover.t === 'p' && (m.to >> 3) === 0) cells[m.to] = { c: B, t: 'q' };
       const v = terminal ? acc + add : ab(cells, side === W ? B : W, depth - 1, alpha, beta, acc + add);
       cells[m.from] = mover; cells[m.to] = cap;
       if (abort) return 0;
@@ -168,7 +168,7 @@
         let add = 0, terminal = false;
         if (side === W && cap) add = 150 + 250 * VALUE[cap.t];
         if (side === B && cap) { add = -UNIT * COST[cap.t]; terminal = true; }
-        if (side === B && mover.t === 'p' && (m.to >> 3) === 0) work[m.to] = null;
+        if (side === B && mover.t === 'p' && (m.to >> 3) === 0) work[m.to] = { c: B, t: 'q' };
         const v = terminal ? add : ab(work, side === W ? B : W, d - 1, -INF, INF, add);
         work[m.from] = mover; work[m.to] = cap;
         if (abort) break;
@@ -213,7 +213,7 @@
   function emptySquares(cells) { const o = []; for (let i = 0; i < 64; i++) if (!cells[i]) o.push(i); return o; }
 
   function spawnBlack(cells) {
-    const t = pick(['p', 'p', 'p', 'n', 'n', 'b', 'b', 'r', 'r']);
+    const t = pick(['p', 'p', 'p', 'n', 'n', 'b', 'b', 'r', 'r', 'q']);
     const wss = whiteSquares(cells);
     const atk = new Set();
     for (const w of wss) for (const x of gen(cells, w)) atk.add(x);
@@ -288,6 +288,7 @@
   }
 
   function render(popSq) {
+    const pops = Array.isArray(popSq) ? popSq : [popSq];
     const legal = new Set(cfg.hints ? g.targets : []);
     for (let s = 0; s < 64; s++) {
       const el = els[s], p = g.cells[s];
@@ -303,7 +304,7 @@
         pe.className = 'piece ' + p.c;
         pe.textContent = GLYPH[p.t];
         el._code = code;
-        if (s === popSq) { pe.classList.add('reveal'); pe.addEventListener('animationend', () => pe.classList.remove('reveal'), { once: true }); }
+        if (pops.includes(s)) { pe.classList.add('spawn'); pe.addEventListener('animationend', () => pe.classList.remove('spawn'), { once: true }); }
       }
     }
     $('#rush-' + barOf(B)).classList.toggle('active', !g.ended && g.turn === B);
@@ -392,7 +393,15 @@
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   };
 
-  function remaining() { if (g.fixedRem !== undefined) return g.fixedRem; return g.t0 ? Math.max(0, TOTAL - (performance.now() - g.t0)) : TOTAL; }
+  /** White's time used so far: the clock only runs while it is White's turn. */
+  function elapsed() { return (g.used || 0) + (g.runStart ? performance.now() - g.runStart : 0); }
+  function syncClock() {
+    if (!g.t0) return;
+    const now = performance.now();
+    if (g.turn === W && !g.runStart) g.runStart = now;
+    else if (g.turn !== W && g.runStart) { g.used = (g.used || 0) + (now - g.runStart); g.runStart = 0; }
+  }
+  function remaining() { if (g.fixedRem !== undefined) return g.fixedRem; return g.t0 ? Math.max(0, TOTAL - elapsed()) : TOTAL; }
 
   function updateHud() {
     const rem = remaining();
@@ -430,13 +439,13 @@
   }
 
   /** Rules for one move; returns what the UI needs to animate. */
-  function applyMove(from, to) {
+  function applyMove(from, to, promo) {
     const cells = g.cells, mover = cells[from], cap = cells[to];
     const side = mover.c;
     cells[to] = mover; cells[from] = null;
     g.last = [from, to];
     let popSq = -1, slideTo = to, msg = '', walkOff = false;
-    const ev = { f: from, t: to, at: g.t0 ? Math.round(performance.now() - g.t0) : 0 };
+    const ev = { f: from, t: to, at: g.t0 ? Math.round(elapsed()) : 0 };
     let nextTurn = side === W ? B : W;
     if (side === W && cap) {
       // Double points for White captures
@@ -454,31 +463,33 @@
       popSq = respawnWhite(cells);
       ev.rw = popSq;
       slideTo = -1;
-      nextTurn = B;                                    // coming back costs White its turn
-      msg = nameOf(B) + ' took ' + nameOf(W) + "'s piece. It respawns, Black moves again";
-    } else if (side === B && mover.t === 'p' && (to >> 3) === 0) {
-      cells[to] = null;                                // the pawn walked off the board
-      ev.rm = 1;
-      walkOff = true;
-      // Treat like a loss for Black count: replace only if ≤ 3 remaining
-      if (blackSquares(cells).length <= 3) {
-        popSq = spawnBlack(cells);
-        if (popSq >= 0) ev.sp = [popSq, cells[popSq].t];
-      }
-      slideTo = -1;
+      msg = nameOf(B) + ' took ' + nameOf(W) + "'s piece. It respawns";
+    }
+    let promoSq = -1;
+    if (side === B && mover.t === 'p' && (to >> 3) === 0) {   // a Black pawn reached the far side: it promotes
+      const pt = promo || 'q';
+      cells[to] = { c: B, t: pt };
+      ev.pr = pt;
+      promoSq = to;
+      msg = (msg ? msg + '. ' : '') + nameOf(B) + ' promoted a pawn to a ' + PNAME[pt].toLowerCase();
     }
     if (nextTurn === B && !allMoves(cells, B).length) nextTurn = W;
     g.turn = nextTurn;
     if (g.log) g.log.push(ev);
-    return { popSq, slideTo, msg, walkOff, mover: { c: mover.c, t: mover.t }, cap: cap ? { c: cap.c, t: cap.t } : null };
+    return { popSq, promoSq, slideTo, msg, walkOff, mover: { c: mover.c, t: mover.t }, cap: cap ? { c: cap.c, t: cap.t } : null };
   }
 
-  function play(from, to) {
+  function play(from, to, promo) {
     if (g.ended) return;
     const side = g.cells[from].c;
+    if (side === B && g.cells[from].t === 'p' && (to >> 3) === 0 && !promo) {
+      if (!isAI(B)) { askPromotion(from, to); return; }
+      promo = levelOf(B) === 'dumb' ? pick(['q', 'r', 'b', 'n']) : 'q';
+    }
     g.selected = -1; g.targets = [];
-    if (side === W && !g.t0) { g.t0 = performance.now(); clearInterval(timerId); timerId = setInterval(tickClock, 100); }
-    const res = applyMove(from, to);
+    if (side === W && !g.t0) { g.t0 = g.runStart = performance.now(); g.used = 0; clearInterval(timerId); timerId = setInterval(tickClock, 100); }
+    const res = applyMove(from, to, promo);
+    syncClock();
 
     // After a Black move, grow Black's army every 2–3 turns (while under 4 pieces)
     let growthSq = -1;
@@ -499,16 +510,23 @@
       }
     }
 
-    const revealSq = res.popSq >= 0 ? res.popSq : growthSq;
-    render(revealSq);
+    render([res.popSq, growthSq, res.promoSq]);
     if (res.slideTo >= 0) slide(from, res.slideTo);
     if (res.cap && res.cap.c !== res.mover.c) ghost(to, res.cap);                 // the captured piece shrinks away
-    if (res.walkOff) ghost(to, res.mover, from);                                  // a pawn that walks off the board
     updateHud();
     if (res.msg) toast(res.msg);
     else if (growthSq >= 0) toast(nameOf(B) + ' gains a piece');
     setStatus();
     scheduleAI();
+  }
+
+  function askPromotion(from, to) {
+    g.selected = -1; g.targets = []; render();
+    LP.openSheet(`<h2>Promote your pawn<span class="sub">Choose what it becomes.</span></h2>
+      <div class="rush-pieces">
+        ${['q', 'r', 'b', 'n'].map((t) => `<button class="btn big" data-promo="${t}"><span class="rp-g">${GLYPH[t]}</span>${PNAME[t]}</button>`).join('')}
+      </div>`);
+    document.querySelectorAll('[data-promo]').forEach((b) => { b.onclick = () => { LP.closeSheet(); if (g && !g.ended) play(from, to, b.dataset.promo); }; });
   }
 
   function scheduleAI() {
@@ -600,6 +618,7 @@
       if (mover.c === W && cap) { score += VALUE[cap.t] * 2; caps.push(cap.t); }  // double points
       if (mover.c === B && cap) { taken++; score -= COST[d.piece]; }
       if (e.rm) cells[e.t] = null;
+      if (e.pr) cells[e.t] = { c: B, t: e.pr };
       if (e.rw !== undefined) cells[e.rw] = { c: W, t: d.piece };
       if (e.sp) cells[e.sp[0]] = { c: B, t: e.sp[1] };
       frames.push(snap([e.f, e.t], e.at));
