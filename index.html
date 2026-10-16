@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Local Pieces</title>
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=12">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -19,33 +19,78 @@
     <!-- MENU -->
     <section id="menu" class="page active">
       <div class="menu-inner">
-        <h1 class="logo">Local Pieces</h1>
+        <header class="hero">
+          <span class="hero-mark" aria-hidden="true">&#9822;&#xFE0E;</span>
+          <h1 class="logo">Local Pieces</h1>
+          <p class="tagline">Chess, your way.</p>
+        </header>
 
         <button id="continue-btn" class="mode continue hidden">
-          <span class="mode-name">Continue playing</span>
-          <span id="continue-desc" class="mode-desc"></span>
+          <span class="mode-ic" aria-hidden="true">&#9654;&#xFE0E;</span>
+          <span class="mode-text">
+            <span class="mode-name">Continue playing</span>
+            <span id="continue-desc" class="mode-desc"></span>
+          </span>
+          <span class="mode-go" aria-hidden="true">&rsaquo;</span>
         </button>
 
+        <h2 class="menu-label">Play</h2>
         <div class="modes">
-          <button class="mode" data-mode="basic">
-            <span class="mode-name">Classic</span>
-            <span class="mode-desc">The classic game of chess.</span>
+          <button class="mode" data-mode="basic" style="--accent:#8fc15b">
+            <span class="mode-ic" aria-hidden="true">&#9818;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">Classic</span>
+              <span class="mode-desc">The classic game of chess.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-          <button class="mode" data-mode="secret">
-            <span class="mode-name">Secret Queen</span>
-            <span class="mode-desc">Every player hides a secret in their army.</span>
+          <button class="mode" data-mode="secret" style="--accent:#b48cf2">
+            <span class="mode-ic" aria-hidden="true">&#9819;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">Secret Queen</span>
+              <span class="mode-desc">Every player hides a secret in their army.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-          <button class="mode" data-mode="tas">
-            <span class="mode-name">TAS</span>
-            <span class="mode-desc">Take on the computer with a few extra tools.</span>
+          <button class="mode" data-mode="tas" style="--accent:#5ab0ff">
+            <span class="mode-ic" aria-hidden="true">&#9820;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">TAS</span>
+              <span class="mode-desc">Take on the computer with a few extra tools.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-          <button class="mode" data-mode="rush">
-            <span class="mode-name">Capture Rush</span>
-            <span class="mode-desc">Beat the clock and capture as much as you can.</span>
+          <button class="mode" data-mode="rush" style="--accent:#ff9a4d">
+            <span class="mode-ic" aria-hidden="true">&#9822;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">Capture Rush</span>
+              <span class="mode-desc">Beat the clock and capture as much as you can.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-          <button class="mode" data-mode="puzzle">
-            <span class="mode-name">Puzzles</span>
-            <span class="mode-desc">Sharpen your tactics with a fresh challenge every time.</span>
+        </div>
+
+        <h2 class="menu-label">Train</h2>
+        <div class="modes">
+          <button class="mode" data-mode="puzzle" style="--accent:#f2c45a">
+            <span class="mode-ic" aria-hidden="true">&#9823;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">Puzzles</span>
+              <span class="mode-desc">Sharpen your tactics with a fresh challenge every time.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+        </div>
+
+        <h2 class="menu-label">Records</h2>
+        <div class="modes">
+          <button class="mode" data-mode="board" style="--accent:#e8c14a">
+            <span class="mode-ic" aria-hidden="true">&#9733;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">Leaderboard</span>
+              <span class="mode-desc">Your best scores and fastest wins.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
         </div>
 
@@ -85,6 +130,7 @@
           </div>
 
           <div id="status" class="status">&nbsp;</div>
+          <div id="rating-line" class="rating-line hidden"></div>
 
           <!-- secret queen pick bar -->
           <div id="pick-bar" class="pick-bar hidden">
@@ -178,28 +224,55 @@
     <section id="puzzle" class="page">
       <header class="game-header">
         <button id="pz-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
-        <span id="pz-title" class="mode-title">Puzzles</span>
+        <span class="pz-head"><span class="pz-badge" aria-hidden="true">&#129513;&#xFE0E;</span><span id="pz-title" class="mode-title">Puzzle</span></span>
         <span class="header-spacer"></span>
       </header>
       <div class="layout">
         <div class="board-col">
-          <div class="pz-info">
-            <span id="pz-goal" class="pz-goal"></span>
-            <span id="pz-meta" class="pz-meta"></span>
-          </div>
           <div class="board-wrap">
             <div id="pz-board" class="board"></div>
             <div id="pz-toast" class="toast" role="status"></div>
           </div>
           <div id="pz-status" class="status">&nbsp;</div>
-          <div class="controls pz-controls">
-            <button id="pz-hint" class="btn">Hint</button>
-            <button id="pz-undo" class="btn hidden">Undo</button>
-            <button id="pz-retry" class="btn">Retry</button>
-            <button id="pz-answer" class="btn">Solution</button>
-            <button id="pz-next" class="btn primary">New puzzle</button>
+
+          <div class="pz-panel">
+            <div class="pz-panel-head"><span class="pz-badge sm" aria-hidden="true">&#129513;&#xFE0E;</span><span id="pz-kind">Puzzles</span></div>
+            <div id="pz-turn" class="pz-card pz-turn">
+              <span class="pz-sq" aria-hidden="true"></span>
+              <span class="pz-turn-text"><b id="pz-turn-t">White to Move</b><span id="pz-goal">&nbsp;</span></span>
+            </div>
+            <div class="pz-card pz-stats">
+              <div><span class="pz-lab">Difficulty</span><b id="pz-diff" class="pz-big">Normal</b></div>
+              <div class="r"><span class="pz-lab">Streak</span><b class="pz-big"><span class="pz-bolt" aria-hidden="true">&#9889;&#xFE0E;</span><span id="pz-streak">0</span></b></div>
+            </div>
+            <div id="pz-count" class="pz-count"></div>
+            <div class="pz-actions">
+              <button id="pz-hint" class="pz-act"><span aria-hidden="true">&#128161;&#xFE0E;</span>Hint</button>
+              <button id="pz-answer" class="pz-act"><span aria-hidden="true">&#128065;&#xFE0E;</span>Solution</button>
+            </div>
+            <div class="pz-actions small">
+              <button id="pz-undo" class="pz-act hidden">Undo</button>
+              <button id="pz-retry" class="pz-act">Retry</button>
+              <button id="pz-next" class="pz-act primary">New puzzle</button>
+            </div>
+            <p class="pz-note">Using a hint, the solution or a wrong move counts as a miss.</p>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- LEADERBOARD -->
+    <section id="board" class="page">
+      <header class="game-header">
+        <button id="lb-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span class="mode-title">Leaderboard</span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="lb-wrap">
+        <div id="lb-tabs" class="lb-tabs"></div>
+        <div id="lb-chips" class="lb-chips"></div>
+        <div id="lb-body"></div>
+        <button id="lb-reset" class="btn wide lb-reset hidden">Reset leaderboard</button>
       </div>
     </section>
 
@@ -209,11 +282,13 @@
     </div>
   </div>
 
-  <script src="chess.js?v=6"></script>
-  <script src="ai.js?v=6"></script>
-  <script src="app.js?v=6"></script>
-  <script src="rush.js?v=6"></script>
-  <script src="puzzlegen.js?v=6"></script>
-  <script src="puzzles.js?v=6"></script>
+  <script src="chess.js?v=12"></script>
+  <script src="ai.js?v=12"></script>
+  <script src="app.js?v=12"></script>
+  <script src="leaderboard.js?v=12"></script>
+  <script src="rush.js?v=12"></script>
+  <script src="puzzlegen.js?v=12"></script>
+  <script src="ratings.js?v=12"></script>
+  <script src="puzzles.js?v=12"></script>
 </body>
 </html>

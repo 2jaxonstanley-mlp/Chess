@@ -29,9 +29,25 @@
   let token = 0;
   let toastTimer = null;
 
-  const counts = {
-    get() { try { return JSON.parse(localStorage.getItem('localPieces.puzzleSolved')) || {}; } catch (e) { return {}; } },
-    add(t) { const c = counts.get(); c[t] = (c[t] || 0) + 1; try { localStorage.setItem('localPieces.puzzleSolved', JSON.stringify(c)); } catch (e) { /* ignore */ } },
+  let missed = false;      // a hint, the solution or a wrong move was used on this puzzle
+  const stats = {
+    get() {
+      let s = null;
+      try { s = JSON.parse(localStorage.getItem('localPieces.puzzleStats')); } catch (e) { /* ignore */ }
+      return Object.assign({ solved: 0, missed: 0, streak: 0, best: 0 }, s || {});
+    },
+    put(s) { try { localStorage.setItem('localPieces.puzzleStats', JSON.stringify(s)); } catch (e) { /* ignore */ } },
+    miss() {
+      if (missed || !P) return;
+      missed = true;
+      const s = stats.get(); s.missed++; s.streak = 0; stats.put(s);
+      updateInfo();
+    },
+    win() {
+      const s = stats.get(); s.solved++;
+      if (!missed) { s.streak++; s.best = Math.max(s.best, s.streak); }
+      stats.put(s);
+    },
   };
 
   /* ------------------------------------------------------------------ board */
@@ -112,13 +128,17 @@
   function movesLeft() { return P.limit - userMoves; }
 
   function updateInfo() {
-    let goal = 'Find the best move';
-    if (P && P.type === 'mate') goal = 'Checkmate in ' + P.n;
-    else if (P && P.type === 'check') goal = 'Check in ' + P.limit + (P.limit === 1 ? ' move' : ' moves') + (userMoves ? ' · ' + movesLeft() + ' left' : '');
-    $('#pz-goal').textContent = state === 'gen' ? 'Setting up…' : goal;
-    const n = counts.get()[cfg.type] || 0;
-    $('#pz-meta').textContent = 'White to move · ' + DIFF[cfg.diff] + (n ? ' · Solved ' + n : '');
-    $('#pz-title').textContent = TITLE[cfg.type];
+    let goal = 'Find the best move for White.';
+    if (P && P.type === 'mate') goal = 'Checkmate in ' + P.n + (P.n === 1 ? ' move.' : ' moves.');
+    else if (P && P.type === 'check') goal = 'Give check in ' + P.limit + (P.limit === 1 ? ' move' : ' moves') + (userMoves ? ' (' + movesLeft() + ' left).' : '.');
+    $('#pz-goal').textContent = state === 'gen' ? 'Setting up the board…' : goal;
+    const s = stats.get();
+    $('#pz-diff').textContent = DIFF[cfg.diff];
+    $('#pz-streak').textContent = s.streak;
+    $('#pz-count').innerHTML = 'Solved ' + s.solved + ' <i>·</i> Missed ' + s.missed + ' <i>·</i> Best ' + s.best;
+    $('#pz-kind').textContent = TITLE[cfg.type];
+    $('#pz-turn').classList.toggle('solved', state === 'solved');
+    $('#pz-turn-t').textContent = state === 'solved' ? (missed || revealed ? 'Puzzle over' : 'Puzzle solved') : 'White to Move';
     const chk = cfg.type === 'check';
     $('#pz-undo').classList.toggle('hidden', !chk);
     $('#pz-undo').disabled = !snaps.length || busy || state === 'solved';
@@ -172,6 +192,7 @@
   }
 
   function newPuzzle() {
+    missed = false;
     const my = ++token;
     P = null; g = PG.blank(); log = []; snaps = []; userMoves = 0; sel = -1; targets = []; last = null; hints = [];
     state = 'gen'; busy = true;
@@ -225,6 +246,7 @@
 
   /** Take back the move that was just made (not part of the solution) after a short pause. */
   function wrong(msg) {
+    stats.miss();
     busy = true;
     const my = token;
     setStatus(msg, 'check');
@@ -301,7 +323,15 @@
     render();
     updateInfo();
     clearSave();
-    if (!revealed) counts.add(P.type);
+    if (!revealed) {
+      stats.win();
+      const st = stats.get();
+      if (!missed && st.streak >= 3 && LP.board) {
+        const nm = LP.board.lastName();
+        const res = LP.board.record({ cat: 'puzzle', key: 'puzzle:' + cfg.type + ':' + cfg.diff, group: TITLE[cfg.type].replace(' puzzles', '') + ' · ' + DIFF[cfg.diff], name: nm || 'Player', vs: 'Puzzles', value: st.streak, unit: 'streak', low: false, unique: true });
+        if (res.isBest) { if (!nm) LP.board.askName(res.entry, null, 'A new best streak! Choose the name for the leaderboard.'); else toast('New best streak: ' + st.streak); }
+      }
+    }
     updateInfo();
     let msg;
     if (P.type === 'best') msg = 'Correct! ' + P.san + '. ' + P.explain;
@@ -313,6 +343,7 @@
   /* ----------------------------------------------------------------- buttons */
   function hint() {
     if (busy || state === 'solved' || state === 'gen' || !P) return;
+    stats.miss();
     let from = -1;
     if (P.type === 'best') from = P.good[0].f;
     else if (P.type === 'mate') {
@@ -331,6 +362,7 @@
 
   function solution() {
     if (busy || state === 'gen' || !P) return;
+    stats.miss();
     load(P);                      // back to the start, then show the answer
     revealed = true;
     let text = '';
@@ -423,6 +455,7 @@
   window.Puzzle = {
     resume(d) {
       cfg = d.cfg;
+      missed = false;
       LP.closeSheet();
       LP.showPage('puzzle');
       load(d.P, d.log);

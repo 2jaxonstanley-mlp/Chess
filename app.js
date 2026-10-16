@@ -12,7 +12,8 @@
   let sans = [];               // every move played (standard notation)
   let fullMoves = [];          // every move played (plain objects, for redo + replay)
   let viewPly = 0;             // how many of those moves the board is showing
-  let opts = { autoFlip: true, hints: true };
+  let opts = { autoFlip: true, hints: true, ratings: false };
+  let ratings = [];            // move strength of every move played (an id from MoveRating.RATINGS, or null), parallel to fullMoves
   let flipTimer = null;
   let toastTimer = null;
   let ai = null;               // { level, color (computer), human } when playing the computer
@@ -143,6 +144,38 @@
     });
   }
 
+  /* ---------------------------------------------------------- move strength */
+  const ratingsOn = () => opts.ratings && mode !== 'secret' && !!window.MoveRating;
+  function ratingIdAt(i) {
+    if (i < 0) return null;
+    if (phase === 'replay') return (replay && replay.data.ratings && replay.data.ratings[i]) || null;
+    return (ratingsOn() && ratings[i]) || null;
+  }
+  const shownPly = () => (phase === 'replay' ? (replay ? replay.idx : 0) : viewPly);
+
+  function updateRatingLine() {
+    const el = $('#rating-line');
+    const id = ratingIdAt(shownPly() - 1);
+    const r = id && window.MoveRating ? window.MoveRating.get(id) : null;
+    if (!r) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    const list = phase === 'replay' ? replay.data.sans : sans;
+    el.innerHTML = `<span class="rl-sym${r.hasImg ? ' img' : ''}" style="background:${r.hasImg ? 'none' : r.color}">${window.MoveRating.iconHtml(r)}</span><span class="rl-text"><b>${esc(fmt(list[shownPly() - 1] || ''))}</b> is ${esc(r.phrase)}</span>`;
+    el.classList.remove('hidden');
+  }
+
+  function rateLastMove(before, m) {
+    const idx = fullMoves.length - 1;
+    const mm = { from: m.from, to: m.to, promo: m.promo || 0 };
+    setTimeout(() => {
+      try { const rr = window.MoveRating.rate(before, mm); ratings[idx] = rr ? rr.id : null; } catch (e) { ratings[idx] = null; }
+      if (phase === 'replay') return;
+      renderBoard();
+      updateRatingLine();
+      renderMoves(sans, viewPly);
+      saveSession();
+    }, 30);
+  }
+
   function renderBoard() {
     const checkSq = G.inCheck(G.turn) ? G.kingSquare(G.turn) : -1;
     const lastH = G.history[G.history.length - 1];
@@ -153,6 +186,8 @@
     const legalSet = new Map(opts.hints ? legalTargets.filter((m) => !m.q || showQueen).map((m) => [m.to, m]) : []);
     const qSq = queenMarkSq();
     boardEl.classList.toggle('picking', picking);
+    const rr = last && window.MoveRating ? window.MoveRating.get(ratingIdAt(shownPly() - 1)) : null;
+    const badgeSq = rr ? last.to : -1;
 
     for (const key in squareEls) {
       const s = +key;
@@ -177,6 +212,15 @@
         if (!hb) { hb = document.createElement('span'); hb.className = 'hbadge'; el.appendChild(hb); el._hb = hb; }
         hb.textContent = nums.join('/');
       } else if (hb) { hb.remove(); el._hb = null; }
+
+      let rb = el._rb;
+      if (s === badgeSq) {
+        if (!rb) { rb = document.createElement('span'); el.appendChild(rb); el._rb = rb; }
+        rb.className = 'rbadge' + (rr.hasImg ? ' img' : '');
+        rb.style.background = rr.hasImg ? '' : rr.color;
+        const ih = window.MoveRating.iconHtml(rr);
+        if (rb._h !== ih) { rb.innerHTML = ih; rb._h = ih; }
+      } else if (rb) { rb.remove(); el._rb = null; }
 
       // piece
       let pe = el._piece;
@@ -310,6 +354,8 @@
       b.className = 'move ' + (i % 2 === 0 ? 'w' : 'b') + (i === cur - 1 ? ' current' : '');
       b.dataset.ply = i;
       b.textContent = Math.floor(i / 2) + 1 + '. ' + fmt(san);
+      const rid = ratingIdAt(i), rinfo = rid && window.MoveRating ? window.MoveRating.get(rid) : null;
+      if (rinfo) { const sp = document.createElement('span'); sp.className = 'mv-r'; sp.style.color = rinfo.color; sp.innerHTML = ' ' + window.MoveRating.iconHtml(rinfo); b.appendChild(sp); }
       pair.appendChild(b);
     });
     const cEl = moveListEl.querySelector('.current');
@@ -404,6 +450,7 @@
     renderBoard();
     renderBars();
     updateControls();
+    updateRatingLine();
   }
 
   /* ------------------------------------------------------------- menu/start */
@@ -456,6 +503,7 @@
     names = { [WHITE]: 'Computer (' + LEVEL_LABEL[wl] + ')', [BLACK]: 'Computer (' + LEVEL_LABEL[bl] + ')' };
     viewNames = names;
     opts.autoFlip = false;
+    opts.ratings = false;
     showPage('game');
     buildBoard();
     renderAll();
@@ -490,6 +538,7 @@
     viewNames = names;
     sans = [];
     fullMoves = [];
+    ratings = [];
     posKeys = [];
     viewPly = 0;
     aiToken++;
@@ -539,7 +588,7 @@
     if (phase !== 'play' || !fullMoves.length) return;
     session.set({
       kind: 'chess', mode, names: { [WHITE]: names[WHITE], [BLACK]: names[BLACK] }, ai, bots,
-      opts: { autoFlip: opts.autoFlip, hints: opts.hints }, secrets: initialSecrets,
+      opts: { autoFlip: opts.autoFlip, hints: opts.hints, ratings: opts.ratings }, ratings: ratings.slice(), secrets: initialSecrets,
       moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
     });
   }
@@ -554,6 +603,8 @@
     bots = d.bots || null;
     opts.autoFlip = d.opts.autoFlip;
     opts.hints = d.opts.hints;
+    opts.ratings = !!d.opts.ratings;
+    ratings = (d.ratings || []).slice();
     initialSecrets = { [WHITE]: d.secrets[WHITE], [BLACK]: d.secrets[BLACK] };
     game.secretQueen = { [WHITE]: initialSecrets[WHITE], [BLACK]: initialSecrets[BLACK] };
     sans = d.sans.slice();
@@ -622,8 +673,7 @@
         opts.autoFlip = false;
         askYN('Show legal move hints?', 'Show where each piece can move.', (hints) => {
           opts.hints = hints;
-          closeSheet();
-          afterNames();
+          askRatings(() => { closeSheet(); afterNames(); });
         });
       };
     });
@@ -642,13 +692,18 @@
     $('#yn-n').onclick = () => done(false);
   }
 
+  /* Classic and TAS only: label every move (Brilliant, Book, Blunder...). Secret Queen has hidden information, so it is skipped. */
+  function askRatings(next) {
+    if (mode === 'secret') { opts.ratings = false; next(); return; }
+    askYN('Show move strength?', 'Label each move, like Brilliant, Book or Blunder.', (v) => { opts.ratings = v; next(); });
+  }
+
   function askSettings() {
     askYN('Flip the board to the player whose turn it is?', 'Great for sharing one screen.', (flip) => {
       opts.autoFlip = flip;
       askYN('Show legal move hints?', 'Show where each piece can move.', (hints) => {
         opts.hints = hints;
-        closeSheet();
-        afterNames();
+        askRatings(() => { closeSheet(); afterNames(); });
       });
     });
   }
@@ -862,6 +917,7 @@
       // TAS: playing from an earlier point throws away the old future (redo is off until you undo again)
       sans.length = viewPly;
       fullMoves.length = viewPly;
+      ratings.length = viewPly;
       posKeys.length = viewPly + 1;
       over = null;
       phase = 'play';
@@ -869,6 +925,7 @@
     }
     hintMoves = [];
     showQueen = false;   // the queen is hidden again once the turn is done
+    const before = ratingsOn() ? window.MoveRating.clone(game) : null;   // the position before the move, for rating it
     const san = game.moveToSan(m);
     const mover = game.turn;
     game.makeMove(m);
@@ -878,6 +935,7 @@
     sans.push(full);
     fullMoves.push({ from: m.from, to: m.to, flags: m.flags, promo: m.promo || 0, q: m.q || 0 });
     viewPly = sans.length;
+    ratings[fullMoves.length - 1] = null;
     posKeys.push(positionKey(game));
     selected = -1;
     legalTargets = [];
@@ -887,6 +945,7 @@
     const h = game.history[game.history.length - 1];
     if (h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, sans.length);
+    if (before) rateLastMove(before, m);
 
     let end = null;
     if (!canMove) end = check ? 'mate' : 'stalemate';
@@ -929,9 +988,27 @@
     over = type === 'mate'
       ? { title: nameOf(mover) + ' wins', sub: 'Checkmate', result: mover === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
+    const lb = type === 'mate' ? recordWin(mover) : null;
+    if (lb && lb.rank) over.note = lb.isBest ? 'New best: checkmate in ' + lb.entry.value + ' moves!' : '#' + lb.rank + ' on the leaderboard';
     updateControls();
     overStatus();
-    setTimeout(() => { if (phase === 'over' && sheetBg.classList.contains('hidden')) showOverSheet(); }, 800);
+    setTimeout(() => {
+      if (phase !== 'over' || !sheetBg.classList.contains('hidden')) return;
+      if (lb && lb.isBest && window.LP.board) window.LP.board.askName(lb.entry, () => { if (phase === 'over') showOverSheet(); }, 'Your fastest win so far. Choose the name for the leaderboard.');
+      else showOverSheet();
+    }, 800);
+  }
+
+  /** Classic and Secret Queen wins, against the computer or a friend, ranked by how few moves they took. */
+  function recordWin(mover) {
+    if (!window.LP.board || isTas() || bots || playBoth || (ai && mover !== ai.human)) return null;
+    const lvl = ai ? ai.level : 'pvp';
+    return window.LP.board.record({
+      cat: 'chess', key: 'chess:' + mode + ':' + lvl,
+      group: MODE_LABEL[mode] + ' · ' + (ai ? LEVEL_LABEL[ai.level] : '2 players'),
+      name: names[mover], vs: ai ? 'Computer (' + LEVEL_LABEL[ai.level] + ')' : names[mover === WHITE ? BLACK : WHITE],
+      value: Math.ceil(fullMoves.length / 2), unit: 'moves', low: true,
+    });
   }
 
   function overStatus() {
@@ -946,7 +1023,7 @@
         <button class="btn" id="ov-save" ${savedNote === true ? 'disabled' : ''}>${savedNote === true ? (isTas() ? 'TAS saved' : 'Replay saved') : (isTas() ? 'Save TAS' : 'Save replay')}</button>
         <div class="row"><button class="btn" id="ov-new">New game</button><button class="btn" id="ov-close">Close</button></div>
       </div>
-      <p class="note">${savedNote === true ? 'Find it on the main menu.' : ''}</p>`);
+      <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${savedNote === true ? 'Find it on the main menu.' : ''}</p>`);
     $('#ov-watch').onclick = () => { closeSheet(); startReplay(buildReplayData(), 'over'); };
     $('#ov-save').onclick = showSaveSheet;
     $('#ov-new').onclick = () => { closeSheet(); startGame(mode, true); };
@@ -988,6 +1065,7 @@
       names: { w: names[WHITE], b: names[BLACK] },
       secrets: { w: initialSecrets[WHITE], b: initialSecrets[BLACK] },
       moves: fullMoves.map((m) => Object.assign({}, m)),
+      ratings: ratingsOn() ? ratings.slice() : null,
       sans: sans.slice(),
       result: over ? over.title + ' · ' + over.sub : '',
     };

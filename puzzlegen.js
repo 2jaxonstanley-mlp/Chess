@@ -209,7 +209,21 @@
     }
     return out.sort((a, b) => b.o - a.o);
   }
+  let horizon = false;                                   // on for move ratings (so mates are seen), off for puzzle generation (speed)
   function qs(g, alpha, beta, ply) {
+    if (horizon && ply === 0 && g.inCheck(g.turn)) {   // in check at the horizon: look at every reply so a mate is not missed
+      const side = g.turn;
+      let best = -INF, legal = 0;
+      for (const m of pseudo(g, false)) {
+        g.makeMove(m);
+        if (g.inCheck(side)) { g.unmakeMove(); continue; }
+        legal++;
+        const sc = -qs(g, -beta, -alpha, 1);
+        g.unmakeMove();
+        if (sc > best) { best = sc; if (sc > alpha) alpha = sc; if (alpha >= beta) break; }
+      }
+      return legal ? best : -MATE + 8;
+    }
     const stand = evalSide(g);
     if (stand >= beta) return stand;
     if (stand > alpha) alpha = stand;
@@ -341,5 +355,5 @@
     setTimeout(step, 0);
   }
 
-  root.PuzzleGen = { make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, bestDefence, checkPath, sanPath, sanOf, tryMate, tryCheck, tryBest, uniq };
+  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, bestDefence, checkPath, sanPath, sanOf, tryMate, tryCheck, tryBest, uniq };
 })();

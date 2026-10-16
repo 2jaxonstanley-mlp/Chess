@@ -551,23 +551,44 @@
     clearInterval(timerId); clearTimeout(aiTimer);
     clearRush();
     updateHud(); render(); setStatus('Time is up');
-    const best = bestStore.get();
-    const prev = best[g.piece];
-    const isBest = prev === undefined || g.score > prev;
-    if (isBest) { best[g.piece] = g.score; bestStore.set(best); }
+    g.lb = recordScore();
     const my = token;
     setTimeout(() => {
       if (my !== token) return;
-      showOver(isBest, prev);
+      if (g.lb && g.lb.isBest) LP.board.askName(g.lb.entry, () => showOver(), 'Your score is the best so far. Choose the name for the leaderboard.');
+      else showOver();
     }, 500);
   }
 
-  function showOver(isBest, prev) {
+  /** Put the round on the leaderboard (only when a person played White). */
+  function recordScore() {
+    if (!LP.board || cfg.players === 0 || (cfg.players === 1 && cfg.human !== W)) return null;
+    const solo = cfg.players === 1;
+    const opp = solo ? 'Computer (' + LP.LEVEL_LABEL[cfg.level] + ')' : cfg.names.b;
+    const r = LP.board.record({
+      cat: 'rush', key: 'rush:' + g.piece + ':' + (solo ? cfg.level : 'pvp'),
+      group: PNAME[g.piece] + ' · ' + (solo ? LP.LEVEL_LABEL[cfg.level] : '2 players'),
+      name: cfg.names.w, vs: opp, value: g.score, unit: 'pts', low: false,
+    });
+    return r;
+  }
+
+  function lbLine() {
+    const l = g.lb;
+    if (!l) return '';
+    const pn = PNAME[g.piece].toLowerCase();
+    if (l.isBest) return 'New best with the ' + pn + '!';
+    const parts = [];
+    if (l.rank) parts.push('#' + l.rank + ' on the leaderboard');
+    if (l.prev !== undefined) parts.push('best ' + fmtPts(l.prev));
+    return parts.join(' · ');
+  }
+
+  function showOver() {
     const saved = g.saved;
     const lost = g.taken * COST[g.piece], got = g.score + lost;
-    const bestNow = isBest ? g.score : prev;
     LP.openSheet(`<h2>Time is up<span class="sub">${esc(nameOf(W))} scored ${fmtPts(g.score)} point${Math.abs(g.score) === 1 ? '' : 's'}</span></h2>
-      <p class="rush-note">${g.caps.length} piece${g.caps.length === 1 ? '' : 's'} captured for ${got} points${g.taken ? ', minus ' + lost + ' for losing the ' + PNAME[g.piece].toLowerCase() + ' ' + g.taken + (g.taken === 1 ? ' time' : ' times') : ''}.<br>${isBest ? 'New best with the ' + PNAME[g.piece].toLowerCase() + '!' : 'Best with the ' + PNAME[g.piece].toLowerCase() + ': ' + fmtPts(bestNow)}</p>
+      <p class="rush-note">${g.caps.length} piece${g.caps.length === 1 ? '' : 's'} captured for ${got} points${g.taken ? ', minus ' + lost + ' for losing the ' + PNAME[g.piece].toLowerCase() + ' ' + g.taken + (g.taken === 1 ? ' time' : ' times') : ''}.${lbLine() ? '<br>' + esc(lbLine()) : ''}</p>
       <div class="row"><button class="btn" id="rs-watch">Watch replay</button><button class="btn" id="rs-save"${saved ? ' disabled' : ''}>${saved ? 'Saved' : 'Save replay'}</button></div>
       <div class="row">${cfg.players === 0 ? '' : '<button class="btn" id="rs-swap">Swap sides</button>'}<button class="btn primary" id="rs-again">Play again</button></div>
       <button class="btn wide" id="rs-menu">Menu</button>`);
@@ -581,7 +602,7 @@
       LP.store.set(list.slice(0, 30));
       g.saved = true;
       toast('Saved. Find it on the main menu.');
-      showOver(isBest, prev);
+      showOver();
     };
   }
 
@@ -737,7 +758,7 @@
         $('#rush-' + bar).querySelector('.dot').className = 'dot ' + side;
       }
       render(); updateHud(); setStatus('Time is up');
-      showOver(false, bestStore.get()[g.piece]);
+      showOver();
     } else toMenu();
   }
 
