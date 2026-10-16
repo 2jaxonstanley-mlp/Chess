@@ -363,27 +363,37 @@
   }
 
   /* ------------------------------------------------------------------- setup */
+  const KINDS = [
+    { id: 'mate', icon: '\u265A', name: 'Checkmate', sub: 'Find the winning blow.' },
+    { id: 'check', icon: '\u265C', name: 'Check', sub: 'Work your way to a check.' },
+    { id: 'best', icon: '\u265E', name: 'Best move', sub: 'Find the strongest move.' },
+  ];
+  const LEVELS = [
+    { id: 'easy', name: 'Easy', sub: 'Clear and straightforward.', n: 1 },
+    { id: 'normal', name: 'Normal', sub: 'A little more to think about.', n: 2 },
+    { id: 'hard', name: 'Hard', sub: 'Tricky and well defended.', n: 3 },
+  ];
+  const meter = (n) => `<span class="pz-lv lv${n}" aria-hidden="true"><i class="${n >= 1 ? 'on' : ''}"></i><i class="${n >= 2 ? 'on' : ''}"></i><i class="${n >= 3 ? 'on' : ''}"></i></span>`;
+
   function askDiff(type) {
-    LP.openSheet(`<h2>Choose difficulty</h2>
-      <div class="stack">
-        <button class="btn big" data-d="easy">Easy<span class="rp-c" style="display:block">Pretty obvious</span></button>
-        <button class="btn big" data-d="normal">Normal<span class="rp-c" style="display:block">Noticeable, and not always the queen</span></button>
-        <button class="btn big" data-d="hard">Hard<span class="rp-c" style="display:block">Defenders, decoys and deeper ideas</span></button>
-        <button class="btn" id="pz-dx">Cancel</button>
-      </div>`, true);
+    const kind = KINDS.find((k) => k.id === type);
+    LP.openSheet(`<h2>${esc(kind.name)}<span class="sub">How hard should it be?</span></h2>
+      <div class="pz-options">
+        ${LEVELS.map((l) => `<button class="pz-opt" data-d="${l.id}">${meter(l.n)}<span class="pz-text"><span class="pz-name">${l.name}</span><span class="pz-sub">${l.sub}</span></span></button>`).join('')}
+      </div>
+      <div class="row"><button class="btn" id="pz-dback">Back</button><button class="btn" id="pz-dx">Cancel</button></div>`, true);
     document.querySelectorAll('[data-d]').forEach((b) => { b.onclick = () => { cfg = { type, diff: b.dataset.d }; LP.closeSheet(); newPuzzle(); }; });
+    $('#pz-dback').onclick = startPuzzles;
     $('#pz-dx').onclick = LP.closeSheet;
   }
 
   function startPuzzles() {
-    LP.openSheet(`<h2>Puzzles</h2>
-      <div class="stack">
-        <button class="btn big" id="pz-t-mate">Checkmate<span class="rp-c" style="display:block">Mate in 1, or a forced mate in 2</span></button>
-        <button class="btn big" id="pz-t-check">Check<span class="rp-c" style="display:block">Give check in up to 5 moves</span></button>
-        <button class="btn" id="pz-x">Cancel</button>
-      </div>`, true);
-    $('#pz-t-mate').onclick = () => askDiff('mate');
-    $('#pz-t-check').onclick = () => askDiff('check');
+    LP.openSheet(`<h2>Puzzles<span class="sub">Choose a challenge.</span></h2>
+      <div class="pz-options">
+        ${KINDS.map((k) => `<button class="pz-opt" data-k="${k.id}"><span class="pz-ic">${k.icon}\uFE0E</span><span class="pz-text"><span class="pz-name">${k.name}</span><span class="pz-sub">${k.sub}</span></span></button>`).join('')}
+      </div>
+      <button class="btn wide" id="pz-x">Cancel</button>`, true);
+    document.querySelectorAll('[data-k]').forEach((b) => { b.onclick = () => askDiff(b.dataset.k); });
     $('#pz-x').onclick = LP.closeSheet;
   }
 
@@ -409,7 +419,6 @@
     } else newPuzzle();
   });
   document.querySelector('.mode[data-mode="puzzle"]').addEventListener('click', startPuzzles);
-  document.querySelector('.mode[data-mode="best"]').addEventListener('click', () => askDiff('best'));
 
   window.Puzzle = {
     resume(d) {

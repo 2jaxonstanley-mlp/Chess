@@ -764,7 +764,7 @@
   }
 
   function askPiece(who, cb) {
-    LP.openSheet(`<h2>${esc(who)}, choose your piece<span class="sub">You are White. You get two of them. Score points by capturing in 2:30. If one is taken you lose points.</span></h2>
+    LP.openSheet(`<h2>${esc(who)}, choose your piece<span class="sub">Pick the piece you will play with.</span></h2>
       <div class="rush-pieces">
         ${['q', 'r', 'b', 'n'].map((t) => `<button class="btn big" data-pc="${t}"><span class="rp-g">${GLYPH[t]}</span>${PNAME[t]}<span class="rp-c">loses ${COST[t]} if taken</span></button>`).join('')}
       </div>`);
@@ -782,7 +782,7 @@
   }
 
   function finishSetup() {
-    askYN('Show legal move hints?', 'Dots on the squares a piece can move to.', (h) => { cfg.hints = h; newRound(); });
+    askYN('Show legal move hints?', 'Show where each piece can move.', (h) => { cfg.hints = h; newRound(); });
   }
 
   function start() {
@@ -813,7 +813,7 @@
       askLevel((lv) => {
         cfg = { players: 1, level: lv, names: {}, hints: true };
         askName('What is your name?', 'Player', (nm) => {
-          LP.openSheet(`<h2>Play as<span class="sub">White captures, Black spawns the pieces.</span></h2>
+          LP.openSheet(`<h2>Play as<span class="sub">Choose your side.</span></h2>
             <div class="stack">
               <button class="btn big" data-side="w">White</button>
               <button class="btn big" data-side="b">Black</button>

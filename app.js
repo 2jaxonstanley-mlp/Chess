@@ -620,7 +620,7 @@
         names = { [ai.human]: name, [ai.color]: 'Computer (' + LEVEL_LABEL[ai.level] + ')' };
         viewNames = names;
         opts.autoFlip = false;
-        askYN('Show legal move hints?', 'Dots on the squares a piece can move to.', (hints) => {
+        askYN('Show legal move hints?', 'Show where each piece can move.', (hints) => {
           opts.hints = hints;
           closeSheet();
           afterNames();
@@ -643,9 +643,9 @@
   }
 
   function askSettings() {
-    askYN('Flip the board to the player whose turn it is?', 'Handy for passing one phone back and forth.', (flip) => {
+    askYN('Flip the board to the player whose turn it is?', 'Great for sharing one screen.', (flip) => {
       opts.autoFlip = flip;
-      askYN('Show legal move hints?', 'Dots on the squares a piece can move to.', (hints) => {
+      askYN('Show legal move hints?', 'Show where each piece can move.', (hints) => {
         opts.hints = hints;
         closeSheet();
         afterNames();
