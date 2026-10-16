@@ -64,6 +64,78 @@
     'b2b3 e7e5 c1b2 b8c6 e2e3 d7d5 f1b5 f8d6',
   ];
 
+
+  /* Opening names. A move is named after the longest listed line it continues. */
+  const OPENINGS = [
+    ['e2e4', "King's Pawn Opening"],
+    ['e2e4 e7e5', "King's Pawn Game"],
+    ['e2e4 e7e5 g1f3', "King's Knight Opening"],
+    ['e2e4 e7e5 g1f3 b8c6 f1b5', 'Ruy Lopez'],
+    ['e2e4 e7e5 g1f3 b8c6 f1b5 a7a6', 'Ruy Lopez: Morphy Defense'],
+    ['e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 b5a4 g8f6 e1g1 f8e7 f1e1', 'Ruy Lopez: Closed'],
+    ['e2e4 e7e5 g1f3 b8c6 f1b5 g8f6', 'Ruy Lopez: Berlin Defense'],
+    ['e2e4 e7e5 g1f3 b8c6 f1c4', 'Italian Game'],
+    ['e2e4 e7e5 g1f3 b8c6 f1c4 f8c5', 'Italian Game: Giuoco Piano'],
+    ['e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3 g8f6 d2d3', 'Italian Game: Giuoco Pianissimo'],
+    ['e2e4 e7e5 g1f3 b8c6 f1c4 g8f6', 'Italian Game: Two Knights Defense'],
+    ['e2e4 e7e5 g1f3 b8c6 d2d4', 'Scotch Game'],
+    ['e2e4 e7e5 g1f3 b8c6 d2d4 e5d4 f3d4 g8f6', 'Scotch Game: Classical'],
+    ['e2e4 e7e5 g1f3 b8c6 d2d4 e5d4 f1c4', 'Scotch Gambit'],
+    ['e2e4 e7e5 g1f3 b8c6 b1c3 g8f6', 'Four Knights Game'],
+    ['e2e4 e7e5 g1f3 g8f6', "Petrov's Defense"],
+    ['e2e4 e7e5 g1f3 d7d6', 'Philidor Defense'],
+    ['e2e4 e7e5 b1c3', 'Vienna Game'],
+    ['e2e4 e7e5 f2f4', "King's Gambit"],
+    ['e2e4 e7e5 f2f4 e5f4', "King's Gambit Accepted"],
+    ['e2e4 e7e5 f2f4 e5f4 g1f3 g7g5 h2h4 g5g4 f3e5', "King's Gambit: Kieseritzky"],
+    ['e2e4 c7c5', 'Sicilian Defense'],
+    ['e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6', 'Sicilian Defense: Najdorf'],
+    ['e2e4 c7c5 g1f3 b8c6 d2d4 c5d4 f3d4 g8f6 b1c3 d7d6', 'Sicilian Defense: Classical'],
+    ['e2e4 c7c5 g1f3 b8c6 d2d4 c5d4 f3d4 g8f6 b1c3 d7d6 c1g5', 'Sicilian Defense: Richter-Rauzer'],
+    ['e2e4 c7c5 g1f3 e7e6 d2d4 c5d4 f3d4 a7a6', 'Sicilian Defense: Kan'],
+    ['e2e4 c7c5 b1c3', 'Sicilian Defense: Closed'],
+    ['e2e4 c7c5 c2c3', 'Sicilian Defense: Alapin'],
+    ['e2e4 e7e6', 'French Defense'],
+    ['e2e4 e7e6 d2d4 d7d5 b1c3 g8f6', 'French Defense: Classical'],
+    ['e2e4 e7e6 d2d4 d7d5 b1c3 f8b4', 'French Defense: Winawer'],
+    ['e2e4 e7e6 d2d4 d7d5 e4e5', 'French Defense: Advance'],
+    ['e2e4 c7c6', 'Caro-Kann Defense'],
+    ['e2e4 c7c6 d2d4 d7d5 b1c3 d5e4 c3e4', 'Caro-Kann Defense: Classical'],
+    ['e2e4 c7c6 d2d4 d7d5 e4e5', 'Caro-Kann Defense: Advance'],
+    ['e2e4 d7d5', 'Scandinavian Defense'],
+    ['e2e4 d7d6', 'Pirc Defense'],
+    ['e2e4 g7g6', 'Modern Defense'],
+    ['e2e4 g8f6', "Alekhine's Defense"],
+    ['d2d4', "Queen's Pawn Opening"],
+    ['d2d4 d7d5', "Queen's Pawn Game"],
+    ['d2d4 d7d5 c2c4', "Queen's Gambit"],
+    ['d2d4 d7d5 c2c4 e7e6', "Queen's Gambit Declined"],
+    ['d2d4 d7d5 c2c4 c7c6', 'Slav Defense'],
+    ['d2d4 d7d5 c2c4 d5c4', "Queen's Gambit Accepted"],
+    ['d2d4 d7d5 g1f3 g8f6 c1f4', 'London System'],
+    ['d2d4 g8f6', 'Indian Defense'],
+    ['d2d4 g8f6 c2c4 e7e6 b1c3 f8b4', 'Nimzo-Indian Defense'],
+    ['d2d4 g8f6 c2c4 e7e6 g1f3 b7b6', "Queen's Indian Defense"],
+    ['d2d4 g8f6 c2c4 g7g6', "King's Indian Defense"],
+    ['d2d4 g8f6 c2c4 g7g6 b1c3 d7d5', 'Gr\u00fcnfeld Defense'],
+    ['d2d4 g8f6 g1f3 g7g6 c1f4', 'London System'],
+    ['d2d4 f7f5', 'Dutch Defense'],
+    ['c2c4', 'English Opening'],
+    ['c2c4 e7e5', 'English Opening: Reversed Sicilian'],
+    ['c2c4 c7c5', 'English Opening: Symmetrical'],
+    ['g1f3', 'R\u00e9ti Opening'],
+    ['g1f3 d7d5 g2g3', "R\u00e9ti Opening: King's Indian Attack"],
+    ['b2b3', 'Nimzo-Larsen Attack'],
+  ];
+  const OPEN = new Map(OPENINGS);
+  const SQN = (s) => 'abcdefgh'[s & 7] + ((s >> 4) + 1);
+  /** The opening name for the first n moves of a game (moves: [{from,to}]), or null. */
+  function openingName(moves, n) {
+    const u = moves.slice(0, n).map((m) => SQN(m.from) + SQN(m.to));
+    for (let k = u.length; k >= 1; k--) { const nm = OPEN.get(u.slice(0, k).join(' ')); if (nm) return nm; }
+    return null;
+  }
+
   const boardKey = (g) => { let k = ''; for (let s = 0; s < 128; s++) { if (s & 0x88) { s += 7; continue; } k += String.fromCharCode(48 + g.board[s]); } return k + g.turn; };
   let book = null;
   function buildBook() {
@@ -127,7 +199,9 @@
     if (loss <= 10) {
       if (afterQs <= before - 250 && played >= before - 100 && played > -300) return RATINGS.brilliant;
       if (!captured && legal.length > 2 && !PG.rivalWithin(g, mv, top.score, D, 150)) return RATINGS.great;
-      return RATINGS.best;
+      // "Best" is for a move that clearly stands out; when several moves are about as good, none gets a label
+      if (!PG.rivalWithin(g, mv, top.score, D, 30)) return RATINGS.best;
+      return null;
     }
     if (loss < 100) return null;                       // fine moves that are not the best get no label
     if (loss < 200) return RATINGS.inaccuracy;
@@ -145,5 +219,5 @@
   }
   const iconHtml = (x) => (x.hasImg ? `<img class="ri" src="${x.img}" alt="${x.label}">` : x.sym.replace(/&/g, '&amp;').replace(/</g, '&lt;'));
 
-  window.MoveRating = { rate, clone, iconHtml, RATINGS, get: (id) => RATINGS[id] || null };
+  window.MoveRating = { rate, clone, iconHtml, openingName, RATINGS, get: (id) => RATINGS[id] || null };
 })();

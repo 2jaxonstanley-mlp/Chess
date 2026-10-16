@@ -159,7 +159,8 @@
     const r = id && window.MoveRating ? window.MoveRating.get(id) : null;
     if (!r) { el.classList.add('hidden'); el.innerHTML = ''; return; }
     const list = phase === 'replay' ? replay.data.sans : sans;
-    el.innerHTML = `<span class="rl-sym${r.hasImg ? ' img' : ''}" style="background:${r.hasImg ? 'none' : r.color}">${window.MoveRating.iconHtml(r)}</span><span class="rl-text"><b>${esc(fmt(list[shownPly() - 1] || ''))}</b> is ${esc(r.phrase)}</span>`;
+    const opening = r.id === 'book' ? window.MoveRating.openingName(phase === 'replay' ? replay.data.moves : fullMoves, shownPly()) : null;
+    el.innerHTML = `<span class="rl-sym${r.hasImg ? ' img' : ''}" style="background:${r.hasImg ? 'none' : r.color}">${window.MoveRating.iconHtml(r)}</span><span class="rl-text"><span><b>${esc(fmt(list[shownPly() - 1] || ''))}</b> is ${esc(r.phrase)}</span>${opening ? `<span class="rl-open">${esc(opening)}</span>` : ''}</span>`;
     el.classList.remove('hidden');
   }
 

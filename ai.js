@@ -690,8 +690,8 @@
   const LEVELS = {
     dumb:    { worst: true },
     easy:    { maxDepth: 1, time: 300,  q: 0, noise: 120, blunder: 0.18 },
-    medium:  { maxDepth: 2, time: 500,  q: 2, noise: 14,  blunder: 0 },
-    hard:    { maxDepth: 4, time: 900,  q: 4, noise: 0,   blunder: 0, book: true },
+    medium:  { maxDepth: 2, time: 500,  q: 1, noise: 90,  blunder: 0.10 },        // about an average club beginner, roughly 1000
+    hard:    { maxDepth: 3, time: 700,  q: 2, noise: 40,  blunder: 0.03, book: true },  // a solid improving player, roughly 1500
     insane:  { maxDepth: 30, time: 4200, q: 8, noise: 0,  blunder: 0 },
     // Godly: searches 5 full moves (10 plies), keeps its 3 best moves and picks one at random 3/6, 2/6, 1/6
     godly:   { maxDepth: 14, time: 6000, q: 8, noise: 0,  blunder: 0, multi: 5, pick: 3, weights: [3, 2, 1], castle: 120, guard: true, window: 70, mate: true },
