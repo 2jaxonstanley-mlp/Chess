@@ -174,9 +174,9 @@ class Chess {
     const p = this.board[s];
     if (!p) return [];
     if (this.isSecretDisguised(s)) {
-      // A disguised secret queen moves as a pawn OR as a queen.
+      // A disguised secret piece moves as what it looks like OR as a queen.
       // Queen-only moves are flagged q:1 and reveal the piece.
-      const moves = this._gen(s, PAWN);
+      const moves = this._gen(s, this.typeOf(p));
       const taken = new Set(moves.map(m => m.to));
       for (const m of this._gen(s, QUEEN)) {
         if (!taken.has(m.to)) { m.q = 1; moves.push(m); }
@@ -343,6 +343,7 @@ class Chess {
     if (this.mode === 'secret' && this.secretQueen[col] === m.from && !this.revealed[col]) {
       if (m.q) {
         hist.wasSecretMove = true;
+        hist.origPiece = p;
         this.revealed[col] = true;
         // Promote the piece to queen on the board
         this.board[m.from] = col | QUEEN;
@@ -384,11 +385,13 @@ class Chess {
       const rTo = col === WHITE ? sq(5,0) : sq(5,7);
       this.board[rTo] = this.board[rFrom];
       this.board[rFrom] = EMPTY;
+      if (this.secretQueen[col] === rFrom) this.secretQueen[col] = rTo;   // a secret rook goes with the castle
     } else if (m.flags === 8) {
       const rFrom = col === WHITE ? sq(0,0) : sq(0,7);
       const rTo = col === WHITE ? sq(3,0) : sq(3,7);
       this.board[rTo] = this.board[rFrom];
       this.board[rFrom] = EMPTY;
+      if (this.secretQueen[col] === rFrom) this.secretQueen[col] = rTo;
     }
 
     // Update castling rights
@@ -445,7 +448,7 @@ class Chess {
     // Restore piece (possibly undo reveal)
     let restored = this.board[m.to];
     if (hist.wasSecretMove) {
-      restored = mover | PAWN; // put back the disguised pawn
+      restored = hist.origPiece; // put back the disguised piece
     }
     if (m.promo) {
       restored = mover | PAWN;

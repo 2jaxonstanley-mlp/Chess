@@ -34,6 +34,7 @@
   let pickSel = -1;
   let flipped = false;
   let pendingPromo = false;
+  let showQueen = false;       // Secret Queen: the player to move asked to see which piece is their queen (until the move is made)
   let over = null;             // { title, sub, result }
   let replay = null;           // { data, idx, playing, speed, timer, from }
 
@@ -68,6 +69,17 @@
     return {
       get() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return mem; } },
       set(v) { mem = v; try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) { /* private mode etc. */ } },
+    };
+  })();
+
+  /* the game in progress, kept so the menu can offer "Continue playing" (one slot, whichever mode was played last) */
+  const session = (() => {
+    const KEY = 'localPieces.session';
+    let mem = null;
+    return {
+      get() { try { return JSON.parse(localStorage.getItem(KEY)) || mem; } catch (e) { return mem; } },
+      set(v) { mem = v; try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) { /* private mode etc. */ } },
+      clear() { mem = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } },
     };
   })();
 
@@ -137,7 +149,9 @@
     const last = lastH ? lastH.move : null;
     const picking = phase === 'pick-w' || phase === 'pick-b';
     const pickColor = phase === 'pick-w' ? WHITE : BLACK;
-    const legalSet = new Map(opts.hints ? legalTargets.map((m) => [m.to, m]) : []);
+    // a secret piece's queen-only moves are not hinted unless the player asked to see their queen
+    const legalSet = new Map(opts.hints ? legalTargets.filter((m) => !m.q || showQueen).map((m) => [m.to, m]) : []);
+    const qSq = queenMarkSq();
     boardEl.classList.toggle('picking', picking);
 
     for (const key in squareEls) {
@@ -151,8 +165,8 @@
       const lm = legalSet.get(s);
       el.classList.toggle('legal', !!lm);
       el.classList.toggle('capture', !!lm && (!!p || lm.flags === 2));
-      el.classList.toggle('pickable', picking && p === (pickColor | PAWN));
-      el.classList.toggle('secret', phase === 'replay' && G.isSecretDisguised(s));
+      el.classList.toggle('pickable', picking && !!p && (p & 24) === pickColor && (p & 7) !== KING && (p & 7) !== QUEEN);
+      el.classList.toggle('secret', (phase === 'replay' && G.isSecretDisguised(s)) || s === qSq);
       const hf = hintMoves.some((m) => m.from === s), ht = hintMoves.some((m) => m.to === s);
       el.classList.toggle('hint-from', hf);
       el.classList.toggle('hint-to', ht);
@@ -179,6 +193,29 @@
         el._code = p;
       }
     }
+  }
+
+  /** The square of the mover's secret piece while they are looking at it, otherwise -1. */
+  function queenMarkSq() {
+    if (!showQueen || phase !== 'play' || G !== game || game.mode !== 'secret') return -1;
+    const s = game.secretQueen[game.turn];
+    return s >= 0 && game.isSecretDisguised(s) ? s : -1;
+  }
+
+  /** The Show queen button: only for a human about to move in Secret Queen. */
+  function canShowQueen() {
+    return mode === 'secret' && phase === 'play' && !aiBusy && !pendingPromo && humanTurn() && !bots
+      && viewPly === sans.length && game.secretQueen[game.turn] >= 0 && game.isSecretDisguised(game.secretQueen[game.turn]);
+  }
+
+  function updateQueenBtn() {
+    const b = $('#queen-btn');
+    b.classList.toggle('hidden', mode !== 'secret');
+    if (!canShowQueen()) showQueen = false;
+    b.disabled = !canShowQueen();
+    b.classList.toggle('on', showQueen);
+    b.setAttribute('aria-pressed', showQueen ? 'true' : 'false');
+    b.textContent = showQueen ? 'Hide queen' : 'Show queen';
   }
 
   /* slide the piece that now sits on dst as if it came from src */
@@ -357,6 +394,7 @@
     $('#both-btn').setAttribute('aria-pressed', playBoth ? 'true' : 'false');
     $('#both-btn').disabled = !(phase === 'play' || phase === 'over');
     updateHintGlow();
+    updateQueenBtn();
     $('#save-btn').disabled = !sans.length;
     $('#flip-btn').disabled = opts.autoFlip;
     document.querySelector('.layout').classList.toggle('replaying', phase === 'replay');
@@ -369,7 +407,7 @@
   }
 
   /* ------------------------------------------------------------- menu/start */
-  document.querySelectorAll('.mode:not([data-mode="rush"])').forEach((b) => {
+  document.querySelectorAll('.mode[data-mode="basic"], .mode[data-mode="secret"], .mode[data-mode="tas"]').forEach((b) => {
     b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
 
@@ -466,6 +504,7 @@
     selected = -1;
     legalTargets = [];
     pickSel = -1;
+    showQueen = false;
     flipped = false;
     pendingPromo = false;
     over = null;
@@ -494,6 +533,46 @@
     if (keepNames) afterNames();
     else if (ai) askSoloName();
     else askName(WHITE);
+  }
+
+  function saveSession() {
+    if (phase !== 'play' || !fullMoves.length) return;
+    session.set({
+      kind: 'chess', mode, names: { [WHITE]: names[WHITE], [BLACK]: names[BLACK] }, ai, bots,
+      opts: { autoFlip: opts.autoFlip, hints: opts.hints }, secrets: initialSecrets,
+      moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
+    });
+  }
+  function clearSession() { const x = session.get(); if (x && x.kind === 'chess') session.clear(); }
+
+  function resumeChess(d) {
+    closeSheet();
+    freshGame(d.mode);
+    names = { [WHITE]: d.names[WHITE], [BLACK]: d.names[BLACK] };
+    viewNames = names;
+    ai = d.ai || null;
+    bots = d.bots || null;
+    opts.autoFlip = d.opts.autoFlip;
+    opts.hints = d.opts.hints;
+    initialSecrets = { [WHITE]: d.secrets[WHITE], [BLACK]: d.secrets[BLACK] };
+    game.secretQueen = { [WHITE]: initialSecrets[WHITE], [BLACK]: initialSecrets[BLACK] };
+    sans = d.sans.slice();
+    fullMoves = d.moves.map((m) => Object.assign({}, m));
+    posKeys = [positionKey(game)];
+    for (const m of fullMoves) { game.makeMove(m); posKeys.push(positionKey(game)); }
+    viewPly = fullMoves.length;
+    while (viewPly > d.viewPly) { game.unmakeMove(); viewPly--; }
+    playBoth = !!d.playBoth;
+    phase = 'play';
+    showPage('game');
+    flipped = false;
+    buildBoard();
+    setFlipped(ai ? ai.human === BLACK : opts.autoFlip && game.turn === BLACK, false);
+    renderAll();
+    renderMoves(sans, viewPly);
+    updateStatus();
+    if (viewPly === sans.length) maybeAI();
+    refreshHint();
   }
 
   function backToMenu() { closeSheet(); aiToken++; aiBusy = false; phase = 'menu'; renderSavedList(); showPage('menu'); }
@@ -608,7 +687,7 @@
 
   function afterNames() {
     renderBars();
-    if (bots) {   // two computers: they each pick a random secret pawn, then play
+    if (bots) {   // two computers: they each pick a random secret piece, then play
       if (mode === 'secret') {
         game.secretQueen[WHITE] = pickSecretPawn(WHITE);
         game.secretQueen[BLACK] = pickSecretPawn(BLACK);
@@ -630,7 +709,7 @@
       renderAll();
       $('#pick-confirm').disabled = true;
       coverEl.classList.add('hidden');
-      setStatus(`${nameOf(color)}: tap one of your pawns`);
+      setStatus(`${nameOf(color)}: tap one of your pieces`);
       return;
     }
     setFlipped(opts.autoFlip && color === BLACK, false);
@@ -643,7 +722,7 @@
     coverEl.classList.remove('hidden');
     $('#cover-ok').onclick = () => {
       coverEl.classList.add('hidden');
-      setStatus(`${nameOf(color)}: tap one of your pawns`);
+      setStatus(`${nameOf(color)}: tap one of your pieces`);
     };
   }
 
@@ -722,10 +801,11 @@
     if (phase === 'pick-w' || phase === 'pick-b') {
       if (!coverEl.classList.contains('hidden')) return;
       const color = phase === 'pick-w' ? WHITE : BLACK;
-      if (game.board[s] === (color | PAWN)) {
+      const pc = game.board[s];
+      if (pc && (pc & 24) === color && (pc & 7) !== KING && (pc & 7) !== QUEEN) {
         pickSel = pickSel === s ? -1 : s;
         $('#pick-confirm').disabled = pickSel < 0;
-        setStatus(pickSel < 0 ? `${nameOf(color)}: tap one of your pawns` : 'Tap Confirm to lock it in');
+        setStatus(pickSel < 0 ? `${nameOf(color)}: tap one of your pieces` : 'Tap Confirm to lock it in');
         renderBoard();
       }
       return;
@@ -788,6 +868,7 @@
       closeSheet();
     }
     hintMoves = [];
+    showQueen = false;   // the queen is hidden again once the turn is done
     const san = game.moveToSan(m);
     const mover = game.turn;
     game.makeMove(m);
@@ -813,8 +894,8 @@
     else if (game.halfmove >= 100) end = 'fifty';
     else if (posKeys.filter((k) => k === posKeys[viewPly]).length >= 3) end = 'repeat';
 
-    if (end) endGame(end, mover);
-    else { updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
+    if (end) { endGame(end, mover); clearSession(); }
+    else { saveSession(); updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
   }
 
   function showPromotion(move) {
@@ -913,6 +994,12 @@
   }
 
   /* --------------------------------------------------------------- controls */
+  $('#queen-btn').addEventListener('click', () => {
+    if (!canShowQueen()) return;
+    showQueen = !showQueen;
+    renderAll();
+  });
+
   $('#flip-btn').addEventListener('click', () => {
     flipped = !flipped;
     buildBoard();
@@ -930,6 +1017,7 @@
     while (viewPly < target) { m = fullMoves[viewPly]; game.makeMove(m); viewPly++; }
     closeSheet();
     hintMoves = [];
+    showQueen = false;
     selected = -1;
     legalTargets = [];
     const atLive = viewPly === fullMoves.length;
@@ -940,6 +1028,7 @@
     if (dir > 0 && h && h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, viewPly);
     if (phase === 'over') overStatus(); else updateStatus();
+    saveSession();
     if (atLive) { syncFlip(true, 300); maybeAI(); }
     refreshHint();
   }
@@ -1003,6 +1092,7 @@
   $('#both-btn').addEventListener('click', () => {
     if (!isTas() || !ai || (phase !== 'play' && phase !== 'over')) return;
     playBoth = !playBoth;
+    saveSession();
     if (playBoth) { aiToken++; aiBusy = false; }
     hintMoves = [];
     if (phase === 'play') updateStatus(); else overStatus();
@@ -1024,7 +1114,7 @@
   $('#back-btn').addEventListener('click', () => {
     if (phase === 'replay') { exitReplay(); return; }
     const leave = backToMenu;
-    if ((phase === 'play' && sans.length)) confirmSheet('Leave this game?', 'Leave', leave); else leave();
+    if ((phase === 'play' && sans.length)) confirmSheet('Leave this game? You can continue it from the menu.', 'Leave', leave); else leave();
   });
 
   /* ----------------------------------------------------------------- replay */
@@ -1167,7 +1257,29 @@
   });
 
   /* ------------------------------------------------------------ saved list */
+  function renderContinue() {
+    const s = session.get();
+    const b = $('#continue-btn');
+    let desc = '';
+    try {
+      if (s && s.kind === 'chess') desc = MODE_LABEL[s.mode] + ' \u00b7 ' + Math.ceil(s.moves.length / 2) + ' moves played';
+      else if (s && s.kind === 'rush' && window.Rush && window.Rush.describe) desc = window.Rush.describe(s);
+      else if (s && s.kind === 'puzzle' && window.Puzzle) desc = window.Puzzle.describe(s);
+    } catch (e) { desc = ''; }
+    b.classList.toggle('hidden', !desc);
+    $('#continue-desc').textContent = desc;
+  }
+
+  $('#continue-btn').addEventListener('click', () => {
+    const s = session.get();
+    if (!s) return;
+    if (s.kind === 'chess') resumeChess(s);
+    else if (s.kind === 'rush' && window.Rush) window.Rush.resume(s);
+    else if (s.kind === 'puzzle' && window.Puzzle) window.Puzzle.resume(s);
+  });
+
   function renderSavedList() {
+    renderContinue();
     const list = store.get();
     const box = $('#saved');
     const ul = $('#saved-list');
@@ -1198,5 +1310,5 @@
 
   renderSavedList();
   buildBoard();
-  window.LP = { openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList };
+  window.LP = { openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session };
 })();

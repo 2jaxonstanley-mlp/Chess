@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Local Pieces</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=5">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -21,6 +21,11 @@
       <div class="menu-inner">
         <h1 class="logo">Local Pieces</h1>
 
+        <button id="continue-btn" class="mode continue hidden">
+          <span class="mode-name">Continue playing</span>
+          <span id="continue-desc" class="mode-desc"></span>
+        </button>
+
         <div class="modes">
           <button class="mode" data-mode="basic">
             <span class="mode-name">Classic</span>
@@ -28,7 +33,7 @@
           </button>
           <button class="mode" data-mode="secret">
             <span class="mode-name">Secret Queen</span>
-            <span class="mode-desc">Each player secretly picks a pawn that can move like a queen.</span>
+            <span class="mode-desc">Each player secretly picks a piece (not the king or queen) that can also move like a queen.</span>
           </button>
           <button class="mode" data-mode="tas">
             <span class="mode-name">TAS</span>
@@ -37,6 +42,14 @@
           <button class="mode" data-mode="rush">
             <span class="mode-name">Capture Rush</span>
             <span class="mode-desc">White has two pieces and 2:30 to score points by capturing while Black keeps spawning more.</span>
+          </button>
+          <button class="mode" data-mode="puzzle">
+            <span class="mode-name">Puzzles</span>
+            <span class="mode-desc">Find a checkmate in 1 or 2, or give check within a few moves. Easy, normal or hard.</span>
+          </button>
+          <button class="mode" data-mode="best">
+            <span class="mode-name">Best Move</span>
+            <span class="mode-desc">A position, one best move. Can you find it?</span>
           </button>
         </div>
 
@@ -85,6 +98,7 @@
           <!-- live game controls -->
           <div id="controls" class="controls">
             <button id="flip-btn" class="btn">Flip</button>
+            <button id="queen-btn" class="btn hidden" aria-pressed="false">Show queen</button>
             <button id="undo-btn" class="btn">Undo</button>
             <button id="redo-btn" class="btn">Redo</button>
             <button id="hint-btn" class="btn hidden">Hint</button>
@@ -164,15 +178,46 @@
       </div>
     </section>
 
+    <!-- PUZZLES -->
+    <section id="puzzle" class="page">
+      <header class="game-header">
+        <button id="pz-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span id="pz-title" class="mode-title">Puzzles</span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="layout">
+        <div class="board-col">
+          <div class="pz-info">
+            <span id="pz-goal" class="pz-goal"></span>
+            <span id="pz-meta" class="pz-meta"></span>
+          </div>
+          <div class="board-wrap">
+            <div id="pz-board" class="board"></div>
+            <div id="pz-toast" class="toast" role="status"></div>
+          </div>
+          <div id="pz-status" class="status">&nbsp;</div>
+          <div class="controls pz-controls">
+            <button id="pz-hint" class="btn">Hint</button>
+            <button id="pz-undo" class="btn hidden">Undo</button>
+            <button id="pz-retry" class="btn">Retry</button>
+            <button id="pz-answer" class="btn">Solution</button>
+            <button id="pz-next" class="btn primary">New puzzle</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- SHEET (names, hand-off, game over, save) -->
     <div id="sheet-bg" class="sheet-bg hidden">
       <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
     </div>
   </div>
 
-  <script src="chess.js"></script>
-  <script src="ai.js"></script>
-  <script src="app.js"></script>
-  <script src="rush.js"></script>
+  <script src="chess.js?v=5"></script>
+  <script src="ai.js?v=5"></script>
+  <script src="app.js?v=5"></script>
+  <script src="rush.js?v=5"></script>
+  <script src="puzzlegen.js?v=5"></script>
+  <script src="puzzles.js?v=5"></script>
 </body>
 </html>

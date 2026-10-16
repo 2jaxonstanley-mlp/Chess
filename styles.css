@@ -575,3 +575,12 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 .ghost { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
 .ghost.out { animation: ghost-out .38s ease-in forwards; }
 @keyframes ghost-out { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.3); } }
+
+/* continue playing + puzzles */
+.mode.continue { border-color: #fff; margin-bottom: .75rem; }
+.mode.continue .mode-name::after { content: '  \25B6\FE0E'; font-size: .9rem; }
+.pz-info { display: flex; flex-direction: column; padding: .1rem .4rem .35rem; }
+.pz-goal { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+.pz-meta { color: var(--muted); font-size: 1rem; }
+.status.good { color: #8fe388; font-weight: 700; }
+.pz-controls .btn { font-size: .95rem; padding: .6rem .1rem; }

@@ -513,6 +513,7 @@
     if (res.slideTo >= 0) slide(from, res.slideTo);
     if (res.cap && res.cap.c !== res.mover.c) ghost(to, res.cap);                 // the captured piece shrinks away
     updateHud();
+    saveRush();
     if (res.msg) toast(res.msg);
     else if (growthSq >= 0) toast(nameOf(B) + ' gains a piece');
     setStatus();
@@ -548,6 +549,7 @@
     g.ended = true;
     g.selected = -1; g.targets = [];
     clearInterval(timerId); clearTimeout(aiTimer);
+    clearRush();
     updateHud(); render(); setStatus('Time is up');
     const best = bestStore.get();
     const prev = best[g.piece];
@@ -592,7 +594,45 @@
     };
   }
 
+  /* ------------------------------------------------------------------ continue later */
+  function saveRush() {
+    if (!g || !cfg || g.ended || !g.t0 || rp) return;
+    LP.session.set({
+      kind: 'rush', cfg, date: Date.now(),
+      g: { cells: g.cells, piece: g.piece, turn: g.turn, score: g.score, taken: g.taken, caps: g.caps, used: Math.round(elapsed()), last: g.last, bTurns: g.bTurns, nextGrowth: g.nextGrowth, init: g.init, log: g.log },
+    });
+  }
+  function clearRush() { const x = LP.session.get(); if (x && x.kind === 'rush') LP.session.clear(); }
+
+  function resume(d) {
+    token++;
+    clearInterval(timerId); clearTimeout(aiTimer);
+    rp = null;
+    exitReplayUI();
+    cfg = d.cfg;
+    const now = performance.now();
+    g = { cells: d.g.cells, piece: d.g.piece, turn: d.g.turn, score: d.g.score, taken: d.g.taken, caps: d.g.caps, t0: now, ended: false, selected: -1, targets: [], last: d.g.last, ai: false, bTurns: d.g.bTurns, nextGrowth: d.g.nextGrowth, init: d.g.init, log: d.g.log, used: d.g.used, runStart: d.g.turn === W ? now : 0 };
+    timerId = setInterval(tickClock, 100);
+    flipped = cfg.players === 1 && cfg.human === B;
+    buildBoard();
+    for (const side of [W, B]) {
+      const bar = barOf(side);
+      $('#rush-' + bar + '-name').textContent = nameOf(side);
+      $('#rush-' + bar).querySelector('.dot').className = 'dot ' + side;
+    }
+    render();
+    updateHud();
+    LP.closeSheet();
+    LP.showPage('rush');
+    setStatus();
+    scheduleAI();
+  }
+
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveRush(); });
+  window.addEventListener('pagehide', saveRush);
+
   function toMenu() {
+    saveRush();
     token++; clearInterval(timerId); clearTimeout(aiTimer);
     if (g) g.ended = true;
     LP.closeSheet();
@@ -821,7 +861,7 @@
   });
   $('#rush-back').addEventListener('click', () => {
     if (g && !g.ended && g.t0) {
-      LP.openSheet(`<h2>Leave this round?</h2><div class="row"><button class="btn" id="c-no">Stay</button><button class="btn primary" id="c-yes">Leave</button></div>`);
+      LP.openSheet(`<h2>Leave this round? You can continue it from the menu.</h2><div class="row"><button class="btn" id="c-no">Stay</button><button class="btn primary" id="c-yes">Leave</button></div>`);
       $('#c-no').onclick = LP.closeSheet;
       $('#c-yes').onclick = toMenu;
     } else toMenu();
@@ -839,7 +879,7 @@
   }));
   $('#rush-scrub').addEventListener('input', rpGo(() => { rpStop(); showFrame(+$('#rush-scrub').value, false); }));
   $('#rr-exit').addEventListener('click', rpGo(closeReplay));
-  window.Rush = { watch: (d) => watch(d, 'menu') };
+  window.Rush = { watch: (d) => watch(d, 'menu'), resume, describe: (d) => 'Capture Rush \u00b7 ' + fmtTime(TOTAL - d.g.used) + ' left' };
   document.querySelector('.mode[data-mode="rush"]').addEventListener('click', start);
 
   /** Headless round for testing the computer players: returns { score, taken, blacks }. */

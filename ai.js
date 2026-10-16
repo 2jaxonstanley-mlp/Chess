@@ -614,7 +614,7 @@
     c.fullmove = g.fullmove;
     c.secretQueen = { [WHITE]: g.secretQueen[WHITE], [BLACK]: g.secretQueen[BLACK] };
     c.revealed = { [WHITE]: g.revealed[WHITE], [BLACK]: g.revealed[BLACK] };
-    if (hideColor) c.secretQueen[hideColor] = -1;   // the computer can't see your secret pawn
+    if (hideColor) c.secretQueen[hideColor] = -1;   // the computer can't see your secret piece
     c.history = [];
     return c;
   }
@@ -976,9 +976,12 @@
     setTimeout(iterate, 0);
   };
 
-  /** The computer's own secret queen: a random pawn. */
+  /** The computer's own secret queen: a random piece that is not the king or queen. */
   window.pickSecretPawn = function (color) {
-    return sq(Math.floor(Math.random() * 8), color === WHITE ? 1 : 6);
+    const back = color === WHITE ? 0 : 7, front = color === WHITE ? 1 : 6;
+    const spots = [];
+    for (let f = 0; f < 8; f++) { spots.push(sq(f, front)); if (f !== 3 && f !== 4) spots.push(sq(f, back)); }
+    return spots[Math.floor(Math.random() * spots.length)];
   };
 
   window.positionKey = boardKey;
