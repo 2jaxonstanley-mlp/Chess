@@ -10,7 +10,7 @@
   const esc = LP.esc;
   const KEY = 'localPieces.leaderboard', NAME = 'localPieces.username';
   const KEEP = 10;
-  const TABS = [{ id: 'rush', label: 'Rush' }, { id: 'chess', label: 'Chess' }, { id: 'puzzle', label: 'Puzzles' }];
+  const TABS = [{ id: 'rush', label: 'Rush', ic: '\u265E' }, { id: 'chess', label: 'Chess', ic: '\u265A' }, { id: 'puzzle', label: 'Puzzles', ic: '\u265F' }];
   const EMPTY = {
     rush: 'Play Capture Rush and your best scores will show up here.',
     chess: 'Win a game of Classic or Secret Queen and your fastest wins will show up here.',
@@ -36,6 +36,12 @@
     });
     save(list);
     write('localPieces.lbMigrated', true);
+  })();
+
+  (function dropOldPuzzles() {   // puzzle boards used to be split by kind and mixed streaks across difficulties
+    const list = load();
+    const keep = list.filter((x) => x.cat !== 'puzzle' || /^puzzle:(easy|normal|hard)$/.test(x.key));
+    if (keep.length !== list.length) save(keep);
   })();
 
   const better = (low, a, b) => (low ? a < b : a > b);
@@ -97,31 +103,46 @@
   const fmt = (e) => (e.unit === 'moves' ? e.value + (e.value === 1 ? ' move' : ' moves') : e.unit === 'streak' ? e.value + ' in a row' : (e.value < 0 ? '−' + Math.abs(e.value) : e.value) + ' pts');
   const when = (t) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
+  const EMPTY_D = (g) => 'No ' + g.toLowerCase() + ' streaks yet. Solve three puzzles in a row without a miss.';
+  const whoLine = (e) => (e.unit === 'streak' ? e.vs : 'vs ' + e.vs);
+
   function render() {
     const all = load();
-    $('#lb-tabs').innerHTML = TABS.map((t) => `<button class="lb-tab${t.id === tab ? ' on' : ''}" data-t="${t.id}">${t.label}</button>`).join('');
+    $('#lb-tabs').innerHTML = TABS.map((t) => `<button class="lb-tab${t.id === tab ? ' on' : ''}" data-t="${t.id}"><span aria-hidden="true">${t.ic}</span>${t.label}</button>`).join('');
     document.querySelectorAll('.lb-tab').forEach((b) => { b.onclick = () => { tab = b.dataset.t; write('localPieces.lbTab', tab); render(); }; });
     const inTab = all.filter((x) => x.cat === tab);
-    const groups = [];
+    let groups = [];
     inTab.slice().sort((a, b) => b.date - a.date).forEach((x) => { if (!groups.find((g) => g.key === x.key)) groups.push({ key: x.key, group: x.group }); });
-    const box = $('#lb-body');
+    const puz = tab === 'puzzle';
+    if (puz) groups = [{ key: 'puzzle:easy', group: 'Easy' }, { key: 'puzzle:normal', group: 'Normal' }, { key: 'puzzle:hard', group: 'Hard' }];
+    const box = $('#lb-body'), chips = $('#lb-chips');
+    $('#lb-reset').classList.toggle('hidden', !all.length);
     if (!groups.length) {
-      $('#lb-chips').innerHTML = '';
+      chips.innerHTML = '';
       box.innerHTML = `<div class="lb-empty"><span aria-hidden="true">&#9733;&#xFE0E;</span><p>${esc(EMPTY[tab])}</p></div>`;
-      $('#lb-reset').classList.toggle('hidden', !all.length);
       return;
     }
     if (!groups.find((g) => g.key === sel[tab])) sel[tab] = groups[0].key;
-    $('#lb-chips').innerHTML = groups.map((g) => `<button class="lb-chip${g.key === sel[tab] ? ' on' : ''}" data-k="${esc(g.key)}">${esc(g.group)}</button>`).join('');
+    chips.className = 'lb-chips' + (puz ? ' seg' : '');
+    chips.innerHTML = groups.map((g) => `<button class="lb-chip${g.key === sel[tab] ? ' on' : ''}" data-k="${esc(g.key)}">${esc(g.group)}</button>`).join('');
     document.querySelectorAll('.lb-chip').forEach((b) => { b.onclick = () => { sel[tab] = b.dataset.k; render(); }; });
+    const g = groups.find((x) => x.key === sel[tab]);
     const rows = sorted(all, sel[tab]);
-    box.innerHTML = '<ol class="lb-list">' + rows.map((e, i) => `<li class="lb-row r${i + 1}" data-id="${e.id}">
-        <span class="lb-rank">${i + 1}</span>
-        <span class="lb-who"><b>${esc(e.name)}</b><span>vs ${esc(e.vs)}</span></span>
+    if (!rows.length) { box.innerHTML = `<div class="lb-empty"><span aria-hidden="true">&#9733;&#xFE0E;</span><p>${esc(puz ? EMPTY_D(g.group) : EMPTY[tab])}</p></div>`; return; }
+    const top = rows[0];
+    const champ = `<div class="lb-champ" data-id="${top.id}">
+        <span class="lb-crown" aria-hidden="true">&#9819;&#xFE0E;</span>
+        <span class="lb-champ-lab">Best${puz ? ' streak' : ''}</span>
+        <b class="lb-champ-val">${esc(fmt(top))}</b>
+        <span class="lb-champ-who"><b>${esc(top.name)}</b> &middot; ${esc(whoLine(top))} &middot; ${when(top.date)}</span>
+      </div>`;
+    const rest = rows.slice(1);
+    box.innerHTML = champ + (rest.length ? '<ol class="lb-list" start="2">' + rest.map((e, i) => `<li class="lb-row r${i + 2}" data-id="${e.id}">
+        <span class="lb-rank">${i + 2}</span>
+        <span class="lb-who"><b>${esc(e.name)}</b><span>${esc(whoLine(e))}</span></span>
         <span class="lb-val"><b>${esc(fmt(e))}</b><span>${when(e.date)}</span></span>
-      </li>`).join('') + '</ol><p class="lb-hint">Tap a score to rename or remove it.</p>';
-    box.querySelectorAll('.lb-row').forEach((li) => { li.onclick = () => edit(rows.find((x) => x.id === li.dataset.id)); });
-    $('#lb-reset').classList.remove('hidden');
+      </li>`).join('') + '</ol>' : '') + '<p class="lb-hint">Tap a score to rename or remove it.</p>';
+    box.querySelectorAll('[data-id]').forEach((li) => { li.onclick = () => edit(rows.find((x) => x.id === li.dataset.id)); });
   }
 
   function edit(e) {

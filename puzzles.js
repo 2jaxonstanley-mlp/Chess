@@ -30,13 +30,11 @@
   let toastTimer = null;
 
   let missed = false;      // a hint, the solution or a wrong move was used on this puzzle
+  // Each difficulty keeps its own record, so a streak on Easy never counts towards Hard.
   const stats = {
-    get() {
-      let s = null;
-      try { s = JSON.parse(localStorage.getItem('localPieces.puzzleStats')); } catch (e) { /* ignore */ }
-      return Object.assign({ solved: 0, missed: 0, streak: 0, best: 0 }, s || {});
-    },
-    put(s) { try { localStorage.setItem('localPieces.puzzleStats', JSON.stringify(s)); } catch (e) { /* ignore */ } },
+    all() { try { return JSON.parse(localStorage.getItem('localPieces.puzzleStats2')) || {}; } catch (e) { return {}; } },
+    get(d) { return Object.assign({ solved: 0, missed: 0, streak: 0, best: 0 }, stats.all()[d || cfg.diff] || {}); },
+    put(s, d) { const a = stats.all(); a[d || cfg.diff] = s; try { localStorage.setItem('localPieces.puzzleStats2', JSON.stringify(a)); } catch (e) { /* ignore */ } },
     miss() {
       if (missed || !P) return;
       missed = true;
@@ -135,6 +133,7 @@
     const s = stats.get();
     $('#pz-diff').textContent = DIFF[cfg.diff];
     $('#pz-streak').textContent = s.streak;
+    $('.pz-bolt').classList.toggle('on', s.streak > 0);
     $('#pz-count').innerHTML = 'Solved ' + s.solved + ' <i>·</i> Missed ' + s.missed + ' <i>·</i> Best ' + s.best;
     $('#pz-kind').textContent = TITLE[cfg.type];
     $('#pz-turn').classList.toggle('solved', state === 'solved');
@@ -328,7 +327,7 @@
       const st = stats.get();
       if (!missed && st.streak >= 3 && LP.board) {
         const nm = LP.board.lastName();
-        const res = LP.board.record({ cat: 'puzzle', key: 'puzzle:' + cfg.type + ':' + cfg.diff, group: TITLE[cfg.type].replace(' puzzles', '') + ' · ' + DIFF[cfg.diff], name: nm || 'Player', vs: 'Puzzles', value: st.streak, unit: 'streak', low: false, unique: true });
+        const res = LP.board.record({ cat: 'puzzle', key: 'puzzle:' + cfg.diff, group: DIFF[cfg.diff], name: nm || 'Player', vs: TITLE[cfg.type], value: st.streak, unit: 'streak', low: false, unique: true });
         if (res.isBest) { if (!nm) LP.board.askName(res.entry, null, 'A new best streak! Choose the name for the leaderboard.'); else toast('New best streak: ' + st.streak); }
       }
     }
