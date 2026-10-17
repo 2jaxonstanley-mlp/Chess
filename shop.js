@@ -26,15 +26,8 @@
     ['amethyst', 'Amethyst', '#e6dcef', '#7c5ea8', 'rare'], ['coral', 'Coral', '#fbe4d8', '#e0795a', 'rare'],
   ].map(([id, name, l, d, r]) => ({ id, name, l, d, r }));
   BOARDS.push({ id: 'grass', name: 'Grass & Dirt', l: '#0e7a06', d: '#70420a', li: 'url(board-grass.png)', di: 'url(board-dirt.png)', r: 'epic' });
-  BOARDS.push({ id: 'neonboard', name: 'Neon Grid', l: '#1d1850', d: '#0d0a28', r: 'legendary',
-    li: 'linear-gradient(135deg, rgba(61,242,255,.34), rgba(61,242,255,0) 62%)', di: 'linear-gradient(135deg, rgba(255,61,240,.30), rgba(255,61,240,0) 62%)' });
-  const PIECES = [
-    ['mint', 'Mint', '#bfe3d0', '#1d5c45', 'common'], ['sandcastle', 'Sandcastle', '#e6d9b8', '#6b4a2b', 'common'],
-    ['sky', 'Sky', '#b9d4ec', '#173a73', 'common'], ['rosewood', 'Rosewood', '#f0cfd0', '#8c1f2b', 'common'],
-    ['honey', 'Honey', '#f3e2a0', '#8a6a12', 'common'], ['lilac', 'Lilac', '#dcd2f2', '#40236e', 'common'],
-    ['coral', 'Coral', '#ffc9b5', '#a33a1b', 'rare'], ['teal', 'Teal', '#aeeceb', '#0b5558', 'rare'],
-    ['lime', 'Lime', '#dff59a', '#3d5d0b', 'rare'], ['ice', 'Ice', '#e6f6ff', '#2b5878', 'rare'],
-  ].map(([id, name, w, b, r]) => ({ id, name, w, b, r }));
+  BOARDS.push({ id: 'neonboard', name: 'Neon Grid', l: '#1b1550', d: '#09071f', neon: true, r: 'legendary' });
+  const PIECES = [];
   /* picture packs: one sprite sheet each (white P B Q K N R, then black P B Q K N R), and the CSS-drawn neon pack */
   PIECES.push({ id: 'realism', name: 'Realism', pk: 'sheet', sheet: 'pk-realism.png', r: 'common' });
   PIECES.push({ id: 'pixel', name: 'Pixel', pk: 'sheet', sheet: 'pk-pixel.png', px: 1, r: 'rare' });
@@ -74,6 +67,7 @@
     root.setProperty('--pw', p && p.w ? p.w : '#ffffff');
     root.setProperty('--pb', p && p.b ? p.b : '#1a1a1a');
     root.setProperty('--sheet', p && p.sheet ? 'url(' + p.sheet + ')' : 'none');
+    document.body.dataset.bd = b && b.neon ? 'neon' : '';
     PK = p && p.pk ? p.pk : '';
     PX = p && p.px ? '1' : '';
     tagKings();
@@ -188,7 +182,7 @@
   function preview(slot, it) {
     if (slot === 'board') {
       const st = `--a:${it.l};--b:${it.d}` + (it.li ? `;--ai:${it.li};--bi:${it.di}` : '');
-      return `<span class="pv-board${it.li ? ' tex' : ''}" style="${st}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
+      return `<span class="pv-board${it.li ? ' tex' : ''}${it.neon ? ' neon' : ''}" style="${st}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
     }
     if (slot === 'piece') {
       if (it.pk === 'sheet') return `<span class="pv-king pv-sheet" style="--sheet:url(${it.sheet})"><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${3 / 11 * 100}%"></b><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${9 / 11 * 100}%"></b></span>`;
@@ -199,40 +193,47 @@
   }
   const dflt = { board: { id: '', name: 'Classic', l: '#eeeed2', d: '#769656' }, piece: RETRO, hat: { id: '', name: 'None', e: '' } };
 
+  const TABS = { board: 'Boards', piece: 'Pieces', hat: 'Accessories' };
+  let tab = 'board';
   function renderShop() {
     $('#sh-tokens').textContent = S.tokens;
-    $('#sh-list').innerHTML = Object.keys(CRATES).map((slot) => {
-      const c = CRATES[slot];
-      const got = c.items.filter((i) => S.owned[slot + ':' + i.id]).length;
-      const can = S.tokens >= COST;
-      const tiles = [dflt[slot]].concat(c.items).map((it) => {
-        const isDef = it.id === '', owned = isDef || S.owned[slot + ':' + it.id];
-        const eq = S.equipped[slot] === it.id;
-        const rc = isDef ? '#777' : RARITY[it.r].c;
-        return `<button class="sh-tile${owned ? '' : ' locked'}${eq ? ' eq' : ''}" data-slot="${slot}" data-id="${it.id}" ${owned ? '' : 'disabled'}>
-          <span class="sh-pv">${isDef && slot === 'hat' ? '<span class="pv-none">∅</span>' : preview(slot, it)}</span>
-          <span class="sh-nm">${esc(it.name)}</span>
-          <span class="sh-lock" aria-hidden="true">${owned ? (eq ? '✓' : '') : '\u{1F512}︎'}</span>
-          <span class="sh-rb" style="background:${rc}"></span></button>`;
-      }).join('');
-      return `<section class="sh-crate">
-        <div class="sh-head">
-          <span class="crate" style="--c:${c.color}"><i></i><u>${c.badge}</u></span>
-          <span class="sh-title"><b>${c.name}</b><span>${got} / ${c.items.length} collected</span></span>
-          <button class="sh-open" data-open="${slot}" ${can ? '' : 'disabled'}>${coin}Open ${COST}</button>
-        </div>
-        <div class="sh-odds">${rollOdds(slot).map(([r, p]) => `<span style="color:${RARITY[r].c}">${RARITY[r].name}</span> ${p}%`).join('<i></i>')}</div>
-        <button class="sh-toggle" data-tog="${slot}">${openState[slot] ? 'Hide items' : 'See items'} <span aria-hidden="true">${openState[slot] ? '▴' : '▾'}</span></button>
-        <div class="sh-grid${openState[slot] ? '' : ' hidden'}">${tiles}</div>
-      </section>`;
+    const c = CRATES[tab], slot = tab;
+    const got = c.items.filter((i) => S.owned[slot + ':' + i.id]).length;
+    const can = S.tokens >= COST;
+    const pct = Math.round(100 * got / c.items.length);
+    const order = ['common', 'rare', 'epic', 'legendary'];
+    const sorted = c.items.slice().sort((x, y) => order.indexOf(x.r) - order.indexOf(y.r));
+    const tiles = [dflt[slot]].concat(sorted).map((it) => {
+      const isDef = it.id === '', owned = isDef || S.owned[slot + ':' + it.id];
+      const eq = S.equipped[slot] === it.id;
+      const R = isDef ? { name: 'Starter', c: '#8a8a85' } : RARITY[it.r];
+      return `<button class="sh-tile${owned ? '' : ' locked'}${eq ? ' eq' : ''}" style="--rc:${R.c}" data-slot="${slot}" data-id="${it.id}" ${owned ? '' : 'disabled'}>
+        <span class="sh-rar">${R.name}</span>
+        <span class="sh-pv">${isDef && slot === 'hat' ? '<span class="pv-none">∅</span>' : preview(slot, it)}</span>
+        <span class="sh-nm">${esc(it.name)}</span>
+        <span class="sh-st">${owned ? (eq ? 'Equipped' : 'Tap to equip') : 'Not found yet'}</span></button>`;
     }).join('');
-    document.querySelectorAll('[data-tog]').forEach((b) => { b.onclick = () => { openState[b.dataset.tog] = !openState[b.dataset.tog]; renderShop(); }; });
+    $('#sh-list').innerHTML = `<div class="sh-tabs" role="tablist">${Object.keys(TABS).map((k) => `<button role="tab" class="${k === tab ? 'on' : ''}" data-tab="${k}">${TABS[k]}</button>`).join('')}</div>
+      <section class="sh-crate" style="--c:${c.color}">
+        <div class="sh-head">
+          <span class="crate big" style="--c:${c.color}"><i></i><u>${c.badge}</u></span>
+          <span class="sh-title"><b>${c.name}</b>
+            <span class="sh-prog"><i style="width:${pct}%"></i></span>
+            <span class="sh-cnt">${got} of ${c.items.length} found</span></span>
+        </div>
+        <div class="sh-odds">${rollOdds(slot).map(([r, p]) => `<span class="od" style="--rc:${RARITY[r].c}">${RARITY[r].name} <b>${p}%</b></span>`).join('')}</div>
+        <button class="sh-open" data-open="${slot}" ${can ? '' : 'disabled'}>${coin}<span>Open crate for ${COST}</span></button>
+        ${can ? '' : `<p class="sh-need">You need ${COST - S.tokens} more token${COST - S.tokens === 1 ? '' : 's'}. Daily tasks pay tokens.</p>`}
+      </section>
+      <h3 class="sh-sub">Collection</h3>
+      <div class="sh-grid">${tiles}</div>`;
+    document.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { tab = b.dataset.tab; renderShop(); }; });
     document.querySelectorAll('[data-open]').forEach((b) => { b.onclick = () => openCrate(b.dataset.open); });
     document.querySelectorAll('.sh-tile').forEach((b) => {
       b.onclick = () => {
-        const slot = b.dataset.slot, id = b.dataset.id;
-        S.equipped[slot] = id; saveS(); apply(); renderShop();
-        popup((id ? esc(find(slot, id).name) : 'Classic') + ' equipped');
+        const sl = b.dataset.slot, id = b.dataset.id;
+        S.equipped[sl] = id; saveS(); apply(); renderShop();
+        popup((id ? esc(find(sl, id).name) : dflt[sl].name) + ' equipped');
       };
     });
   }

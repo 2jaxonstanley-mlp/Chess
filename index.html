@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Local Pieces</title>
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -21,13 +21,13 @@
       <button id="acct" class="acct" aria-label="Your profile"><span class="acct-av" id="acct-av">?</span><span class="acct-tx"><b id="acct-name">Set name</b><small id="acct-elo">Tap to set up</small></span></button>
       <div class="menu-inner">
         <header class="hero">
-          <span class="hero-mark" aria-hidden="true">&#9822;&#xFE0E;</span>
+          <span class="hero-mark" aria-hidden="true"><i class="ic-sp" style="--i:4"></i></span>
           <h1 class="logo">Local Pieces</h1>
           <p class="tagline">Chess, your way.</p>
         </header>
 
         <button id="continue-btn" class="mode continue hidden">
-          <span class="mode-ic" aria-hidden="true">&#9654;&#xFE0E;</span>
+          <span class="mode-ic" aria-hidden="true"><i class="ic-play"></i></span>
           <span class="mode-text">
             <span class="mode-name">Continue playing</span>
             <span id="continue-desc" class="mode-desc"></span>
@@ -38,7 +38,7 @@
         <h2 class="menu-label">Play</h2>
         <div class="modes">
           <button class="mode" data-mode="basic" style="--accent:#8fc15b">
-            <span class="mode-ic" aria-hidden="true">&#9818;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:3"></i></span>
             <span class="mode-text">
               <span class="mode-name">Classic</span>
               <span class="mode-desc">The classic game of chess.</span>
@@ -46,7 +46,7 @@
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
           <button class="mode" data-mode="secret" style="--accent:#b48cf2">
-            <span class="mode-ic" aria-hidden="true">&#9819;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:2"></i></span>
             <span class="mode-text">
               <span class="mode-name">Secret Queen</span>
               <span class="mode-desc">Every player hides a secret in their army.</span>
@@ -54,7 +54,7 @@
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
           <button class="mode" data-mode="tas" style="--accent:#5ab0ff">
-            <span class="mode-ic" aria-hidden="true">&#9820;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:5"></i></span>
             <span class="mode-text">
               <span class="mode-name">TAS</span>
               <span class="mode-desc">Take on the computer with a few extra tools.</span>
@@ -62,7 +62,7 @@
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
           <button class="mode" data-mode="rush" style="--accent:#ff9a4d">
-            <span class="mode-ic" aria-hidden="true">&#9822;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:4"></i></span>
             <span class="mode-text">
               <span class="mode-name">Capture Rush</span>
               <span class="mode-desc">Beat the clock and capture as much as you can.</span>
@@ -74,7 +74,7 @@
         <h2 class="menu-label">Train</h2>
         <div class="modes">
           <button class="mode" data-mode="puzzle" style="--accent:#f2c45a">
-            <span class="mode-ic" aria-hidden="true">&#9823;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:0"></i></span>
             <span class="mode-text">
               <span class="mode-name">Puzzles</span>
               <span class="mode-desc">Sharpen your tactics with a fresh challenge every time.</span>
@@ -86,7 +86,7 @@
         <h2 class="menu-label">Rewards</h2>
         <div class="modes">
           <button class="mode" data-mode="tasks" style="--accent:#3fbfa3">
-            <span class="mode-ic" aria-hidden="true">&#10003;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-check"></i></span>
             <span class="mode-text">
               <span class="mode-name">Daily Tasks</span>
               <span id="tasks-desc" class="mode-desc">Complete tasks to earn tokens.</span>
@@ -94,7 +94,7 @@
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
           <button class="mode" data-mode="shop" style="--accent:#f5a623">
-            <span class="mode-ic" aria-hidden="true">&#9830;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-gem"></i></span>
             <span class="mode-text">
               <span class="mode-name">Shop</span>
               <span id="shop-desc" class="mode-desc">Spend tokens on crates.</span>
@@ -106,7 +106,7 @@
         <h2 class="menu-label">Records</h2>
         <div class="modes">
           <button class="mode" data-mode="board" style="--accent:#e8c14a">
-            <span class="mode-ic" aria-hidden="true">&#9733;&#xFE0E;</span>
+            <span class="mode-ic" aria-hidden="true"><i class="ic-star"></i></span>
             <span class="mode-text">
               <span class="mode-name">Leaderboard</span>
               <span class="mode-desc">Your best scores and fastest wins.</span>
@@ -289,7 +289,7 @@
     <section id="tasks" class="page">
       <header class="game-header">
         <button id="tk-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
-        <span class="pz-head"><span class="pz-badge tk" aria-hidden="true">&#10003;&#xFE0E;</span><span class="mode-title">Daily Tasks</span></span>
+        <span class="pz-head"><span class="pz-badge tk" aria-hidden="true"><i class="ic-check"></i></span><span class="mode-title">Daily Tasks</span></span>
         <span class="header-spacer"></span>
       </header>
       <div class="lb-wrap">
@@ -335,15 +335,15 @@
     </div>
   </div>
 
-  <script src="chess.js?v=20"></script>
-  <script src="ai.js?v=20"></script>
-  <script src="app.js?v=20"></script>
-  <script src="leaderboard.js?v=20"></script>
-  <script src="profile.js?v=20"></script>
-  <script src="shop.js?v=20"></script>
-  <script src="rush.js?v=20"></script>
-  <script src="puzzlegen.js?v=20"></script>
-  <script src="ratings.js?v=20"></script>
-  <script src="puzzles.js?v=20"></script>
+  <script src="chess.js?v=21"></script>
+  <script src="ai.js?v=21"></script>
+  <script src="app.js?v=21"></script>
+  <script src="leaderboard.js?v=21"></script>
+  <script src="profile.js?v=21"></script>
+  <script src="shop.js?v=21"></script>
+  <script src="rush.js?v=21"></script>
+  <script src="puzzlegen.js?v=21"></script>
+  <script src="ratings.js?v=21"></script>
+  <script src="puzzles.js?v=21"></script>
 </body>
 </html>

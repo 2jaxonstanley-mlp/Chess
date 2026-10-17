@@ -518,18 +518,18 @@
 
   /* The computer levels, weakest to strongest, shown as cards (also used by Capture Rush) */
   const LEVEL_INFO = [
-    { id: 'dumb',   ic: '\u265F', col: '#9aa0a6', n: 1, tag: 'For laughs',   sub: 'Plays the worst moves it can find.' },
-    { id: 'easy',   ic: '\u265E', col: '#8fc15b', n: 2, tag: 'Beginner',     sub: 'Makes plenty of mistakes.' },
-    { id: 'medium', ic: '\u265D', col: '#5ab0ff', n: 3, tag: 'About 1000',   sub: 'Plays like an average player.' },
-    { id: 'hard',   ic: '\u265C', col: '#f2c45a', n: 4, tag: 'About 1500',   sub: 'A solid, improving player.' },
-    { id: 'godly',  ic: '\u265B', col: '#b48cf2', n: 5, tag: 'Expert',       sub: 'Looks far ahead and varies its strong moves.' },
-    { id: 'insane', ic: '\u265A', col: '#ff6b6b', n: 5, tag: 'Maximum',      sub: 'Plays book lines and hunts for brilliant moves.' },
+    { id: 'dumb',   ic: '0', col: '#9aa0a6', n: 1, tag: 'For laughs',   sub: 'Plays the worst moves it can find.' },
+    { id: 'easy',   ic: '4', col: '#8fc15b', n: 2, tag: 'Beginner',     sub: 'Makes plenty of mistakes.' },
+    { id: 'medium', ic: '1', col: '#5ab0ff', n: 3, tag: 'About 1000',   sub: 'Plays like an average player.' },
+    { id: 'hard',   ic: '5', col: '#f2c45a', n: 4, tag: 'About 1500',   sub: 'A solid, improving player.' },
+    { id: 'godly',  ic: '2', col: '#b48cf2', n: 5, tag: 'Expert',       sub: 'Looks far ahead and varies its strong moves.' },
+    { id: 'insane', ic: '3', col: '#ff6b6b', n: 5, tag: 'Maximum',      sub: 'Plays book lines and hunts for brilliant moves.' },
   ];
   function levelMenu(title, sub, cb) {
     openSheet(`<h2>${esc(title)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h2>
       <div class="lv-list">
         ${LEVEL_INFO.map((l) => `<button class="lv-card" data-lv="${l.id}" style="--lc:${l.col}">
-          <span class="lv-ic" aria-hidden="true">${l.ic}&#xFE0E;</span>
+          <span class="lv-ic" aria-hidden="true"><i class="ic-sp" style="--i:${l.ic}"></i></span>
           <span class="lv-text"><span class="lv-top"><b>${LEVEL_LABEL[l.id]}</b><em>${l.tag}</em></span><span class="lv-sub">${l.sub}</span>
             <span class="lv-meter" aria-hidden="true">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= l.n ? 'on' : ''}"></i>`).join('')}</span></span>
         </button>`).join('')}
