@@ -40,7 +40,7 @@
   const RETRO = { id: '', name: 'Retro', pk: 'sheet', sheet: 'pk-retro.png' };   // the main skin everyone starts with
   const CRATES = {
     board: { name: 'Board Crate', slot: 'board', items: BOARDS, color: '#7cb342', badge: '▦' },
-    piece: { name: 'Piece Crate', slot: 'piece', items: PIECES, color: '#f08c3a', badge: '♛' },
+    piece: { name: 'Piece Crate', slot: 'piece', items: PIECES, color: '#f08c3a', badge: '<i class="ic-sp" style="--i:2;width:100%;height:100%"></i>' },
     hat:   { name: 'Accessory Crate', slot: 'hat', items: HATS, color: '#e8587a', badge: '★' },
   };
 
@@ -68,6 +68,7 @@
     root.setProperty('--pb', p && p.b ? p.b : '#1a1a1a');
     root.setProperty('--sheet', p && p.sheet ? 'url(' + p.sheet + ')' : 'none');
     document.body.dataset.bd = b && b.neon ? 'neon' : '';
+    document.body.dataset.pack = '1';
     PK = p && p.pk ? p.pk : '';
     PX = p && p.px ? '1' : '';
     tagKings();
@@ -92,7 +93,7 @@
     });
   }
   let kt = 0;
-  new MutationObserver(() => { clearTimeout(kt); kt = setTimeout(tagKings, 0); }).observe(document.getElementById('app'), { childList: true, subtree: true, characterData: true });
+  new MutationObserver(() => tagKings()).observe(document.getElementById('app'), { childList: true, subtree: true, characterData: true });
 
   /* ------------------------------------------------------------------ tokens + toast */
   let toastT = 0;
@@ -107,63 +108,93 @@
   const coin = '<span class="coin" aria-hidden="true"><i></i></span>';
   function addTokens(n) { S.tokens = Math.max(0, S.tokens + n); saveS(); refresh(); }
 
-  /* ------------------------------------------------------------------ daily tasks */
+  /* ------------------------------------------------------------------ daily + weekly tasks */
+  const IC = (i) => '<i class="ic-sp" style="--i:' + i + '"></i>';
   const DEFS = {
-    play:    { ev: 'play',    text: (n) => 'Play ' + n + ' games', opts: [[3, 1], [5, 1]], ic: '♟︎', col: '#8fc15b' },
+    play:    { ev: 'play',    text: (n) => 'Play ' + n + ' games', opts: [[3, 1], [5, 1]], ic: IC(0), col: '#8fc15b' },
     win:     { ev: 'win',     text: (n) => 'Win ' + n + (n === 1 ? ' game' : ' games'), opts: [[1, 2], [2, 3]], ic: '\u{1F3C6}', col: '#f2c45a' },
     capture: { ev: 'capture', text: (n) => 'Capture ' + n + ' pieces', opts: [[25, 1], [50, 2]], ic: '⚔️', col: '#ef6a4c' },
     puzzle:  { ev: 'puzzle',  text: (n) => 'Solve ' + n + ' puzzles', opts: [[2, 1], [4, 2]], ic: '\u{1F9E9}', col: '#f58a2d' },
     rush:    { ev: 'rush',    text: (n) => 'Finish ' + n + (n === 1 ? ' Capture Rush round' : ' Capture Rush rounds'), opts: [[1, 1], [2, 2]], ic: '⏱️', col: '#ff9a4d' },
-    secret:  { ev: 'secret',  text: (n) => 'Play ' + n + ' Secret Queen game', opts: [[1, 2]], ic: '♛︎', col: '#b48cf2' },
+    secret:  { ev: 'secret',  text: (n) => 'Play ' + n + ' Secret Queen game', opts: [[1, 2]], ic: IC(2), col: '#b48cf2' },
   };
+  /* weekly quests: bigger goals, each pays 5 to 8 tokens */
+  const WDEFS = {
+    play:    { ev: 'play',    text: (n) => 'Play ' + n + ' games', opts: [[12, 5], [18, 6]], ic: IC(0), col: '#8fc15b' },
+    win:     { ev: 'win',     text: (n) => 'Win ' + n + ' games', opts: [[6, 6], [10, 8]], ic: '\u{1F3C6}', col: '#f2c45a' },
+    capture: { ev: 'capture', text: (n) => 'Capture ' + n + ' pieces', opts: [[150, 5], [250, 7]], ic: '⚔️', col: '#ef6a4c' },
+    puzzle:  { ev: 'puzzle',  text: (n) => 'Solve ' + n + ' puzzles', opts: [[12, 5], [20, 7]], ic: '\u{1F9E9}', col: '#f58a2d' },
+    rush:    { ev: 'rush',    text: (n) => 'Finish ' + n + ' Capture Rush rounds', opts: [[4, 5], [6, 6]], ic: '⏱️', col: '#ff9a4d' },
+    secret:  { ev: 'secret',  text: (n) => 'Play ' + n + ' Secret Queen games', opts: [[3, 6]], ic: IC(2), col: '#b48cf2' },
+    hardwin: { ev: 'hardwin', text: (n) => 'Beat Hard or tougher ' + n + (n === 1 ? ' time' : ' times'), opts: [[2, 8], [3, 8]], ic: '\u{1F525}', col: '#ff6b6b' },
+    streak:  { ev: 'cleanpuzzle', text: (n) => 'Solve ' + n + ' puzzles without a miss', opts: [[8, 7]], ic: '\u{1F3AF}', col: '#5ab0ff' },
+  };
+  const WKEY = 'localPieces.weekly';
+  const pad2 = (n) => (n < 10 ? '0' : '') + n;
   const dayKey = () => { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
+  const monday = (d) => { const m = new Date(d.getFullYear(), d.getMonth(), d.getDate()); m.setDate(m.getDate() - ((m.getDay() + 6) % 7)); return m; };   // weeks start on Monday
+  const weekKey = () => { const m = monday(new Date()); return m.getFullYear() + '-' + pad2(m.getMonth() + 1) + '-' + pad2(m.getDate()); };
   const seed = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
   const rng = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-  let D = read(DKEY, null);
+  const shuffle = (arr, r) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const build = (defs, key, count) => {
+    const r = rng(seed(key));
+    return shuffle(Object.keys(defs), r).slice(0, count).map((k) => { const o = defs[k].opts[Math.floor(r() * defs[k].opts.length)]; return { k, n: o[0], r: o[1], p: 0, done: false }; });
+  };
+  let D = read(DKEY, null), W = read(WKEY, null);
   function ensureDay() {
     const k = dayKey();
-    if (D && D.day === k) return;
-    const r = rng(seed(k));
-    const keys = Object.keys(DEFS).sort(() => r() - 0.5).slice(0, 3);
-    D = { day: k, list: keys.map((key) => { const o = DEFS[key].opts[Math.floor(r() * DEFS[key].opts.length)]; return { k: key, n: o[0], r: o[1], p: 0, done: false }; }) };
-    write(DKEY, D);
+    if (!D || D.day !== k || !D.list.every((t) => DEFS[t.k])) { D = { day: k, list: build(DEFS, k, 3) }; write(DKEY, D); }
+    const w = weekKey();
+    if (!W || W.week !== w || !W.list.every((t) => WDEFS[t.k])) { W = { week: w, list: build(WDEFS, 'w' + w, 4) }; write(WKEY, W); }
   }
   ensureDay();
 
   function tick(ev, amount) {
     ensureDay();
-    D.list.forEach((t) => {
-      if (t.done || DEFS[t.k].ev !== ev) return;
-      t.p = Math.min(t.n, t.p + amount);
-      if (t.p >= t.n) {
-        t.done = true;
-        S.tokens += t.r; saveS();
-        popup(coin + ' Task complete: ' + esc(DEFS[t.k].text(t.n)) + ' <b>+' + t.r + '</b>');
-      }
+    [[D, DEFS, 'Daily'], [W, WDEFS, 'Weekly']].forEach(([box, defs, label]) => {
+      box.list.forEach((t) => {
+        if (t.done || defs[t.k].ev !== ev) return;
+        t.p = Math.min(t.n, t.p + amount);
+        if (t.p >= t.n) {
+          t.done = true;
+          S.tokens += t.r; saveS();
+          popup(coin + ' ' + label + ' complete: ' + esc(defs[t.k].text(t.n)) + ' <b>+' + t.r + '</b>');
+        }
+      });
     });
-    write(DKEY, D);
+    write(DKEY, D); write(WKEY, W);
     refresh();
   }
 
-  /** Called by the games: 'game' {mode, won}, 'capture' n, 'puzzle', 'rush'. */
+  const HARD = { hard: 1, godly: 1, insane: 1 };
+  /** Called by the games: 'game' {mode, won, level...}, 'capture' n, 'puzzle', 'rush'. */
   function event(name, p) {
+    if (LP.stats && LP.stats.event) LP.stats.event(name, p);
     if (name === 'game') {
       tick('play', 1);
-      if (p && p.won) tick('win', 1);
+      if (p && p.won) { tick('win', 1); if (HARD[p.level]) tick('hardwin', 1); }
       if (p && p.mode === 'secret') tick('secret', 1);
     } else tick(name, typeof p === 'number' ? p : 1);
   }
 
-  const leftToday = () => { const n = new Date(), m = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1); return Math.max(0, m - n); };
-  const fmtLeft = () => { const m = Math.floor(leftToday() / 60000); return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; };
+  const leftDay = () => { const n = new Date(), m = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1); return Math.max(0, m - n); };
+  const leftWeek = () => { const n = new Date(), m = monday(n); m.setDate(m.getDate() + 7); return Math.max(0, m - n); };
+  const fmtMs = (ms) => { const m = Math.floor(ms / 60000), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + 'd ' + h + 'h' : h + 'h ' + (m % 60) + 'm'; };
+  let tkTab = 'daily';
 
   function renderTasks() {
     ensureDay();
     $('#tk-tokens').textContent = S.tokens;
-    $('#tk-left').textContent = fmtLeft();
-    $('#tk-list').innerHTML = D.list.map((t) => {
-      const d = DEFS[t.k], pct = Math.round(100 * t.p / t.n);
-      return `<div class="tk-card${t.done ? ' done' : ''}">
+    const weekly = tkTab === 'weekly';
+    const box = weekly ? W : D, defs = weekly ? WDEFS : DEFS;
+    const dn = D.list.filter((t) => t.done).length, wn = W.list.filter((t) => t.done).length;
+    $('#tk-tabs').innerHTML = `<button class="${weekly ? '' : 'on'}" data-tk="daily">Daily <em>${dn}/${D.list.length}</em></button><button class="${weekly ? 'on' : ''}" data-tk="weekly">Weekly <em>${wn}/${W.list.length}</em></button>`;
+    document.querySelectorAll('[data-tk]').forEach((b) => { b.onclick = () => { tkTab = b.dataset.tk; renderTasks(); }; });
+    $('#tk-reset').innerHTML = (weekly ? 'New weekly quests in <b>' : 'New tasks in <b>') + fmtMs(weekly ? leftWeek() : leftDay()) + '</b>' + (weekly ? ' <span class="tk-hard">Harder goals, 5 to 8 tokens each</span>' : '');
+    $('#tk-list').innerHTML = box.list.map((t) => {
+      const d = defs[t.k], pct = Math.round(100 * t.p / t.n);
+      return `<div class="tk-card${t.done ? ' done' : ''}${weekly ? ' wk' : ''}">
         <div class="tk-top"><span class="tk-ic" style="color:${d.col}" aria-hidden="true">${d.ic}</span><b>${esc(d.text(t.n))}</b>
           <span class="tk-rw">${t.done ? '<span class="tk-ok" aria-hidden="true">✓</span>' : coin + '+' + t.r}</span></div>
         <div class="tk-bar"><i style="width:${t.p ? Math.max(pct, 8) : 0}%"></i><span>${t.p} / ${t.n}</span></div>
@@ -189,7 +220,7 @@
       if (it.pk === 'neon') return `<span class="pv-king pv-neon"><b class="piece w" data-pk="neon" data-k="k"></b><b class="piece b" data-pk="neon" data-k="n"></b></span>`;
       return `<span class="pv-king"><b style="color:${it.w}">♚︎</b><b style="color:${it.b}">♚︎</b></span>`;
     }
-    return `<span class="pv-hat"><em>${it.e}</em><b>♚︎</b></span>`;
+    return `<span class="pv-hat"><em>${it.e}</em><i class="ic-sp" style="--i:3"></i></span>`;
   }
   const dflt = { board: { id: '', name: 'Classic', l: '#eeeed2', d: '#769656' }, piece: RETRO, hat: { id: '', name: 'None', e: '' } };
 
@@ -275,10 +306,11 @@
 
   /* ------------------------------------------------------------------ pages + menu */
   function refresh() {
-    const done = D.list.filter((t) => t.done).length;
+    ensureDay();
+    const done = D.list.filter((t) => t.done).length, wdone = W.list.filter((t) => t.done).length;
     const sd = $('#shop-desc'), td = $('#tasks-desc');
     if (sd) sd.textContent = S.tokens + (S.tokens === 1 ? ' token' : ' tokens') + ' to spend on crates.';
-    if (td) td.textContent = done === D.list.length ? 'All done for today. Come back tomorrow!' : done + ' of ' + D.list.length + ' done. Earn tokens.';
+    if (td) td.textContent = 'Daily ' + done + '/' + D.list.length + ' · Weekly ' + wdone + '/' + W.list.length + '. Earn tokens.';
     if ($('#tasks').classList.contains('active')) renderTasks();
     if ($('#shop').classList.contains('active')) renderShop();
   }
@@ -287,7 +319,7 @@
     LP.showPage(id);
     refresh();
     clearInterval(clock);
-    if (id === 'tasks') clock = setInterval(() => { if (!$('#tasks').classList.contains('active')) clearInterval(clock); else { ensureDay(); renderTasks(); } }, 30000);
+    if (id === 'tasks') clock = setInterval(() => { if (!$('#tasks').classList.contains('active')) clearInterval(clock); else { renderTasks(); } }, 30000);
   }
   document.querySelector('.mode[data-mode="tasks"]').addEventListener('click', () => openPage('tasks'));
   document.querySelector('.mode[data-mode="shop"]').addEventListener('click', () => openPage('shop'));

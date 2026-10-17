@@ -10,7 +10,7 @@
   const esc = LP.esc;
   const KEY = 'localPieces.leaderboard', NAME = 'localPieces.username';
   const KEEP = 10;
-  const TABS = [{ id: 'rush', label: 'Rush', ic: '\u265E' }, { id: 'chess', label: 'Chess', ic: '\u265A' }, { id: 'puzzle', label: 'Puzzles', ic: '\u265F' }];
+  const TABS = [{ id: 'rush', label: 'Rush', ic: '<i class="ic-sp" style="--i:4"></i>' }, { id: 'chess', label: 'Chess', ic: '<i class="ic-sp" style="--i:3"></i>' }, { id: 'puzzle', label: 'Puzzles', ic: '<i class="ic-sp" style="--i:0"></i>' }];
   const EMPTY = {
     rush: 'Play Capture Rush and your best scores will show up here.',
     chess: 'Win a game of Classic or Secret Queen and your fastest wins will show up here.',
@@ -119,7 +119,7 @@
     $('#lb-reset').classList.toggle('hidden', !all.length);
     if (!groups.length) {
       chips.innerHTML = '';
-      box.innerHTML = `<div class="lb-empty"><span aria-hidden="true">&#9733;&#xFE0E;</span><p>${esc(EMPTY[tab])}</p></div>`;
+      box.innerHTML = `<div class="lb-empty"><span aria-hidden="true"><i class="ic-star"></i></span><p>${esc(EMPTY[tab])}</p></div>`;
       return;
     }
     if (!groups.find((g) => g.key === sel[tab])) sel[tab] = groups[0].key;
@@ -128,10 +128,10 @@
     document.querySelectorAll('.lb-chip').forEach((b) => { b.onclick = () => { sel[tab] = b.dataset.k; render(); }; });
     const g = groups.find((x) => x.key === sel[tab]);
     const rows = sorted(all, sel[tab]);
-    if (!rows.length) { box.innerHTML = `<div class="lb-empty"><span aria-hidden="true">&#9733;&#xFE0E;</span><p>${esc(puz ? EMPTY_D(g.group) : EMPTY[tab])}</p></div>`; return; }
+    if (!rows.length) { box.innerHTML = `<div class="lb-empty"><span aria-hidden="true"><i class="ic-star"></i></span><p>${esc(puz ? EMPTY_D(g.group) : EMPTY[tab])}</p></div>`; return; }
     const top = rows[0];
     const champ = `<div class="lb-champ" data-id="${top.id}">
-        <span class="lb-crown" aria-hidden="true">&#9819;&#xFE0E;</span>
+        <span class="lb-crown" aria-hidden="true"><i class="ic-sp" style="--i:2"></i></span>
         <span class="lb-champ-lab">Best${puz ? ' streak' : ''}</span>
         <b class="lb-champ-val">${esc(fmt(top))}</b>
         <span class="lb-champ-who"><b>${esc(top.name)}</b> &middot; ${esc(whoLine(top))} &middot; ${when(top.date)}</span>
@@ -163,10 +163,9 @@
     $('#lb-yes').onclick = () => { save([]); LP.closeSheet(); render(); };
   }
 
-  function open() { render(); LP.showPage('board'); }
+  function open() { if (LP.stats) LP.stats.open(); else { render(); LP.showPage('board'); } }
   $('#lb-back').addEventListener('click', () => { LP.closeSheet(); LP.showPage('menu'); });
   $('#lb-reset').addEventListener('click', resetAll);
-  document.querySelector('.mode[data-mode="board"]').addEventListener('click', open);
 
-  LP.board = { record, askName, lastName, open };
+  LP.board = { record, askName, lastName, open, render };
 })();

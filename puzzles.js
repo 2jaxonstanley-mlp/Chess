@@ -39,12 +39,14 @@
       if (missed || !P) return;
       missed = true;
       const s = stats.get(); s.missed++; s.streak = 0; stats.put(s);
+      if (LP.stats) LP.stats.puzzle({ diff: cfg.diff, type: cfg.type, miss: true });
       updateInfo();
     },
     win() {
       const s = stats.get(); s.solved++;
       if (!missed) { s.streak++; s.best = Math.max(s.best, s.streak); }
       stats.put(s);
+      if (LP.stats) LP.stats.puzzle({ diff: cfg.diff, type: cfg.type, clean: !missed });
     },
   };
 
@@ -225,7 +227,7 @@
   function choose(ms) {
     if (ms.length === 1) { commit(ms[0]); return; }
     LP.openSheet(`<h2>Promote to</h2>
-      <div class="rush-pieces">${[5, 4, 3, 2].map((t) => `<button class="btn big" data-pr="${t}"><span class="rp-g">${glyph(8 | t)}</span>${PIECE_NAME[t]}</button>`).join('')}</div>`, true);
+      <div class="rush-pieces">${[5, 4, 3, 2].map((t) => `<button class="btn big" data-pr="${t}"><span class="rp-g"><i class="ic-sp" style="--i:${({ 5: 2, 4: 5, 3: 1, 2: 4 })[t]}"></i></span>${PIECE_NAME[t]}</button>`).join('')}</div>`, true);
     document.querySelectorAll('[data-pr]').forEach((b) => {
       b.onclick = () => { LP.closeSheet(); const m = ms.find((x) => x.promo === +b.dataset.pr); if (m && state === 'play' && !busy) commit(m); };
     });
@@ -323,7 +325,7 @@
     updateInfo();
     clearSave();
     if (!revealed) {
-      if (LP.rewards) LP.rewards.event('puzzle');
+      if (LP.rewards) { LP.rewards.event('puzzle'); if (!missed) LP.rewards.event('cleanpuzzle'); }
       stats.win();
       const st = stats.get();
       if (!missed && st.streak >= 3 && LP.board) {
@@ -396,9 +398,9 @@
 
   /* ------------------------------------------------------------------- setup */
   const KINDS = [
-    { id: 'mate', icon: '\u265A', name: 'Checkmate', sub: 'Find the winning blow.' },
-    { id: 'check', icon: '\u265C', name: 'Check', sub: 'Work your way to a check.' },
-    { id: 'best', icon: '\u265E', name: 'Best move', sub: 'Find the strongest move.' },
+    { id: 'mate', icon: 3, name: 'Checkmate', sub: 'Find the winning blow.' },
+    { id: 'check', icon: 5, name: 'Check', sub: 'Work your way to a check.' },
+    { id: 'best', icon: 4, name: 'Best move', sub: 'Find the strongest move.' },
   ];
   const LEVELS = [
     { id: 'easy', name: 'Easy', sub: 'Clear and straightforward.', n: 1 },
@@ -422,7 +424,7 @@
   function startPuzzles() {
     LP.openSheet(`<h2>Puzzles<span class="sub">Choose a challenge.</span></h2>
       <div class="pz-options">
-        ${KINDS.map((k) => `<button class="pz-opt" data-k="${k.id}"><span class="pz-ic">${k.icon}\uFE0E</span><span class="pz-text"><span class="pz-name">${k.name}</span><span class="pz-sub">${k.sub}</span></span></button>`).join('')}
+        ${KINDS.map((k) => `<button class="pz-opt" data-k="${k.id}"><span class="pz-ic"><i class="ic-sp" style="--i:${k.icon}"></i></span><span class="pz-text"><span class="pz-name">${k.name}</span><span class="pz-sub">${k.sub}</span></span></button>`).join('')}
       </div>
       <button class="btn wide" id="pz-x">Cancel</button>`, true);
     document.querySelectorAll('[data-k]').forEach((b) => { b.onclick = () => askDiff(b.dataset.k); });

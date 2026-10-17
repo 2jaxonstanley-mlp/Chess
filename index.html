@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Local Pieces</title>
-  <link rel="stylesheet" href="styles.css?v=21">
+  <link rel="stylesheet" href="styles.css?v=22">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -88,7 +88,7 @@
           <button class="mode" data-mode="tasks" style="--accent:#3fbfa3">
             <span class="mode-ic" aria-hidden="true"><i class="ic-check"></i></span>
             <span class="mode-text">
-              <span class="mode-name">Daily Tasks</span>
+              <span class="mode-name">Daily &amp; Weekly Tasks</span>
               <span id="tasks-desc" class="mode-desc">Complete tasks to earn tokens.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
@@ -103,13 +103,13 @@
           </button>
         </div>
 
-        <h2 class="menu-label">Records</h2>
+        <h2 class="menu-label">Progress</h2>
         <div class="modes">
           <button class="mode" data-mode="board" style="--accent:#e8c14a">
             <span class="mode-ic" aria-hidden="true"><i class="ic-star"></i></span>
             <span class="mode-text">
-              <span class="mode-name">Leaderboard</span>
-              <span class="mode-desc">Your best scores and fastest wins.</span>
+              <span class="mode-name">Stats</span>
+              <span class="mode-desc">Ratings, results, puzzles, Rush and your records.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
@@ -289,12 +289,13 @@
     <section id="tasks" class="page">
       <header class="game-header">
         <button id="tk-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
-        <span class="pz-head"><span class="pz-badge tk" aria-hidden="true"><i class="ic-check"></i></span><span class="mode-title">Daily Tasks</span></span>
+        <span class="pz-head"><span class="pz-badge tk" aria-hidden="true"><i class="ic-check"></i></span><span class="mode-title">Tasks</span></span>
         <span class="header-spacer"></span>
       </header>
       <div class="lb-wrap">
         <div class="tk-tokens"><span class="coin big" aria-hidden="true"><i></i></span><span><small>Your tokens</small><b id="tk-tokens">0</b></span><button id="tk-shop" class="btn">Shop</button></div>
-        <p class="tk-reset">New tasks in <b id="tk-left"></b></p>
+        <div id="tk-tabs" class="sh-tabs tk-tabs" role="tablist"></div>
+        <p id="tk-reset" class="tk-reset"></p>
         <div id="tk-list"></div>
         <p class="lb-hint">Games against the computer and friends all count. Spend your tokens on crates in the Shop.</p>
       </div>
@@ -318,14 +319,18 @@
     <section id="board" class="page">
       <header class="game-header">
         <button id="lb-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
-        <span class="mode-title">Leaderboard</span>
+        <span class="mode-title">Stats</span>
         <span class="header-spacer"></span>
       </header>
       <div class="lb-wrap">
-        <div id="lb-tabs" class="lb-tabs"></div>
-        <div id="lb-chips" class="lb-chips"></div>
-        <div id="lb-body"></div>
-        <button id="lb-reset" class="btn wide lb-reset hidden">Reset leaderboard</button>
+        <div id="st-nav" class="lb-tabs st-nav" role="tablist"></div>
+        <div id="st-body" class="st-body"></div>
+        <div id="lb-records" class="hidden">
+          <div id="lb-tabs" class="lb-tabs"></div>
+          <div id="lb-chips" class="lb-chips"></div>
+          <div id="lb-body"></div>
+          <button id="lb-reset" class="btn wide lb-reset hidden">Reset leaderboard</button>
+        </div>
       </div>
     </section>
 
@@ -335,15 +340,16 @@
     </div>
   </div>
 
-  <script src="chess.js?v=21"></script>
-  <script src="ai.js?v=21"></script>
-  <script src="app.js?v=21"></script>
-  <script src="leaderboard.js?v=21"></script>
-  <script src="profile.js?v=21"></script>
-  <script src="shop.js?v=21"></script>
-  <script src="rush.js?v=21"></script>
-  <script src="puzzlegen.js?v=21"></script>
-  <script src="ratings.js?v=21"></script>
-  <script src="puzzles.js?v=21"></script>
+  <script src="chess.js?v=22"></script>
+  <script src="ai.js?v=22"></script>
+  <script src="app.js?v=22"></script>
+  <script src="leaderboard.js?v=22"></script>
+  <script src="profile.js?v=22"></script>
+  <script src="shop.js?v=22"></script>
+    <script src="stats.js?v=22"></script>
+  <script src="rush.js?v=22"></script>
+  <script src="puzzlegen.js?v=22"></script>
+  <script src="ratings.js?v=22"></script>
+  <script src="puzzles.js?v=22"></script>
 </body>
 </html>

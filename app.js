@@ -543,7 +543,9 @@
     levelMenu('Choose difficulty', 'Who do you want to play?', (lv) => { closeSheet(); startGame(m, false, lv); });
   }
 
+  let gameStart = 0;
   function freshGame(m) {
+    gameStart = Date.now();
     mode = m;
     game.mode = engineMode(m);
     game.reset();
@@ -1009,7 +1011,14 @@
     const Pf = window.LP.profile;
     if (Pf && ai && !bots && !playBoth && Pf.MODES[mode]) over.elo = Pf.record(mode, ai.level, type === 'mate' ? (mover === ai.human ? 1 : 0) : 0.5);
     if (lb && lb.rank) over.note = lb.isBest ? 'New best: checkmate in ' + lb.entry.value + ' moves!' : '#' + lb.rank + ' on the leaderboard';
-    if (!bots && !isTas() && window.LP.rewards) window.LP.rewards.event('game', { mode, won: type === 'mate' && (!ai || mover === ai.human) });
+    if (!bots && !isTas() && window.LP.rewards) {
+      const q = {};
+      ratings.forEach((r, i) => { if (r && (!ai || (i % 2 === 0) === (ai.human === WHITE))) q[r] = (q[r] || 0) + 1; });
+      window.LP.rewards.event('game', {
+        mode, won: type === 'mate' && (!ai || mover === ai.human), draw: type !== 'mate', level: ai ? ai.level : 'pvp',
+        moves: Math.ceil(fullMoves.length / 2), secs: Math.min(10800, Math.round((Date.now() - (gameStart || Date.now())) / 1000)), elo: over.elo || null, q,
+      });
+    }
     updateControls();
     overStatus();
     setTimeout(() => {

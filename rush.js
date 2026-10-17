@@ -14,6 +14,7 @@
   const esc = LP.esc;
   let TOTAL = 150000;
   const W = 'w', B = 'b';
+  const IC = { p: 0, b: 1, q: 2, k: 3, n: 4, r: 5 };   // sprite cell of each piece in the pack sheets
   const GLYPH = { p: '♟︎', n: '♞︎', b: '♝︎', r: '♜︎', q: '♛︎' };
   // Points: every capture scores DOUBLE the captured piece's value. If White's own piece is taken, White loses points by its value (queen 9, rook 5, bishop 3, knight 3).
   const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
@@ -525,7 +526,7 @@
     g.selected = -1; g.targets = []; render();
     LP.openSheet(`<h2>Promote your pawn<span class="sub">Choose what it becomes.</span></h2>
       <div class="rush-pieces">
-        ${['q', 'r', 'b', 'n'].map((t) => `<button class="btn big" data-promo="${t}"><span class="rp-g">${GLYPH[t]}</span>${PNAME[t]}</button>`).join('')}
+        ${['q', 'r', 'b', 'n'].map((t) => `<button class="btn big" data-promo="${t}"><span class="rp-g"><i class="ic-sp" style="--i:${IC[t]}"></i></span>${PNAME[t]}</button>`).join('')}
       </div>`);
     document.querySelectorAll('[data-promo]').forEach((b) => { b.onclick = () => { LP.closeSheet(); if (g && !g.ended) play(from, to, b.dataset.promo); }; });
   }
@@ -553,7 +554,7 @@
     clearRush();
     updateHud(); render(); setStatus('Time is up');
     g.lb = recordScore();
-    if (cfg.players !== 0 && LP.rewards) LP.rewards.event('rush');
+    if (cfg.players !== 0 && LP.rewards) LP.rewards.event('rush', { score: g.score, piece: g.piece, level: cfg.players === 1 ? cfg.level : 'pvp', players: cfg.players, caps: g.caps.length, taken: g.taken });
     const my = token;
     setTimeout(() => {
       if (my !== token) return;
@@ -796,7 +797,7 @@
   function askPiece(who, cb) {
     LP.openSheet(`<h2>${esc(who)}, choose your piece<span class="sub">Pick the piece you will play with.</span></h2>
       <div class="rush-pieces">
-        ${['q', 'r', 'b', 'n'].map((t) => `<button class="btn big" data-pc="${t}"><span class="rp-g">${GLYPH[t]}</span>${PNAME[t]}<span class="rp-c">loses ${COST[t]} if taken</span></button>`).join('')}
+        ${['q', 'r', 'b', 'n'].map((t) => `<button class="btn big" data-pc="${t}"><span class="rp-g"><i class="ic-sp" style="--i:${IC[t]}"></i></span>${PNAME[t]}<span class="rp-c">loses ${COST[t]} if taken</span></button>`).join('')}
       </div>`);
     document.querySelectorAll('[data-pc]').forEach((b) => { b.onclick = () => cb(b.dataset.pc); });
   }

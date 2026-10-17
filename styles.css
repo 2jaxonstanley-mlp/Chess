@@ -570,7 +570,7 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 .rush-note { color: var(--muted); margin: 0 0 1rem; }
 .rush-pieces { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
 .rush-pieces .btn { display: flex; flex-direction: column; align-items: center; gap: .1rem; }
-.rush-pieces .rp-g { font-size: 2.4rem; line-height: 1.1; }
+.rush-pieces .rp-g { display: grid; place-items: center; width: 3.2rem; height: 3.2rem; margin: 0 auto; }
 #rush .captured { margin-left: auto; }
 #rush #rush-top-captured { font-size: .95rem; color: var(--muted); }
 .rush-pieces .rp-c { font-size: .85rem; font-weight: 400; color: var(--muted); }
@@ -867,7 +867,7 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 .panel { width: var(--bs); }
 
 /* ---- Neon pack: glowing pieces drawn only with CSS shapes (no glyphs, emoji or images) ---- */
-.piece[data-pk="neon"] { display: block; width: 1.12em; height: 1.12em; color: transparent; text-shadow: none; overflow: visible; --nc: #3df2ff; --nh: #e9fdff;
+.piece[data-pk="neon"] { display: block; width: .9em; height: .9em; color: transparent; text-shadow: none; overflow: visible; --nc: #3df2ff; --nh: #e9fdff;
   filter: drop-shadow(0 0 1px var(--nc)) drop-shadow(0 0 5px var(--nc)) drop-shadow(0 0 11px var(--nc)); }
 .piece.b[data-pk="neon"] { --nc: #ff3df0; --nh: #ffe6fc; }
 .piece[data-pk="neon"]::before { content: ""; position: absolute; inset: 0; clip-path: var(--shape); -webkit-clip-path: var(--shape);
@@ -884,12 +884,12 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 :root{--s-p:polygon(50% 14%,44% 15%,40% 19%,38% 25%,39% 31%,42% 36%,44% 39%,42% 42%,43% 45%,42% 52%,39% 60%,36% 68%,30% 73%,22% 77%,20% 81%,20% 88%,50% 88%,80% 88%,80% 81%,78% 77%,70% 73%,64% 68%,61% 60%,58% 52%,57% 45%,58% 42%,56% 39%,58% 36%,61% 31%,62% 25%,60% 19%,56% 15%);--s-b:polygon(50% 8%,47% 9%,46% 12%,47% 15%,42% 22%,37% 32%,35% 42%,37% 50%,42% 56%,43% 60%,37% 62%,37% 67%,41% 69%,40% 72%,32% 75%,22% 78%,20% 82%,20% 88%,50% 88%,80% 88%,80% 82%,78% 78%,68% 75%,60% 72%,59% 69%,63% 67%,63% 62%,57% 60%,58% 56%,63% 50%,65% 42%,63% 32%,58% 22%,53% 15%,54% 12%,53% 9%);--s-q:polygon(50% 8%,48% 9%,48% 13%,50% 14%,50% 14%,45% 30%,40% 19%,39% 13%,36% 12%,35% 16%,34% 28%,28% 24%,24% 25%,23% 30%,29% 44%,36% 56%,39% 62%,35% 66%,36% 71%,28% 74%,20% 78%,19% 82%,19% 88%,50% 88%,81% 88%,81% 82%,80% 78%,72% 74%,64% 71%,65% 66%,61% 62%,64% 56%,71% 44%,77% 30%,76% 25%,72% 24%,66% 28%,65% 16%,64% 12%,61% 13%,60% 19%,55% 30%,50% 14%,50% 14%,52% 13%,52% 9%);--s-k:polygon(50% 4%,46% 4%,46% 10%,40% 10%,40% 16%,46% 16%,46% 22%,43% 24%,32% 26%,24% 32%,23% 40%,28% 50%,37% 58%,39% 63%,35% 67%,36% 72%,28% 75%,20% 79%,19% 83%,19% 88%,50% 88%,81% 88%,81% 83%,80% 79%,72% 75%,64% 72%,65% 67%,61% 63%,63% 58%,72% 50%,77% 40%,76% 32%,68% 26%,57% 24%,54% 22%,54% 16%,60% 16%,60% 10%,54% 10%,54% 4%);--s-r:polygon(50% 12%,44% 12%,44% 22%,40% 22%,40% 12%,31% 12%,31% 22%,26% 22%,26% 34%,34% 40%,35% 62%,28% 66%,28% 72%,20% 76%,20% 88%,50% 88%,80% 88%,80% 76%,72% 72%,72% 66%,65% 62%,66% 40%,74% 34%,74% 22%,69% 22%,69% 12%,60% 12%,60% 22%,56% 22%,56% 12%);--s-n:polygon(24% 88%,24% 79%,31% 71%,38% 60%,40% 52%,33% 52%,25% 55%,16% 50%,15% 44%,24% 32%,29% 24%,30% 12%,38% 19%,46% 13%,52% 17%,64% 23%,73% 36%,78% 54%,79% 72%,78% 88%);}
 
 /* ---- Picture packs (Realism, Pixel, Blue & Gold): a 12 cell sprite sheet, white P B Q K N R then black P B Q K N R ---- */
-.piece[data-pk="sheet"] { display: block; width: 1.12em; height: 1.12em; color: transparent; text-shadow: none; overflow: visible;
+.piece[data-pk="sheet"] { display: block; width: .9em; height: .9em; color: transparent; text-shadow: none; overflow: visible;
   background-image: var(--sheet); background-repeat: no-repeat; background-size: 1200% 100%; background-position: var(--px, 0%) 50%;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
 .piece[data-pk="sheet"][data-px="1"] { image-rendering: pixelated; }
 .piece.w[data-pk], .piece.b[data-pk] { text-shadow: none; color: transparent; }
-.cp[data-pk] { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: middle; }
+.cp[data-pk] { display: inline-block; width: .92em; height: .92em; vertical-align: middle; }
 .cp[data-pk="sheet"] { background-image: var(--sheet); background-repeat: no-repeat; background-size: 1200% 100%; background-position: var(--px, 0%) 50%; color: transparent; text-shadow: none; }
 .cp[data-pk="sheet"][data-px="1"] { image-rendering: pixelated; }
 .cp[data-pk="neon"] { color: transparent; text-shadow: none; position: relative; --nc: #3df2ff; filter: drop-shadow(0 0 3px var(--nc)); }
@@ -960,3 +960,65 @@ body[data-bd="neon"] .board-wrap { box-shadow: 0 0 0 2px #3df2ff, 0 0 18px rgba(
 .ic-check { width: .5rem; height: 1rem; border: solid #fff; border-width: 0 .22rem .22rem 0; transform: rotate(45deg) translate(-.1rem, -.1rem); }
 .ic-gem { width: 1.05rem; height: 1.05rem; background: currentColor; transform: rotate(45deg); border-radius: .15rem; }
 .ic-star { width: 1.5rem; height: 1.5rem; background: currentColor; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+
+/* never show the plain text glyph: until a piece is tagged by the pack code it stays invisible */
+body[data-pack] .piece:not([data-pk]), body[data-pack] .cp:not([data-pk]) { color: transparent !important; text-shadow: none !important; }
+
+/* tasks tabs */
+.tk-tabs { margin: .2rem 0 .6rem; }
+.tk-tabs button em { font-style: normal; font-size: .8rem; opacity: .7; margin-left: .3rem; }
+.tk-hard { display: block; color: #f5b82e; font-size: .9rem; margin-top: .15rem; }
+.tk-card.wk { border-left: 3px solid #f5b82e; }
+
+/* stats page */
+.lb-tab .ic-sp { width: 1.2rem; height: 1.2rem; } .lb-tab > span { display: inline-grid; place-items: center; width: 1.3rem; height: 1.3rem; }
+.lb-crown { display: block; width: 2rem; height: 2rem; } .lb-crown .ic-sp { width: 100%; height: 100%; }
+.lb-empty span .ic-star { margin: 0 auto; width: 3rem; height: 3rem; }
+.st-nav { overflow-x: auto; scrollbar-width: none; } .st-nav::-webkit-scrollbar { display: none; }
+.st-nav .lb-tab { flex: 1 0 auto; padding-left: .8rem; padding-right: .8rem; }
+.st-body { padding-top: .8rem; } .hidden.st-body, #lb-records.hidden { display: none; }
+.st-seg { margin: 0 0 .8rem; padding: 3px; }
+.st-hero { display: flex; align-items: center; gap: .9rem; background: linear-gradient(135deg, #34362f, var(--panel)); border-radius: 16px; padding: 1rem; margin-bottom: .7rem; }
+.st-av { width: 3.4rem; height: 3.4rem; border-radius: 50%; background: #81b64c; color: #14210a; display: grid; place-items: center; font-size: 1.7rem; font-weight: 800; flex: none; }
+.st-hero-t { display: flex; flex-direction: column; min-width: 0; } .st-hero-t b { font-size: 1.4rem; } .st-hero-t span { color: var(--muted); font-size: .95rem; }
+.st-elos { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-bottom: .7rem; }
+.st-elo { background: var(--panel); border-radius: 14px; padding: .8rem .8rem .5rem; border-top: 3px solid var(--c); display: flex; flex-direction: column; min-width: 0; }
+.st-elo small { color: var(--c); font-weight: 700; letter-spacing: .03em; } .st-elo b { font-size: 2.3rem; line-height: 1.1; } .st-elo > span { color: var(--muted); font-size: .85rem; }
+.st-spark { display: block; width: 100%; height: 2.8rem; margin-top: .45rem; } .st-spark.none { color: #7d7c78; font-size: .85rem; height: auto; padding: .7rem 0 .3rem; }
+.st-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin: .7rem 0; }
+.st-tile { background: var(--panel); border-radius: 14px; padding: .75rem .85rem; display: flex; flex-direction: column; border-left: 3px solid var(--c); min-width: 0; }
+.st-tile small { color: var(--muted); font-weight: 700; font-size: .85rem; } .st-tile b { font-size: 1.7rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .st-tile span { color: #8c8b86; font-size: .85rem; }
+.st-sub { font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 1.2rem .2rem .6rem; }
+.st-card { background: var(--panel); border-radius: 16px; padding: 1rem; margin-bottom: .2rem; }
+.st-rec { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; margin-bottom: .8rem; }
+.st-rec b { display: block; font-size: 1.8rem; line-height: 1.15; } .st-rec small { color: var(--muted); font-weight: 700; }
+.st-stack { display: flex; height: .7rem; border-radius: 99px; overflow: hidden; background: #1d1d1d; gap: 2px; } .st-stack i { display: block; min-width: 4px; }
+.st-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.st-row { display: flex; align-items: center; gap: .8rem; background: var(--panel); border-radius: 12px; padding: .7rem .85rem; }
+.st-rn { flex: none; width: 6.2rem; font-weight: 700; display: flex; align-items: center; gap: .4rem; } .st-rb { flex: 1; min-width: 0; }
+.st-rv { flex: none; text-align: right; font-weight: 700; display: flex; flex-direction: column; min-width: 3.6rem; } .st-rv small { color: var(--muted); font-weight: 400; font-size: .8rem; }
+.st-pi { width: 1.8rem; height: 1.8rem; flex: none; }
+.st-quality { display: grid; gap: .45rem; background: var(--panel); border-radius: 14px; padding: .8rem .9rem; }
+.st-q { display: flex; align-items: center; gap: .6rem; } .st-q img, .st-qi { width: 1.5rem; height: 1.5rem; flex: none; display: grid; place-items: center; } .st-qi .ic-sp { width: 100%; height: 100%; }
+.st-qn { width: 6rem; flex: none; font-weight: 600; } .st-q b { width: 2.6rem; text-align: right; flex: none; }
+.st-qb { flex: 1; height: .6rem; background: #1d1d1d; border-radius: 99px; overflow: hidden; display: block; } .st-qb i { display: block; height: 100%; border-radius: 99px; }
+.st-note { color: #85847f; font-size: .85rem; margin: .6rem .2rem 0; text-align: center; }
+.st-empty { text-align: center; color: var(--muted); padding: 2.5rem 1rem; background: var(--panel); border-radius: 14px; }
+.st-games { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }
+.st-game { display: flex; align-items: center; gap: .8rem; background: var(--panel); border-radius: 12px; padding: .65rem .85rem; border-left: 3px solid #777; }
+.st-game.r-w { border-left-color: #81b64c; } .st-game.r-l { border-left-color: #ca3431; } .st-game.r-d { border-left-color: #8a8a85; }
+.st-res { width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: #1d1d1d; flex: none; }
+.r-w .st-res { background: #81b64c; color: #14210a; } .r-l .st-res { background: #ca3431; }
+.st-gwho { flex: 1; display: flex; flex-direction: column; min-width: 0; } .st-gwho span, .st-gval span { color: var(--muted); font-size: .85rem; }
+.st-gval { display: flex; flex-direction: column; text-align: right; } .st-gval b.up { color: #81b64c; } .st-gval b.dn { color: #ef6a4c; }
+.st-diffs { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+.st-diff { background: var(--panel); border-radius: 14px; padding: .8rem .4rem; text-align: center; border-top: 3px solid var(--c); display: flex; flex-direction: column; align-items: center; gap: .2rem; }
+.st-diff b { color: var(--c); } .st-diff > span { font-size: .85rem; color: var(--muted); }
+.st-ring { width: 3.6rem; height: 3.6rem; border-radius: 50%; display: grid; place-items: center; margin: .3rem 0; background: conic-gradient(var(--c) calc(var(--p) * 1%), #1d1d1d 0); }
+.st-ring i { font-style: normal; width: 2.7rem; height: 2.7rem; border-radius: 50%; background: var(--panel); display: grid; place-items: center; font-weight: 700; font-size: .95rem; }
+.st-bars { display: flex; align-items: flex-end; gap: .3rem; height: 6.5rem; background: var(--panel); border-radius: 14px; padding: .8rem .8rem .6rem; }
+.st-bars span { flex: 1; height: 100%; display: flex; align-items: flex-end; } .st-bars i { display: block; width: 100%; background: #ff9a4d; border-radius: 4px 4px 0 0; } .st-bars .neg i { background: #ca3431; }
+
+.pv-hat .ic-sp { width: 3.4rem; height: 3.4rem; margin-top: .5rem; } .sh-pv .pv-hat .ic-sp { width: 4.4rem; height: 4.4rem; } .cr-item .pv-hat .ic-sp { width: 6rem; height: 6rem; }
+/* accessories sit on the king's sprite (the sprite itself hides its text glyph, so the hat needs its own colour) */
+.piece[data-hat]::after { color: #fff !important; font-size: .5em; top: -6%; z-index: 2; text-shadow: none !important; }

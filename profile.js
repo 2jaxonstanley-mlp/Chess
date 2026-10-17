@@ -61,6 +61,6 @@
   }
   $('#acct').addEventListener('click', sheet);
 
-  LP.profile = { name: () => P.name, setName, elo, record, botRating: (l) => BOT[l], MODES };
+  LP.profile = { name: () => P.name, rec: (m) => Object.assign(blank(), P.rec[m]), setName, elo, record, botRating: (l) => BOT[l], MODES };
   render();
 })();
