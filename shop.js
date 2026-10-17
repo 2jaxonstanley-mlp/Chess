@@ -44,6 +44,7 @@
     ['cap', 'Cap', '\u{1F9E2}', 'common'], ['grad', 'Graduate', '\u{1F393}', 'common'], ['sun', 'Sun Hat', '\u{1F452}', 'common'], ['hard', 'Hard Hat', '⛑️', 'common'],
     ['top', 'Top Hat', '\u{1F3A9}', 'rare'], ['helm', 'Helmet', '\u{1FA96}', 'rare'], ['blossom', 'Blossom', '\u{1F338}', 'rare'], ['clover', 'Clover', '\u{1F340}', 'rare'],
   ].map(([id, name, e, r]) => ({ id, name, e, r }));
+  const RETRO = { id: '', name: 'Retro', pk: 'sheet', sheet: 'pk-retro.png' };   // the main skin everyone starts with
   const CRATES = {
     board: { name: 'Board Crate', slot: 'board', items: BOARDS, color: '#7cb342', badge: '▦' },
     piece: { name: 'Piece Crate', slot: 'piece', items: PIECES, color: '#f08c3a', badge: '♛' },
@@ -65,7 +66,7 @@
   const find = (slot, id) => CRATES[slot].items.find((x) => x.id === id);
   function apply() {
     const root = document.documentElement.style;
-    const b = find('board', S.equipped.board), p = find('piece', S.equipped.piece);
+    const b = find('board', S.equipped.board), p = find('piece', S.equipped.piece) || RETRO;
     root.setProperty('--light-sq', b ? b.l : '#eeeed2');
     root.setProperty('--dark-sq', b ? b.d : '#769656');
     root.setProperty('--light-img', b && b.li ? b.li : 'none');
@@ -196,7 +197,7 @@
     }
     return `<span class="pv-hat"><em>${it.e}</em><b>♚︎</b></span>`;
   }
-  const dflt = { board: { id: '', name: 'Classic', l: '#eeeed2', d: '#769656' }, piece: { id: '', name: 'Retro', w: '#ffffff', b: '#1a1a1a' }, hat: { id: '', name: 'None', e: '' } };
+  const dflt = { board: { id: '', name: 'Classic', l: '#eeeed2', d: '#769656' }, piece: RETRO, hat: { id: '', name: 'None', e: '' } };
 
   function renderShop() {
     $('#sh-tokens').textContent = S.tokens;
