@@ -15,8 +15,11 @@
   const PNAME = { q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight' };
   const PIC = { p: 0, b: 1, q: 2, k: 3, n: 4, r: 5 };
   const QUALITY = [
-    ['brilliant', 'Brilliant', '#26c2a3'], ['great', 'Great', '#5b8baf'], ['best', 'Best', '#81b64c'], ['book', 'Book', '#a88865'],
+    ['brilliant', 'Brilliant', '#26c9c3'], ['great', 'Great', '#26c2a3'], ['best', 'Best', '#96bc4b'], ['good', 'Good', '#2888aa'],
+    ['book', 'Book', '#c9a56b'], ['interesting', 'Interesting', '#a050aa'], ['novelty', 'Novelty', '#96969a'],
     ['inaccuracy', 'Inaccuracy', '#f7c631'], ['mistake', 'Mistake', '#e58f2a'], ['blunder', 'Blunder', '#ca3431'],
+    ['missedwin', 'Missed win', '#b41e28'], ['forced', 'Forced', '#78787d'],
+    ['matewhite', 'Checkmate (W)', '#ebebee'], ['mateblack', 'Checkmate (B)', '#19191c'],
   ];
   const DIFFS = [['easy', 'Easy', '#8fc15b'], ['normal', 'Normal', '#f2c45a'], ['hard', 'Hard', '#ef6a4c']];
   const KINDS = { mate: ['Checkmate', 3], check: ['Check', 5], best: ['Best move', 4] };

@@ -1,5 +1,6 @@
 /**
- * Move strength ratings: Brilliant, Great, Best, Book, Inaccuracy, Mistake and Blunder (other moves get no label).
+ * Move strength ratings: Brilliant, Great, Best, Good, Book, Interesting, Inaccuracy, Mistake, Blunder,
+ * Missed win, Novelty, Forced, and Checkmate (white/black).
  * Each move is compared with the best move found by a short material search (puzzlegen.js), so it spots hung pieces,
  * missed captures, wins and losses of material and mates; it does not judge purely positional ideas.
  */
@@ -8,13 +9,20 @@
   const PG = window.PuzzleGen;
 
   const RATINGS = {
-    brilliant:  { id: 'brilliant', phrase: 'brilliant',  label: 'Brilliant',  sym: '!!', color: '#26c9c3' },
-    great:      { id: 'great', phrase: 'a great move',      label: 'Great move', sym: '!',  color: '#749bbf' },
-    best:       { id: 'best', phrase: 'the best move',       label: 'Best',       sym: '★', color: '#96bc4b' },
-    book:       { id: 'book', phrase: 'a book move',       label: 'Book',       sym: 'B',  color: '#c9a56b' },
-    inaccuracy: { id: 'inaccuracy', phrase: 'an inaccuracy', label: 'Inaccuracy', sym: '?!', color: '#f7c631' },
-    mistake:    { id: 'mistake', phrase: 'a mistake',    label: 'Mistake',    sym: '?',  color: '#e58f2a' },
-    blunder:    { id: 'blunder', phrase: 'a blunder',    label: 'Blunder',    sym: '??', color: '#ca3431' },
+    brilliant:   { id: 'brilliant',   phrase: 'brilliant',            label: 'Brilliant',    sym: '!!', color: '#26c9c3' },
+    great:       { id: 'great',       phrase: 'a great move',         label: 'Great move',   sym: '!',  color: '#26c2a3' },
+    best:        { id: 'best',        phrase: 'the best move',        label: 'Best',         sym: '★', color: '#96bc4b' },
+    good:        { id: 'good',        phrase: 'a good move',          label: 'Good',         sym: '!',  color: '#2888aa' },
+    book:        { id: 'book',        phrase: 'a book move',          label: 'Book',         sym: 'B',  color: '#c9a56b' },
+    interesting: { id: 'interesting', phrase: 'interesting',          label: 'Interesting',  sym: '!?', color: '#a050aa' },
+    inaccuracy:  { id: 'inaccuracy',  phrase: 'an inaccuracy',        label: 'Inaccuracy',   sym: '?!', color: '#f7c631' },
+    mistake:     { id: 'mistake',     phrase: 'a mistake',            label: 'Mistake',      sym: '?',  color: '#e58f2a' },
+    blunder:     { id: 'blunder',     phrase: 'a blunder',            label: 'Blunder',      sym: '??', color: '#ca3431' },
+    missedwin:   { id: 'missedwin',   phrase: 'a missed win',         label: 'Missed win',   sym: 'X',  color: '#b41e28' },
+    novelty:     { id: 'novelty',     phrase: 'a novelty',            label: 'Novelty',      sym: 'N',  color: '#96969a' },
+    forced:      { id: 'forced',      phrase: 'forced',               label: 'Forced',       sym: '□',  color: '#78787d' },
+    matewhite:   { id: 'matewhite',   phrase: 'checkmate',            label: 'Checkmate',    sym: '#',  color: '#ebebee' },
+    mateblack:   { id: 'mateblack',   phrase: 'checkmate',            label: 'Checkmate',    sym: '#',  color: '#19191c' },
   };
 
   const BOOK_LINES = [
@@ -172,12 +180,22 @@
   function rate(g0, m) {
     const g = clone(g0);
     const legal = g.legalMoves();
-    if (legal.length <= 1) return null;                // a forced move is not worth a label
+    if (legal.length <= 1) return RATINGS.forced;      // only legal move
     if (!book) buildBook();
-    if (g.fullmove <= 12) { const set = book.get(boardKey(g)); if (set && set.has(m.from + '-' + m.to)) return RATINGS.book; }
+    const inBook = g.fullmove <= 12;
+    const set = inBook ? book.get(boardKey(g)) : null;
+    const key = m.from + '-' + m.to;
+    if (set && set.has(key)) return RATINGS.book;
 
     PG.setHorizon(true);
-    try { return rateIn(g, legal, m); } finally { PG.setHorizon(false); }
+    try {
+      const r = rateIn(g, legal, m);
+      // First departure from theory in the opening is a novelty (when the move is still decent)
+      if (inBook && set && set.size && !set.has(key) && r && (r.id === 'best' || r.id === 'good' || r.id === 'great')) {
+        return RATINGS.novelty;
+      }
+      return r;
+    } finally { PG.setHorizon(false); }
   }
 
   /** Rate every legal move of g0 at once (one shared search for the best score). Returns [{ move, rating }]. */
@@ -185,18 +203,25 @@
     const g = clone(g0);
     const legal = g.legalMoves();
     if (!book) buildBook();
-    const set = g.fullmove <= 12 ? book.get(boardKey(g)) : null;
+    const inBook = g.fullmove <= 12;
+    const set = inBook ? book.get(boardKey(g)) : null;
     const out = [];
     PG.setHorizon(true);
     try {
       const top = legal.length > 1 ? PG.bestAt(g, D) : null;
       for (const mv of legal) {
         let rating = null;
-        if (legal.length > 1) {
-          if (set && set.has(mv.from + '-' + mv.to)) rating = RATINGS.book;
-          else { lastInfo = null; rating = rateIn(g, legal, { from: mv.from, to: mv.to, promo: mv.promo || 0 }, top); }
+        const key = mv.from + '-' + mv.to;
+        if (legal.length <= 1) rating = RATINGS.forced;
+        else if (set && set.has(key)) rating = RATINGS.book;
+        else {
+          lastInfo = null;
+          rating = rateIn(g, legal, { from: mv.from, to: mv.to, promo: mv.promo || 0 }, top);
+          if (inBook && set && set.size && rating && (rating.id === 'best' || rating.id === 'good' || rating.id === 'great')) {
+            rating = RATINGS.novelty;
+          }
         }
-        out.push({ move: mv, rating, loss: rating && rating.id === 'book' ? 0 : (lastInfo ? lastInfo.loss : 0) });
+        out.push({ move: mv, rating, loss: rating && (rating.id === 'book' || rating.id === 'forced') ? 0 : (lastInfo ? lastInfo.loss : 0) });
       }
     } finally { PG.setHorizon(false); }
     return out;
@@ -209,10 +234,19 @@
     const before = PG.evalSide(g);                                   // material, from the mover's side
     const top = topIn || PG.bestAt(g, D);
     const piece = g.board[mv.from] & 7, captured = g.board[mv.to] || mv.flags === 2;
+    const whiteToMove = g.turn === WHITE;
     g.makeMove(mv);
+    // Checkmate delivered by this move? (stalemate is not labelled)
+    let isMate = false;
+    try {
+      if (typeof g.isCheckmate === 'function') isMate = g.isCheckmate();
+      else if (!g.legalMoves().length && g.inCheck(g.turn)) isMate = true;
+    } catch (e) { /* ignore */ }
     const played = -PG.nega(g, D - 1, -INF, INF, 1);
     const afterQs = -PG.qs(g, -INF, INF, 0);                         // material once the opponent has taken what it can
     g.unmakeMove();
+
+    if (isMate) return whiteToMove ? RATINGS.matewhite : RATINGS.mateblack;
 
     const mates = (v) => Math.abs(v) > PG.MATE - 100;
     let loss = Math.max(0, top.score - played);
@@ -220,21 +254,27 @@
     loss = Math.min(loss, 3000);
     lastInfo = { loss, played };
 
+    // Missed a forced mate / crushing win
+    if (mates(top.score) && top.score > 0 && (loss > 250 || !mates(played) || played <= 0)) {
+      return RATINGS.missedwin;
+    }
+
     if (loss <= 10) {
       if (afterQs <= before - 250 && played >= before - 100 && played > -300) return RATINGS.brilliant;
       if (!captured && legal.length > 2 && !PG.rivalWithin(g, mv, top.score, D, 150)) return RATINGS.great;
-      // "Best" is for a move that clearly stands out; when several moves are about as good, none gets a label
+      // "Best" is for a move that clearly stands out; when several moves are about as good, mark Good
       if (!PG.rivalWithin(g, mv, top.score, D, 30)) return RATINGS.best;
-      return null;
+      return RATINGS.good;
     }
-    if (loss < 100) return null;                       // fine moves that are not the best get no label
-    if (loss < 200) return RATINGS.inaccuracy;
+    // Interesting: speculative / slightly suboptimal but not really wrong (often a sac idea)
+    if (loss < 80 && afterQs <= before - 150 && played >= before - 200) return RATINGS.interesting;
+    if (loss < 80) return RATINGS.good;
+    if (loss < 150) return RATINGS.inaccuracy;
     if (loss < 300) return RATINGS.mistake;
     return RATINGS.blunder;
   }
 
-  /* Optional artwork: drop icon-<id>.png (brilliant, great, best, book, inaccuracy, mistake, blunder)
-     into the game folder and they replace the text symbols automatically. */
+  /* Optional artwork: drop icon-<id>.png into the game folder and they replace the text symbols automatically. */
   for (const x of Object.values(RATINGS)) {
     x.img = 'icon-' + x.id + '.png';
     const im = new Image();
