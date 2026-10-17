@@ -180,11 +180,34 @@
     try { return rateIn(g, legal, m); } finally { PG.setHorizon(false); }
   }
 
-  function rateIn(g, legal, m) {
+  /** Rate every legal move of g0 at once (one shared search for the best score). Returns [{ move, rating }]. */
+  function rateAll(g0) {
+    const g = clone(g0);
+    const legal = g.legalMoves();
+    if (!book) buildBook();
+    const set = g.fullmove <= 12 ? book.get(boardKey(g)) : null;
+    const out = [];
+    PG.setHorizon(true);
+    try {
+      const top = legal.length > 1 ? PG.bestAt(g, D) : null;
+      for (const mv of legal) {
+        let rating = null;
+        if (legal.length > 1) {
+          if (set && set.has(mv.from + '-' + mv.to)) rating = RATINGS.book;
+          else { lastInfo = null; rating = rateIn(g, legal, { from: mv.from, to: mv.to, promo: mv.promo || 0 }, top); }
+        }
+        out.push({ move: mv, rating, loss: rating && rating.id === 'book' ? 0 : (lastInfo ? lastInfo.loss : 0) });
+      }
+    } finally { PG.setHorizon(false); }
+    return out;
+  }
+
+  let lastInfo = null;
+  function rateIn(g, legal, m, topIn) {
     const mv = legal.find((x) => x.from === m.from && x.to === m.to && (x.promo || 0) === (m.promo || 0));
     if (!mv) return null;
     const before = PG.evalSide(g);                                   // material, from the mover's side
-    const top = PG.bestAt(g, D);
+    const top = topIn || PG.bestAt(g, D);
     const piece = g.board[mv.from] & 7, captured = g.board[mv.to] || mv.flags === 2;
     g.makeMove(mv);
     const played = -PG.nega(g, D - 1, -INF, INF, 1);
@@ -195,6 +218,7 @@
     let loss = Math.max(0, top.score - played);
     if (mates(top.score) && mates(played) && top.score > 0 && played > 0) loss = 0;   // still mating
     loss = Math.min(loss, 3000);
+    lastInfo = { loss, played };
 
     if (loss <= 10) {
       if (afterQs <= before - 250 && played >= before - 100 && played > -300) return RATINGS.brilliant;
@@ -219,5 +243,5 @@
   }
   const iconHtml = (x) => (x.hasImg ? `<img class="ri" src="${x.img}" alt="${x.label}">` : x.sym.replace(/&/g, '&amp;').replace(/</g, '&lt;'));
 
-  window.MoveRating = { rate, clone, iconHtml, openingName, RATINGS, get: (id) => RATINGS[id] || null };
+  window.MoveRating = { rate, rateAll, clone, iconHtml, openingName, RATINGS, get: (id) => RATINGS[id] || null };
 })();

@@ -692,7 +692,7 @@
     easy:    { maxDepth: 1, time: 300,  q: 0, noise: 120, blunder: 0.18 },
     medium:  { maxDepth: 2, time: 500,  q: 1, noise: 90,  blunder: 0.10 },        // about an average club beginner, roughly 1000
     hard:    { maxDepth: 3, time: 700,  q: 2, noise: 40,  blunder: 0.03, book: true },  // a solid improving player, roughly 1500
-    insane:  { maxDepth: 30, time: 4200, q: 8, noise: 0,  blunder: 0 },
+    insane:  { maxDepth: 30, time: 4200, q: 8, noise: 0,  blunder: 0, book: true, polish: true },   // plays book lines, then double-checks its move so it avoids labelled mistakes and goes for brilliant/best moves
     // Godly: searches 5 full moves (10 plies), keeps its 3 best moves and picks one at random 3/6, 2/6, 1/6
     godly:   { maxDepth: 14, time: 6000, q: 8, noise: 0,  blunder: 0, multi: 5, pick: 3, weights: [3, 2, 1], castle: 120, guard: true, window: 70, mate: true },
     hint:    { maxDepth: 30, time: 3800, q: 8, noise: 0,  blunder: 0, multi: 3, pick: 3 },   // TAS: the 3 best moves
@@ -858,6 +858,32 @@
   };
 
   /**
+   * Insane only: check the chosen move the way the move-strength labels do. A move that would be labelled an
+   * inaccuracy, mistake or blunder is swapped for the best-labelled alternative, and a brilliant / best move is
+   * preferred over an unlabelled one. Skipped when the rating code is not loaded or for Secret Queen.
+   */
+  function polish(g, pick) {
+    try {
+      const MR = window.MoveRating;
+      if (!MR || !MR.rateAll || g.mode !== 'basic') return pick;
+      const list = MR.rateAll(g);
+      const key = (m) => m.from + '-' + m.to + '-' + (m.promo || 0);
+      const mine = list.find((x) => key(x.move) === key(pick));
+      const cls = { brilliant: 5, great: 4, best: 3, book: 2 };
+      const bad = (x) => x.rating && (x.rating.id === 'inaccuracy' || x.rating.id === 'mistake' || x.rating.id === 'blunder');
+      const score = (x) => (x.rating && cls[x.rating.id] ? cls[x.rating.id] : 1);
+      const pool = list.filter((x) => !bad(x));
+      if (!pool.length || !mine) return pick;
+      const bestOf = (arr) => arr.slice().sort((a, b) => score(b) - score(a) || a.loss - b.loss)[0];
+      let choice = mine;
+      if (bad(mine)) choice = bestOf(pool);
+      else if (score(mine) < 3) { const c = bestOf(pool); if (score(c) >= 3 && c.loss <= 10) choice = c; }
+      else if (score(mine) < 5) { const c = pool.find((x) => x.rating && x.rating.id === 'brilliant'); if (c) choice = c; }
+      return g.legalMovesFrom(choice.move.from).find((x) => x.to === choice.move.to && x.promo === choice.move.promo) || pick;
+    } catch (e) { return pick; }
+  }
+
+  /**
    * Find the computer's move. Calls cb(move) (a move object valid in the real game `g`) when done.
    * `seen` is an optional Map of position-key -> times seen, used to avoid shuffling back and forth.
    */
@@ -874,6 +900,7 @@
         const all = g.legalMoves();
         out = all.length ? all[Math.floor(Math.random() * all.length)] : null;
       }
+      if (out && cfg.polish) out = polish(g, out);
       cb(out);
     };
 

@@ -21,7 +21,7 @@
   const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } };
   const load = () => read(KEY, []);
   const save = (l) => write(KEY, l);
-  const lastName = () => read(NAME, '') || '';
+  const lastName = () => (LP.profile && LP.profile.name()) || read(NAME, '') || '';
   const setName = (n) => write(NAME, n);
 
   /* the old Rush best scores become a "Earlier games" board */

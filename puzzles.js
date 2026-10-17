@@ -323,6 +323,7 @@
     updateInfo();
     clearSave();
     if (!revealed) {
+      if (LP.rewards) LP.rewards.event('puzzle');
       stats.win();
       const st = stats.get();
       if (!missed && st.streak >= 3 && LP.board) {

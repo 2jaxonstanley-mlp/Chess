@@ -307,8 +307,15 @@
     return { w: byWhite.sort(sort), b: byBlack.sort(sort) };
   }
 
+  /** Ratings next to the names in one-player Classic and Secret Queen games. */
+  function eloTag(c) {
+    const Pf = window.LP && window.LP.profile;
+    if (!Pf || !ai || bots || playBoth || phase === 'replay' || !Pf.MODES[mode]) return '';
+    return ' (' + (c === ai.human ? Pf.elo(mode) : Pf.botRating(ai.level)) + ')';
+  }
+
   function fillBar(prefix, color, caps, adv) {
-    $('#' + prefix + '-name').textContent = nameOf(color);
+    $('#' + prefix + '-name').textContent = nameOf(color) + eloTag(color);
     $('#' + prefix + '-dot').className = 'dot ' + (color === WHITE ? 'w' : 'b');
     const box = $('#' + prefix + '-captured');
     box.innerHTML = '';
@@ -350,11 +357,19 @@
         pair = document.createElement('div');
         pair.className = 'pair';
         moveListEl.appendChild(pair);
+        const pn = document.createElement('span');
+        pn.className = 'pn';
+        pn.textContent = Math.floor(i / 2) + 1 + '.';
+        pair.appendChild(pn);
       }
       const b = document.createElement('button');
       b.className = 'move ' + (i % 2 === 0 ? 'w' : 'b') + (i === cur - 1 ? ' current' : '');
       b.dataset.ply = i;
-      b.textContent = Math.floor(i / 2) + 1 + '. ' + fmt(san);
+      const mn = document.createElement('span');
+      mn.className = 'mn';
+      mn.textContent = Math.floor(i / 2) + 1 + '. ';
+      b.appendChild(mn);
+      b.appendChild(document.createTextNode(fmt(san)));
       const rid = ratingIdAt(i), rinfo = rid && window.MoveRating ? window.MoveRating.get(rid) : null;
       if (rinfo) { const sp = document.createElement('span'); sp.className = 'mv-r'; sp.style.color = rinfo.color; sp.innerHTML = ' ' + window.MoveRating.iconHtml(rinfo); b.appendChild(sp); }
       pair.appendChild(b);
@@ -477,23 +492,10 @@
   /* 0 players: pick a computer level for White, then for Black, and watch them play */
   function askBot(m, color, whiteLevel) {
     const white = color === WHITE;
-    openSheet(`<h2>${white ? 'White' : 'Black'} computer</h2>
-      <div class="stack">
-        <button class="btn big" data-lv="dumb">Dumb</button>
-        <button class="btn big" data-lv="easy">Easy</button>
-        <button class="btn big" data-lv="medium">Medium</button>
-        <button class="btn big" data-lv="hard">Hard</button>
-        <button class="btn big" data-lv="insane">Insane</button>
-        <button class="btn big" data-lv="godly">Godly</button>
-        <button class="btn" id="df-x">Cancel</button>
-      </div>`, true);
-    sheet.querySelectorAll('[data-lv]').forEach((b) => {
-      b.onclick = () => {
-        if (white) askBot(m, BLACK, b.dataset.lv);
-        else { closeSheet(); startBots(m, whiteLevel, b.dataset.lv); }
-      };
+    levelMenu((white ? 'White' : 'Black') + ' computer', white ? 'Pick the first computer.' : 'Pick the second computer.', (lv) => {
+      if (white) askBot(m, BLACK, lv);
+      else { closeSheet(); startBots(m, whiteLevel, lv); }
     });
-    $('#df-x').onclick = closeSheet;
   }
 
   function startBots(m, wl, bl) {
@@ -514,21 +516,31 @@
     afterNames();
   }
 
-  function askDifficulty(m) {
-    openSheet(`<h2>Choose difficulty</h2>
-      <div class="stack">
-        <button class="btn big" data-lv="dumb">Dumb</button>
-        <button class="btn big" data-lv="easy">Easy</button>
-        <button class="btn big" data-lv="medium">Medium</button>
-        <button class="btn big" data-lv="hard">Hard</button>
-        <button class="btn big" data-lv="insane">Insane</button>
-        <button class="btn big" data-lv="godly">Godly</button>
-        <button class="btn" id="df-x">Cancel</button>
-      </div>`, true);
-    sheet.querySelectorAll('[data-lv]').forEach((b) => {
-      b.onclick = () => { closeSheet(); startGame(m, false, b.dataset.lv); };
-    });
+  /* The computer levels, weakest to strongest, shown as cards (also used by Capture Rush) */
+  const LEVEL_INFO = [
+    { id: 'dumb',   ic: '\u265F', col: '#9aa0a6', n: 1, tag: 'For laughs',   sub: 'Plays the worst moves it can find.' },
+    { id: 'easy',   ic: '\u265E', col: '#8fc15b', n: 2, tag: 'Beginner',     sub: 'Makes plenty of mistakes.' },
+    { id: 'medium', ic: '\u265D', col: '#5ab0ff', n: 3, tag: 'About 1000',   sub: 'Plays like an average player.' },
+    { id: 'hard',   ic: '\u265C', col: '#f2c45a', n: 4, tag: 'About 1500',   sub: 'A solid, improving player.' },
+    { id: 'godly',  ic: '\u265B', col: '#b48cf2', n: 5, tag: 'Expert',       sub: 'Looks far ahead and varies its strong moves.' },
+    { id: 'insane', ic: '\u265A', col: '#ff6b6b', n: 5, tag: 'Maximum',      sub: 'Plays book lines and hunts for brilliant moves.' },
+  ];
+  function levelMenu(title, sub, cb) {
+    openSheet(`<h2>${esc(title)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h2>
+      <div class="lv-list">
+        ${LEVEL_INFO.map((l) => `<button class="lv-card" data-lv="${l.id}" style="--lc:${l.col}">
+          <span class="lv-ic" aria-hidden="true">${l.ic}&#xFE0E;</span>
+          <span class="lv-text"><span class="lv-top"><b>${LEVEL_LABEL[l.id]}</b><em>${l.tag}</em></span><span class="lv-sub">${l.sub}</span>
+            <span class="lv-meter" aria-hidden="true">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= l.n ? 'on' : ''}"></i>`).join('')}</span></span>
+        </button>`).join('')}
+      </div>
+      <button class="btn wide" id="df-x">Cancel</button>`, true);
+    sheet.querySelectorAll('[data-lv]').forEach((b) => { b.onclick = () => cb(b.dataset.lv); });
     $('#df-x').onclick = closeSheet;
+  }
+
+  function askDifficulty(m) {
+    levelMenu('Choose difficulty', 'Who do you want to play?', (lv) => { closeSheet(); startGame(m, false, lv); });
   }
 
   function freshGame(m) {
@@ -635,6 +647,7 @@
       <input id="name-in" type="text" maxlength="16" placeholder="${white ? 'White' : 'Black'}" autocomplete="off" autocapitalize="words" enterkeyhint="next">
       <div class="row"><button class="btn" id="n-cancel">Cancel</button><button class="btn primary" id="n-ok">${white ? 'Next' : 'Start'}</button></div>`);
     const inp = $('#name-in');
+    if (white && window.LP.profile && window.LP.profile.name()) inp.value = window.LP.profile.name();
     const ok = () => {
       names[color] = inp.value.trim() || cname(color);
       if (white) askName(BLACK); else askSettings();
@@ -646,11 +659,13 @@
 
   /* single player: your name, which side, then hints */
   function askSoloName() {
+    const mine = window.LP.profile && window.LP.profile.name();
+    if (mine) { askSide(mine); return; }            // the profile name is used automatically
     openSheet(`<h2>What is your name?</h2>
       <input id="name-in" type="text" maxlength="16" placeholder="Player" autocomplete="off" autocapitalize="words" enterkeyhint="next">
       <div class="row"><button class="btn" id="n-cancel">Cancel</button><button class="btn primary" id="n-ok">Next</button></div>`);
     const inp = $('#name-in');
-    const ok = () => askSide(inp.value.trim() || 'Player');
+    const ok = () => { const nm = inp.value.trim() || 'Player'; if (window.LP.profile) window.LP.profile.setName(nm); askSide(nm); };
     $('#n-ok').onclick = ok;
     $('#n-cancel').onclick = backToMenu;
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
@@ -929,6 +944,7 @@
     const before = ratingsOn() ? window.MoveRating.clone(game) : null;   // the position before the move, for rating it
     const san = game.moveToSan(m);
     const mover = game.turn;
+    if (!bots && window.LP.rewards && (game.board[m.to] || m.flags === 2)) window.LP.rewards.event('capture', 1);
     game.makeMove(m);
     const check = game.inCheck(game.turn);
     const canMove = game.hasLegalMove();
@@ -990,7 +1006,10 @@
       ? { title: nameOf(mover) + ' wins', sub: 'Checkmate', result: mover === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
     const lb = type === 'mate' ? recordWin(mover) : null;
+    const Pf = window.LP.profile;
+    if (Pf && ai && !bots && !playBoth && Pf.MODES[mode]) over.elo = Pf.record(mode, ai.level, type === 'mate' ? (mover === ai.human ? 1 : 0) : 0.5);
     if (lb && lb.rank) over.note = lb.isBest ? 'New best: checkmate in ' + lb.entry.value + ' moves!' : '#' + lb.rank + ' on the leaderboard';
+    if (!bots && !isTas() && window.LP.rewards) window.LP.rewards.event('game', { mode, won: type === 'mate' && (!ai || mover === ai.human) });
     updateControls();
     overStatus();
     setTimeout(() => {
@@ -1024,6 +1043,7 @@
         <button class="btn" id="ov-save" ${savedNote === true ? 'disabled' : ''}>${savedNote === true ? (isTas() ? 'TAS saved' : 'Replay saved') : (isTas() ? 'Save TAS' : 'Save replay')}</button>
         <div class="row"><button class="btn" id="ov-new">New game</button><button class="btn" id="ov-close">Close</button></div>
       </div>
+      ${over.elo ? `<p class="elo-line ${over.elo.delta >= 0 ? 'up' : 'down'}"><span>${MODE_LABEL[mode]} rating</span><b>${over.elo.after}</b><em>${over.elo.delta >= 0 ? '+' : '\u2212'}${Math.abs(over.elo.delta)}</em></p>` : ''}
       <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${savedNote === true ? 'Find it on the main menu.' : ''}</p>`);
     $('#ov-watch').onclick = () => { closeSheet(); startReplay(buildReplayData(), 'over'); };
     $('#ov-save').onclick = showSaveSheet;
@@ -1389,5 +1409,5 @@
 
   renderSavedList();
   buildBoard();
-  window.LP = { openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session };
+  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session };
 })();

@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Local Pieces</title>
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css?v=18">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -18,6 +18,7 @@
 
     <!-- MENU -->
     <section id="menu" class="page active">
+      <button id="acct" class="acct" aria-label="Your profile"><span class="acct-av" id="acct-av">?</span><span class="acct-tx"><b id="acct-name">Set name</b><small id="acct-elo">Tap to set up</small></span></button>
       <div class="menu-inner">
         <header class="hero">
           <span class="hero-mark" aria-hidden="true">&#9822;&#xFE0E;</span>
@@ -82,6 +83,26 @@
           </button>
         </div>
 
+        <h2 class="menu-label">Rewards</h2>
+        <div class="modes">
+          <button class="mode" data-mode="tasks" style="--accent:#3fbfa3">
+            <span class="mode-ic" aria-hidden="true">&#10003;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">Daily Tasks</span>
+              <span id="tasks-desc" class="mode-desc">Complete tasks to earn tokens.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="shop" style="--accent:#f5a623">
+            <span class="mode-ic" aria-hidden="true">&#9830;&#xFE0E;</span>
+            <span class="mode-text">
+              <span class="mode-name">Shop</span>
+              <span id="shop-desc" class="mode-desc">Spend tokens on crates.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+        </div>
+
         <h2 class="menu-label">Records</h2>
         <div class="modes">
           <button class="mode" data-mode="board" style="--accent:#e8c14a">
@@ -129,6 +150,9 @@
             <span class="captured" id="bottom-captured"></span>
           </div>
 
+        </div>
+
+        <div class="panel">
           <div id="status" class="status">&nbsp;</div>
           <div id="rating-line" class="rating-line hidden"></div>
 
@@ -261,6 +285,35 @@
       </div>
     </section>
 
+    <!-- DAILY TASKS -->
+    <section id="tasks" class="page">
+      <header class="game-header">
+        <button id="tk-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span class="pz-head"><span class="pz-badge tk" aria-hidden="true">&#10003;&#xFE0E;</span><span class="mode-title">Daily Tasks</span></span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="lb-wrap">
+        <div class="tk-tokens"><span class="coin big" aria-hidden="true"><i></i></span><span><small>Your tokens</small><b id="tk-tokens">0</b></span><button id="tk-shop" class="btn">Shop</button></div>
+        <p class="tk-reset">New tasks in <b id="tk-left"></b></p>
+        <div id="tk-list"></div>
+        <p class="lb-hint">Games against the computer and friends all count. Spend your tokens on crates in the Shop.</p>
+      </div>
+    </section>
+
+    <!-- SHOP -->
+    <section id="shop" class="page">
+      <header class="game-header">
+        <button id="sh-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span class="pz-head"><span class="crate mini" style="--c:#f5a623"><i></i></span><span class="mode-title">Shop</span></span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="lb-wrap">
+        <div class="tk-tokens"><span class="coin big" aria-hidden="true"><i></i></span><span><small>Your tokens</small><b id="sh-tokens">0</b></span></div>
+        <h2 class="menu-label">Crates</h2>
+        <div id="sh-list"></div>
+      </div>
+    </section>
+
     <!-- LEADERBOARD -->
     <section id="board" class="page">
       <header class="game-header">
@@ -282,13 +335,15 @@
     </div>
   </div>
 
-  <script src="chess.js?v=15"></script>
-  <script src="ai.js?v=15"></script>
-  <script src="app.js?v=15"></script>
-  <script src="leaderboard.js?v=15"></script>
-  <script src="rush.js?v=15"></script>
-  <script src="puzzlegen.js?v=15"></script>
-  <script src="ratings.js?v=15"></script>
-  <script src="puzzles.js?v=15"></script>
+  <script src="chess.js?v=18"></script>
+  <script src="ai.js?v=18"></script>
+  <script src="app.js?v=18"></script>
+  <script src="leaderboard.js?v=18"></script>
+  <script src="profile.js?v=18"></script>
+  <script src="shop.js?v=18"></script>
+  <script src="rush.js?v=18"></script>
+  <script src="puzzlegen.js?v=18"></script>
+  <script src="ratings.js?v=18"></script>
+  <script src="puzzles.js?v=18"></script>
 </body>
 </html>

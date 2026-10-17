@@ -450,6 +450,7 @@
     if (side === W && cap) {
       // Double points for White captures
       g.score += VALUE[cap.t] * 2;
+      if (cfg.players !== 0 && LP.rewards) LP.rewards.event('capture', 1);
       g.caps.push(cap.t);
       // Only respawn if Black is at or under 3 pieces after the capture
       if (blackSquares(cells).length <= 3) {
@@ -552,6 +553,7 @@
     clearRush();
     updateHud(); render(); setStatus('Time is up');
     g.lb = recordScore();
+    if (cfg.players !== 0 && LP.rewards) LP.rewards.event('rush');
     const my = token;
     setTimeout(() => {
       if (my !== token) return;
@@ -784,6 +786,13 @@
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
   }
 
+  /** One-player name: the profile name when there is one, otherwise ask once and keep it. */
+  function askSolo(cb) {
+    const mine = LP.profile && LP.profile.name();
+    if (mine) { cb(mine); return; }
+    askName('What is your name?', 'Player', (nm) => { if (LP.profile) LP.profile.setName(nm); cb(nm); });
+  }
+
   function askPiece(who, cb) {
     LP.openSheet(`<h2>${esc(who)}, choose your piece<span class="sub">Pick the piece you will play with.</span></h2>
       <div class="rush-pieces">
@@ -792,15 +801,7 @@
     document.querySelectorAll('[data-pc]').forEach((b) => { b.onclick = () => cb(b.dataset.pc); });
   }
 
-  function askLevel(cb, title) {
-    LP.openSheet(`<h2>${esc(title || 'Choose difficulty')}</h2>
-      <div class="stack">
-        ${Object.keys(LEVELS).map((k) => `<button class="btn big" data-lv="${k}">${LP.LEVEL_LABEL[k]}</button>`).join('')}
-        <button class="btn" id="df-x">Cancel</button>
-      </div>`, true);
-    document.querySelectorAll('[data-lv]').forEach((b) => { b.onclick = () => cb(b.dataset.lv); });
-    $('#df-x').onclick = LP.closeSheet;
-  }
+  function askLevel(cb, title) { LP.levelMenu(title || 'Choose difficulty', '', cb); }
 
   function finishSetup() {
     askYN('Show legal move hints?', 'Show where each piece can move.', (h) => { cfg.hints = h; newRound(); });
@@ -833,7 +834,7 @@
     $('#pl-1').onclick = () => {
       askLevel((lv) => {
         cfg = { players: 1, level: lv, names: {}, hints: true };
-        askName('What is your name?', 'Player', (nm) => {
+        askSolo((nm) => {
           LP.openSheet(`<h2>Play as<span class="sub">Choose your side.</span></h2>
             <div class="stack">
               <button class="btn big" data-side="w">White</button>
