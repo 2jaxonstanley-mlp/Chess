@@ -20,27 +20,29 @@
   /* ------------------------------------------------------------------ items */
   const BOARDS = [
     ['walnut', 'Walnut', '#e8d3b0', '#a67c52', 'common'], ['ocean', 'Ocean', '#dfe9ee', '#5f8fa8', 'common'],
-    ['sage', 'Sage', '#e9eddc', '#8fa876', 'common'], ['slate', 'Slate', '#e4e6ea', '#6e7b8b', 'common'],
+    ['sage', 'Sage', '#e9eddc', '#8fa876', 'common'], ['slate', 'Slate', '#5f6c75', '#42535d', 'common'],
     ['sand', 'Sand', '#f3e6c8', '#c9a66b', 'common'], ['rose', 'Rose', '#f6e3e3', '#c78a93', 'common'],
     ['dusk', 'Dusk', '#b9c2d9', '#4a5b82', 'rare'], ['forest', 'Forest', '#d8e2c4', '#3f6b45', 'rare'],
     ['amethyst', 'Amethyst', '#e6dcef', '#7c5ea8', 'rare'], ['coral', 'Coral', '#fbe4d8', '#e0795a', 'rare'],
-    ['blossom', 'Blossom', '#fde8f0', '#d96b9a', 'epic'], ['ember', 'Ember', '#ffd9b8', '#c4491c', 'epic'],
-    ['royal', 'Royal', '#f0e1ff', '#7a4fd1', 'legendary'], ['goldrush', 'Gold Rush', '#fff2b8', '#c79a2b', 'legendary'],
   ].map(([id, name, l, d, r]) => ({ id, name, l, d, r }));
+  BOARDS.push({ id: 'grass', name: 'Grass & Dirt', l: '#0e7a06', d: '#70420a', li: 'url(board-grass.png)', di: 'url(board-dirt.png)', r: 'epic' });
+  BOARDS.push({ id: 'neonboard', name: 'Neon Grid', l: '#1d1850', d: '#0d0a28', r: 'legendary',
+    li: 'linear-gradient(135deg, rgba(61,242,255,.34), rgba(61,242,255,0) 62%)', di: 'linear-gradient(135deg, rgba(255,61,240,.30), rgba(255,61,240,0) 62%)' });
   const PIECES = [
     ['mint', 'Mint', '#bfe3d0', '#1d5c45', 'common'], ['sandcastle', 'Sandcastle', '#e6d9b8', '#6b4a2b', 'common'],
     ['sky', 'Sky', '#b9d4ec', '#173a73', 'common'], ['rosewood', 'Rosewood', '#f0cfd0', '#8c1f2b', 'common'],
     ['honey', 'Honey', '#f3e2a0', '#8a6a12', 'common'], ['lilac', 'Lilac', '#dcd2f2', '#40236e', 'common'],
     ['coral', 'Coral', '#ffc9b5', '#a33a1b', 'rare'], ['teal', 'Teal', '#aeeceb', '#0b5558', 'rare'],
     ['lime', 'Lime', '#dff59a', '#3d5d0b', 'rare'], ['ice', 'Ice', '#e6f6ff', '#2b5878', 'rare'],
-    ['ruby', 'Ruby', '#ffb3b8', '#7a0a1c', 'epic'], ['gold', 'Gold', '#ffe27a', '#5a3d00', 'epic'],
-    ['cosmic', 'Cosmic', '#c8b6ff', '#1a0f4d', 'legendary'], ['regal', 'Regal', '#ffd76a', '#3a0a5c', 'legendary'],
   ].map(([id, name, w, b, r]) => ({ id, name, w, b, r }));
+  /* picture packs: one sprite sheet each (white P B Q K N R, then black P B Q K N R), and the CSS-drawn neon pack */
+  PIECES.push({ id: 'realism', name: 'Realism', pk: 'sheet', sheet: 'pk-realism.png', r: 'common' });
+  PIECES.push({ id: 'pixel', name: 'Pixel', pk: 'sheet', sheet: 'pk-pixel.png', px: 1, r: 'rare' });
+  PIECES.push({ id: 'pixelduo', name: 'Blue & Gold', pk: 'sheet', sheet: 'pk-pixelduo.png', px: 1, r: 'epic' });
+  PIECES.push({ id: 'neon', name: 'Neon', pk: 'neon', r: 'legendary' });
   const HATS = [
     ['cap', 'Cap', '\u{1F9E2}', 'common'], ['grad', 'Graduate', '\u{1F393}', 'common'], ['sun', 'Sun Hat', '\u{1F452}', 'common'], ['hard', 'Hard Hat', '⛑️', 'common'],
     ['top', 'Top Hat', '\u{1F3A9}', 'rare'], ['helm', 'Helmet', '\u{1FA96}', 'rare'], ['blossom', 'Blossom', '\u{1F338}', 'rare'], ['clover', 'Clover', '\u{1F340}', 'rare'],
-    ['flame', 'Flame', '\u{1F525}', 'epic'], ['frost', 'Frost', '❄️', 'epic'], ['bolt', 'Bolt', '⚡', 'epic'],
-    ['crown', 'Crown', '\u{1F451}', 'legendary'], ['gem', 'Gem', '\u{1F48E}', 'legendary'],
   ].map(([id, name, e, r]) => ({ id, name, e, r }));
   const CRATES = {
     board: { name: 'Board Crate', slot: 'board', items: BOARDS, color: '#7cb342', badge: '▦' },
@@ -54,6 +56,9 @@
   let S = Object.assign({ tokens: null, owned: {}, equipped: { board: '', piece: '', hat: '' } }, read(SKEY, {}));
   if (S.tokens == null) S.tokens = 5;                  // a welcome gift, enough for the first crate
   const saveS = () => write(SKEY, S);
+  // anything equipped that no longer exists (removed items) falls back to the default look
+  const stillThere = (slot, id) => !id || (CRATES[slot] && CRATES[slot].items.some((x) => x.id === id));
+  ['board', 'piece', 'hat'].forEach((k) => { if (!stillThere(k, S.equipped[k])) S.equipped[k] = ''; });
   saveS();
 
   /* ------------------------------------------------------------------ cosmetics */
@@ -63,16 +68,32 @@
     const b = find('board', S.equipped.board), p = find('piece', S.equipped.piece);
     root.setProperty('--light-sq', b ? b.l : '#eeeed2');
     root.setProperty('--dark-sq', b ? b.d : '#769656');
-    root.setProperty('--pw', p ? p.w : '#ffffff');
-    root.setProperty('--pb', p ? p.b : '#1a1a1a');
+    root.setProperty('--light-img', b && b.li ? b.li : 'none');
+    root.setProperty('--dark-img', b && b.di ? b.di : 'none');
+    root.setProperty('--pw', p && p.w ? p.w : '#ffffff');
+    root.setProperty('--pb', p && p.b ? p.b : '#1a1a1a');
+    root.setProperty('--sheet', p && p.sheet ? 'url(' + p.sheet + ')' : 'none');
+    PK = p && p.pk ? p.pk : '';
+    PX = p && p.px ? '1' : '';
     tagKings();
   }
-  /* kings wear the equipped accessory: found by their glyph, so no other file has to know about it */
+  let PK = '', PX = '';
+  const KIND = { 0x265A: 'k', 0x265B: 'q', 0x265C: 'r', 0x265D: 'b', 0x265E: 'n', 0x265F: 'p' };
+  const SHEET_AT = { p: 0, b: 1, q: 2, k: 3, n: 4, r: 5 };
+  /* kings wear the equipped accessory and pieces get their picture/neon look: found by their glyph, so no other file has to know about it */
   function tagKings() {
     const h = find('hat', S.equipped.hat);
-    document.querySelectorAll('.piece').forEach((pe) => {
-      const isKing = pe.textContent.charCodeAt(0) === 0x265A;
-      if (isKing && h) pe.dataset.hat = h.e; else if (pe.dataset.hat) delete pe.dataset.hat;
+    document.querySelectorAll('.piece, .cp').forEach((pe) => {
+      const code = pe.textContent.charCodeAt(0), kind = KIND[code];
+      if (pe.classList.contains('piece')) {
+        if (code === 0x265A && h) pe.dataset.hat = h.e; else if (pe.dataset.hat) delete pe.dataset.hat;
+      }
+      if (PK && kind) {
+        if (pe.dataset.pk !== PK) pe.dataset.pk = PK;
+        if (pe.dataset.k !== kind) pe.dataset.k = kind;
+        if (PX) { if (pe.dataset.px !== '1') pe.dataset.px = '1'; } else if (pe.dataset.px) delete pe.dataset.px;
+        if (PK === 'sheet') pe.style.setProperty('--px', ((SHEET_AT[kind] + (pe.classList.contains('b') ? 6 : 0)) / 11 * 100) + '%');
+      } else if (pe.dataset.pk && !Number.isNaN(code)) { delete pe.dataset.pk; delete pe.dataset.k; delete pe.dataset.px; pe.style.removeProperty('--px'); }
     });
   }
   let kt = 0;
@@ -162,12 +183,20 @@
     const tot = [...have].reduce((a, r) => a + RARITY[r].w, 0);
     return Object.keys(RARITY).filter((r) => have.has(r)).map((r) => [r, Math.round(100 * RARITY[r].w / tot)]);
   };
+  const PVSHAPES = 'pbqknr';
   function preview(slot, it) {
-    if (slot === 'board') return `<span class="pv-board" style="--a:${it.l};--b:${it.d}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
-    if (slot === 'piece') return `<span class="pv-king"><b style="color:${it.w}">♚︎</b><b style="color:${it.b}">♚︎</b></span>`;
+    if (slot === 'board') {
+      const st = `--a:${it.l};--b:${it.d}` + (it.li ? `;--ai:${it.li};--bi:${it.di}` : '');
+      return `<span class="pv-board${it.li ? ' tex' : ''}" style="${st}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
+    }
+    if (slot === 'piece') {
+      if (it.pk === 'sheet') return `<span class="pv-king pv-sheet" style="--sheet:url(${it.sheet})"><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${3 / 11 * 100}%"></b><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${9 / 11 * 100}%"></b></span>`;
+      if (it.pk === 'neon') return `<span class="pv-king pv-neon"><b class="piece w" data-pk="neon" data-k="k"></b><b class="piece b" data-pk="neon" data-k="n"></b></span>`;
+      return `<span class="pv-king"><b style="color:${it.w}">♚︎</b><b style="color:${it.b}">♚︎</b></span>`;
+    }
     return `<span class="pv-hat"><em>${it.e}</em><b>♚︎</b></span>`;
   }
-  const dflt = { board: { id: '', name: 'Classic', l: '#eeeed2', d: '#769656' }, piece: { id: '', name: 'Classic', w: '#ffffff', b: '#1a1a1a' }, hat: { id: '', name: 'None', e: '' } };
+  const dflt = { board: { id: '', name: 'Classic', l: '#eeeed2', d: '#769656' }, piece: { id: '', name: 'Retro', w: '#ffffff', b: '#1a1a1a' }, hat: { id: '', name: 'None', e: '' } };
 
   function renderShop() {
     $('#sh-tokens').textContent = S.tokens;
