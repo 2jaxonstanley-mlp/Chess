@@ -209,15 +209,19 @@
 
   /* ------------------------------------------------------------------ page */
   const TABS = [['overview', 'Overview'], ['chess', 'Chess'], ['puzzles', 'Puzzles'], ['rush', 'Rush'], ['records', 'Records']];
+  const TAB_IDS = new Set(TABS.map(([k]) => k));
   let tab = 'overview';
   function render() {
-    $('#st-nav').innerHTML = TABS.map(([k, nm]) => `<button class="lb-tab${k === tab ? ' on' : ''}" data-st="${k}">${nm}</button>`).join('');
-    document.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => { tab = b.dataset.st; render(); $('#board').scrollTop = 0; }; });
+    if (!TAB_IDS.has(tab)) tab = 'overview';
+    const nav = $('#st-nav');
+    nav.innerHTML = TABS.map(([k, nm]) => `<button class="lb-tab${k === tab ? ' on' : ''}" data-st="${k}">${nm}</button>`).join('');
+    nav.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => { tab = b.dataset.st; render(); $('#board').scrollTop = 0; }; });
     const rec = tab === 'records';
     $('#lb-records').classList.toggle('hidden', !rec);
     $('#st-body').classList.toggle('hidden', rec);
     if (rec) { if (LP.board && LP.board.render) LP.board.render(); return; }
-    $('#st-body').innerHTML = { overview, chess, puzzles, rush }[tab]();
+    const bodyFn = { overview, chess, puzzles, rush }[tab];
+    $('#st-body').innerHTML = bodyFn ? bodyFn() : overview();
     document.querySelectorAll('[data-cm]').forEach((b) => { b.onclick = () => { chessMode = b.dataset.cm; render(); }; });
   }
   function open() { render(); LP.showPage('board'); }

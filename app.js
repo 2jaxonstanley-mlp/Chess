@@ -12,7 +12,21 @@
   let sans = [];               // every move played (standard notation)
   let fullMoves = [];          // every move played (plain objects, for redo + replay)
   let viewPly = 0;             // how many of those moves the board is showing
-  let opts = { autoFlip: true, hints: true, ratings: false };
+  let opts = { autoFlip: true, hints: true, ratings: true };
+  function loadOptsFromSettings() {
+    const s = window.LP && window.LP.profile && window.LP.profile.settings && window.LP.profile.settings();
+    if (s) {
+      if (typeof s.hints === 'boolean') opts.hints = s.hints;
+      if (typeof s.ratings === 'boolean') opts.ratings = s.ratings;
+      if (typeof s.autoFlip === 'boolean') opts.autoFlip = s.autoFlip;
+    }
+  }
+  function applySettings(s) {
+    if (!s) return;
+    if (typeof s.hints === 'boolean') opts.hints = s.hints;
+    if (typeof s.ratings === 'boolean') opts.ratings = s.ratings;
+    if (typeof s.autoFlip === 'boolean') opts.autoFlip = s.autoFlip;
+  }
   let ratings = [];            // move strength of every move played (an id from MoveRating.RATINGS, or null), parallel to fullMoves
   let flipTimer = null;
   let toastTimer = null;
@@ -594,7 +608,7 @@
     renderMoves([], 0);
     setStatus('');
     closeSheet();
-    if (keepNames) afterNames();
+    if (keepNames) { loadOptsFromSettings(); afterNames(); }
     else if (ai) askSoloName();
     else askName(WHITE);
   }
@@ -652,7 +666,7 @@
     if (white && window.LP.profile && window.LP.profile.name()) inp.value = window.LP.profile.name();
     const ok = () => {
       names[color] = inp.value.trim() || cname(color);
-      if (white) askName(BLACK); else askSettings();
+      if (white) askName(BLACK); else { loadOptsFromSettings(); closeSheet(); afterNames(); }
     };
     $('#n-ok').onclick = ok;
     $('#n-cancel').onclick = backToMenu;
@@ -688,11 +702,10 @@
         ai.color = ai.human === WHITE ? BLACK : WHITE;
         names = { [ai.human]: name, [ai.color]: 'Computer (' + LEVEL_LABEL[ai.level] + ')' };
         viewNames = names;
-        opts.autoFlip = false;
-        askYN('Show legal move hints?', 'Show where each piece can move.', (hints) => {
-          opts.hints = hints;
-          askRatings(() => { closeSheet(); afterNames(); });
-        });
+        loadOptsFromSettings();
+        opts.autoFlip = false;   // solo always faces your side
+        closeSheet();
+        afterNames();
       };
     });
   }
@@ -708,22 +721,6 @@
     document.addEventListener('keydown', kd);
     $('#yn-y').onclick = () => done(true);
     $('#yn-n').onclick = () => done(false);
-  }
-
-  /* Classic and TAS only: label every move (Brilliant, Book, Blunder...). Secret Queen has hidden information, so it is skipped. */
-  function askRatings(next) {
-    if (mode === 'secret') { opts.ratings = false; next(); return; }
-    askYN('Show move strength?', 'Label each move, like Brilliant, Book or Blunder.', (v) => { opts.ratings = v; next(); });
-  }
-
-  function askSettings() {
-    askYN('Flip the board to the player whose turn it is?', 'Great for sharing one screen.', (flip) => {
-      opts.autoFlip = flip;
-      askYN('Show legal move hints?', 'Show where each piece can move.', (hints) => {
-        opts.hints = hints;
-        askRatings(() => { closeSheet(); afterNames(); });
-      });
-    });
   }
 
   /* orientation: auto-flip puts the player to move at the bottom */
@@ -1418,5 +1415,7 @@
 
   renderSavedList();
   buildBoard();
-  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session };
+  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session, applySettings };
+  // Profile loads after app.js; pick up saved settings once it is ready
+  setTimeout(loadOptsFromSettings, 0);
 })();

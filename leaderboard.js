@@ -108,8 +108,11 @@
 
   function render() {
     const all = load();
-    $('#lb-tabs').innerHTML = TABS.map((t) => `<button class="lb-tab${t.id === tab ? ' on' : ''}" data-t="${t.id}"><span aria-hidden="true">${t.ic}</span>${t.label}</button>`).join('');
-    document.querySelectorAll('.lb-tab').forEach((b) => { b.onclick = () => { tab = b.dataset.t; write('localPieces.lbTab', tab); render(); }; });
+    const tabsEl = $('#lb-tabs');
+    if (!tabsEl) return;
+    // Scope to #lb-tabs / #lb-records so we never overwrite or rebind the Stats nav tabs
+    tabsEl.innerHTML = TABS.map((t) => `<button class="lb-tab${t.id === tab ? ' on' : ''}" data-t="${t.id}"><span aria-hidden="true">${t.ic}</span>${t.label}</button>`).join('');
+    tabsEl.querySelectorAll('.lb-tab').forEach((b) => { b.onclick = () => { tab = b.dataset.t; write('localPieces.lbTab', tab); render(); }; });
     const inTab = all.filter((x) => x.cat === tab);
     let groups = [];
     inTab.slice().sort((a, b) => b.date - a.date).forEach((x) => { if (!groups.find((g) => g.key === x.key)) groups.push({ key: x.key, group: x.group }); });
@@ -125,7 +128,7 @@
     if (!groups.find((g) => g.key === sel[tab])) sel[tab] = groups[0].key;
     chips.className = 'lb-chips' + (puz ? ' seg' : '');
     chips.innerHTML = groups.map((g) => `<button class="lb-chip${g.key === sel[tab] ? ' on' : ''}" data-k="${esc(g.key)}">${esc(g.group)}</button>`).join('');
-    document.querySelectorAll('.lb-chip').forEach((b) => { b.onclick = () => { sel[tab] = b.dataset.k; render(); }; });
+    chips.querySelectorAll('.lb-chip').forEach((b) => { b.onclick = () => { sel[tab] = b.dataset.k; render(); }; });
     const g = groups.find((x) => x.key === sel[tab]);
     const rows = sorted(all, sel[tab]);
     if (!rows.length) { box.innerHTML = `<div class="lb-empty"><span aria-hidden="true"><i class="ic-star"></i></span><p>${esc(puz ? EMPTY_D(g.group) : EMPTY[tab])}</p></div>`; return; }
