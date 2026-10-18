@@ -262,15 +262,18 @@
     if (loss <= 10) {
       if (afterQs <= before - 250 && played >= before - 100 && played > -300) return RATINGS.brilliant;
       if (!captured && legal.length > 2 && !PG.rivalWithin(g, mv, top.score, D, 150)) return RATINGS.great;
-      // "Best" is for a move that clearly stands out; when several moves are about as good, mark Good
+      // "Best" only when the move clearly stands out; otherwise leave unlabeled
       if (!PG.rivalWithin(g, mv, top.score, D, 30)) return RATINGS.best;
-      return RATINGS.good;
+      return null;
     }
-    // Interesting: speculative / slightly suboptimal but not really wrong (often a sac idea)
-    if (loss < 80 && afterQs <= before - 150 && played >= before - 200) return RATINGS.interesting;
-    if (loss < 80) return RATINGS.good;
-    if (loss < 150) return RATINGS.inaccuracy;
-    if (loss < 300) return RATINGS.mistake;
+    // Interesting: speculative / slight sac that is not really wrong
+    if (loss < 70 && afterQs <= before - 150 && played >= before - 200) return RATINGS.interesting;
+    // Good is rare: a close second that still beats most of the field (not every solid move)
+    if (loss < 35 && !PG.rivalWithin(g, mv, top.score, D, 90)) return RATINGS.good;
+    // Ordinary fine moves stay quiet — no badge
+    if (loss < 100) return null;
+    if (loss < 180) return RATINGS.inaccuracy;
+    if (loss < 320) return RATINGS.mistake;
     return RATINGS.blunder;
   }
 
