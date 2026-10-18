@@ -1,5 +1,5 @@
 /**
- * Puzzle screen: Checkmate (mate in 1 / forced mate in 2), Check (check within N moves, Black never moves)
+ * Puzzle screen: Checkmate (mate in 1 / forced mate in 2), Check (safe check within N moves; Black replies),
  * and Best move. The positions come from puzzlegen.js. Progress is saved so the menu can offer "Continue playing".
  */
 (() => {
@@ -30,11 +30,12 @@
   let toastTimer = null;
 
   let missed = false;      // a hint, the solution or a wrong move was used on this puzzle
-  // Each difficulty keeps its own record, so a streak on Easy never counts towards Hard.
+  // Records are per difficulty AND type, so a Check streak never overwrites a Checkmate streak.
   const stats = {
     all() { try { return JSON.parse(localStorage.getItem('localPieces.puzzleStats2')) || {}; } catch (e) { return {}; } },
-    get(d) { return Object.assign({ solved: 0, missed: 0, streak: 0, best: 0 }, stats.all()[d || cfg.diff] || {}); },
-    put(s, d) { const a = stats.all(); a[d || cfg.diff] = s; try { localStorage.setItem('localPieces.puzzleStats2', JSON.stringify(a)); } catch (e) { /* ignore */ } },
+    key(d, t) { return (d || cfg.diff) + ':' + (t || cfg.type); },
+    get(d, t) { return Object.assign({ solved: 0, missed: 0, streak: 0, best: 0 }, stats.all()[stats.key(d, t)] || {}); },
+    put(s, d, t) { const a = stats.all(); a[stats.key(d, t)] = s; try { localStorage.setItem('localPieces.puzzleStats2', JSON.stringify(a)); } catch (e) { /* ignore */ } },
     miss() {
       if (missed || !P) return;
       missed = true;
@@ -130,7 +131,7 @@
   function updateInfo() {
     let goal = 'Find the best move for White.';
     if (P && P.type === 'mate') goal = 'Checkmate in ' + P.n + (P.n === 1 ? ' move.' : ' moves.');
-    else if (P && P.type === 'check') goal = 'Give check in ' + P.limit + (P.limit === 1 ? ' move' : ' moves') + (userMoves ? ' (' + movesLeft() + ' left).' : '.');
+    else if (P && P.type === 'check') goal = 'Safe check in ' + P.limit + (P.limit === 1 ? ' move' : ' moves') + ' (piece must not be capturable)' + (userMoves ? ' · ' + movesLeft() + ' left' : '') + '.';
     $('#pz-goal').textContent = state === 'gen' ? 'Setting up the board…' : goal;
     const s = stats.get();
     $('#pz-diff').textContent = DIFF[cfg.diff];
@@ -152,7 +153,7 @@
   function prompt() {
     if (state === 'failed') return 'Out of moves. Undo a move or retry.';
     if (P.type === 'mate') return P.n === 2 && userMoves >= 1 ? 'Now deliver checkmate' : 'White to move: find the checkmate';
-    if (P.type === 'check') return 'Black will not move. Give check in ' + movesLeft() + (movesLeft() === 1 ? ' move' : ' moves') + ' or fewer.';
+    if (P.type === 'check') return 'Give a safe check in ' + movesLeft() + (movesLeft() === 1 ? ' move' : ' moves') + ' or fewer. Black will reply.';
     return 'Which move is best for White?';
   }
 
@@ -179,12 +180,13 @@
       for (const e of replayLog) {
         const m = findMove(g, e);
         if (!m) break;
-        if (p.type === 'check') { snaps.push(g.board.slice()); g.makeMove(m); passTurn(); userMoves++; }
-        else { g.makeMove(m); if (!e.r) userMoves++; }
+        if (p.type === 'check' && !e.r) snaps.push(g.board.slice());
+        g.makeMove(m);
+        if (!e.r) userMoves++;
         log.push(e);
         last = [e.f, e.t];
       }
-      if (p.type === 'check' && userMoves >= p.limit) state = 'failed';
+      if (p.type === 'check' && userMoves >= p.limit && !g.inCheck(0x10)) state = 'failed';
     }
     render();
     updateInfo();
@@ -302,15 +304,52 @@
   }
 
   function afterCheck(m) {
+    // Winning check must put Black in check AND leave the checking piece safe
+    if (g.inCheck(0x10)) {
+      if (PG.isSafeCheck && PG.isSafeCheck(g, m.to)) {
+        log.push(plain(m));
+        userMoves++;
+        solve();
+        return;
+      }
+      // Unsafe check — Black can take the piece (move still on board until wrong() undoes it)
+      wrong('That checks, but your piece can be taken. Find a safe check.');
+      return;
+    }
     log.push(plain(m));
     userMoves++;
-    if (g.inCheck(0x10)) { solve(); return; }
-    passTurn();
-    if (userMoves >= P.limit) state = 'failed';
-    render();
+    if (userMoves >= P.limit) {
+      state = 'failed';
+      render();
+      updateInfo();
+      setStatus(prompt(), 'check');
+      save();
+      return;
+    }
+    // Black replies (like mate-in-2)
+    busy = true;
+    const my = token;
+    setStatus('Black replies…', 'dim');
     updateInfo();
-    setStatus(prompt(), state === 'failed' ? 'check' : 'dim');
-    save();
+    setTimeout(() => {
+      if (my !== token) return;
+      const replies = g.legalMoves();
+      let r = null;
+      if (replies.length) {
+        const pref = (P.replies && P.replies[userMoves - 1]) || null;
+        if (pref) r = replies.find((x) => x.from === pref.f && x.to === pref.t && (x.promo || 0) === (pref.p || 0)) || null;
+        if (!r) r = replies[Math.floor(Math.random() * replies.length)];
+        g.makeMove(r);
+        log.push(Object.assign(plain(r), { r: 1 }));
+        last = [r.from, r.to];
+      }
+      busy = false;
+      render();
+      if (r) slide(r.from, r.to);
+      updateInfo();
+      setStatus(prompt(), 'dim');
+      save();
+    }, 650);
   }
 
   function afterBest(m) {
@@ -330,7 +369,7 @@
       const st = stats.get();
       if (!missed && st.streak >= 3 && LP.board) {
         const nm = LP.board.lastName();
-        const res = LP.board.record({ cat: 'puzzle', key: 'puzzle:' + cfg.diff, group: DIFF[cfg.diff], name: nm || 'Player', vs: TITLE[cfg.type], value: st.streak, unit: 'streak', low: false, unique: true });
+        const res = LP.board.record({ cat: 'puzzle', key: 'puzzle:' + cfg.diff + ':' + cfg.type, group: DIFF[cfg.diff] + ' · ' + TITLE[cfg.type].replace(' puzzles', '').replace(' puzzles', ''), name: nm || 'Player', vs: TITLE[cfg.type], value: st.streak, unit: 'streak', low: false, unique: true });
         if (res.isBest) { if (!nm) LP.board.askName(res.entry, null, 'A new best streak! Choose the name for the leaderboard.'); else toast('New best streak: ' + st.streak); }
       }
     }
@@ -365,29 +404,96 @@
   function solution() {
     if (busy || state === 'gen' || !P) return;
     stats.miss();
-    load(P);                      // back to the start, then show the answer
+    load(P);                      // back to the start
     revealed = true;
-    let text = '';
-    const gg = PG.fromPos(P.pos);
-    if (P.type === 'best') { text = 'Best move: ' + P.san + '. ' + P.explain; hints = [P.good[0].f]; }
-    else if (P.type === 'mate') {
-      const m = findMove(gg, P.sol[0]);
-      const san = PG.sanOf(gg, m);
-      text = P.n === 1 ? 'Solution: ' + san : 'Solution: ' + san + ', then checkmate next move whatever Black plays';
-      hints = [P.sol[0].f];
-    } else {
-      text = 'Solution: ' + PG.sanPath(P.pos, P.path).map((s, i) => (i + 1) + '. ' + s).join('  ');
-      hints = [P.path[0].f];
+    busy = true;
+    state = 'play';
+    updateInfo();
+    setStatus('Playing solution…', 'dim');
+
+    const steps = [];             // sequence of plain moves (White and Black) to animate
+    if (P.type === 'best') {
+      steps.push(P.good[0]);
+    } else if (P.type === 'mate') {
+      steps.push(P.sol[0]);
+      // Mate in 2: show one Black defence then a mating move if we can compute it
+      if (P.n === 2) {
+        steps.push({ _defence: true });
+        steps.push({ _mate2: true });
+      }
+    } else if (P.type === 'check' && P.path) {
+      P.path.forEach((wm, i) => {
+        steps.push(wm);
+        if (P.replies && P.replies[i]) steps.push(Object.assign({}, P.replies[i], { r: 1 }));
+      });
     }
-    render();
-    setStatus(text, 'dim');
+
+    const my = token;
+    let i = 0;
+    const playNext = () => {
+      if (my !== token) return;
+      if (i >= steps.length) {
+        busy = false;
+        state = 'solved';
+        sel = -1; targets = []; hints = [];
+        render();
+        updateInfo();
+        let msg = 'Solution played.';
+        if (P.type === 'best') msg = 'Best move: ' + P.san + '. ' + P.explain;
+        else if (P.type === 'mate') msg = P.n === 1 ? 'Checkmate solution.' : 'Forced mate solution.';
+        else msg = 'Safe check solution.';
+        setStatus(msg, 'good');
+        // Next puzzle button is already glowing via updateInfo
+        return;
+      }
+      const step = steps[i++];
+      // Dynamic mate-in-2 continuation
+      if (step._defence) {
+        const r = PG.bestDefence(g);
+        if (r) {
+          g.makeMove(r);
+          log.push(Object.assign(plain(r), { r: 1 }));
+          last = [r.from, r.to];
+          render();
+          slide(r.from, r.to);
+        }
+        setTimeout(playNext, 700);
+        return;
+      }
+      if (step._mate2) {
+        const ms = PG.mateMoves(g, true);
+        if (ms.length) {
+          const m = ms[0];
+          g.makeMove(m);
+          log.push(plain(m));
+          last = [m.from, m.to];
+          render();
+          slide(m.from, m.to);
+        }
+        setTimeout(playNext, 700);
+        return;
+      }
+      const m = findMove(g, step);
+      if (!m) { setTimeout(playNext, 200); return; }
+      g.makeMove(m);
+      log.push(step.r ? Object.assign({}, step) : plain(m));
+      last = [m.from, m.to];
+      if (!step.r) userMoves++;
+      render();
+      slide(m.from, m.to);
+      setTimeout(playNext, 700);
+    };
+    setTimeout(playNext, 450);
   }
 
   function undo() {
     if (busy || !snaps.length || P.type !== 'check' || state === 'solved') return;
+    // Restore board from snapshot (before White's last move); drop White move and any Black reply from the log
     g.board.set(snaps.pop());
-    passTurn();
-    userMoves--; log.pop();
+    g.turn = 8; g.ep = -1; g.castling = 0; g.history = [];
+    while (log.length && log[log.length - 1].r) log.pop();
+    if (log.length) log.pop();
+    userMoves = snaps.length;
     state = 'play'; sel = -1; targets = []; hints = [];
     last = log.length ? [log[log.length - 1].f, log[log.length - 1].t] : null;
     render();
@@ -399,7 +505,7 @@
   /* ------------------------------------------------------------------- setup */
   const KINDS = [
     { id: 'mate', icon: 3, name: 'Checkmate', sub: 'Find the winning blow.' },
-    { id: 'check', icon: 5, name: 'Check', sub: 'Work your way to a check.' },
+    { id: 'check', icon: 5, name: 'Check', sub: 'Safe check — Black replies each turn.' },
     { id: 'best', icon: 4, name: 'Best move', sub: 'Find the strongest move.' },
   ];
   const LEVELS = [

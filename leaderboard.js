@@ -38,10 +38,18 @@
     write('localPieces.lbMigrated', true);
   })();
 
-  (function dropOldPuzzles() {   // puzzle boards used to be split by kind and mixed streaks across difficulties
+  (function migratePuzzleKeys() {
+    // Old keys: puzzle:easy — keep them under a generic group; new keys: puzzle:easy:mate etc.
     const list = load();
-    const keep = list.filter((x) => x.cat !== 'puzzle' || /^puzzle:(easy|normal|hard)$/.test(x.key));
-    if (keep.length !== list.length) save(keep);
+    let changed = false;
+    const keep = list.filter((x) => {
+      if (x.cat !== 'puzzle') return true;
+      if (/^puzzle:(easy|normal|hard):(mate|check|best)$/.test(x.key)) return true;
+      if (/^puzzle:(easy|normal|hard)$/.test(x.key)) return true; // legacy difficulty-only
+      changed = true;
+      return false;
+    });
+    if (changed || keep.length !== list.length) save(keep);
   })();
 
   const better = (low, a, b) => (low ? a < b : a > b);
@@ -117,7 +125,11 @@
     let groups = [];
     inTab.slice().sort((a, b) => b.date - a.date).forEach((x) => { if (!groups.find((g) => g.key === x.key)) groups.push({ key: x.key, group: x.group }); });
     const puz = tab === 'puzzle';
-    if (puz) groups = [{ key: 'puzzle:easy', group: 'Easy' }, { key: 'puzzle:normal', group: 'Normal' }, { key: 'puzzle:hard', group: 'Hard' }];
+    if (puz) groups = [
+      { key: 'puzzle:easy:mate', group: 'Easy · Checkmate' }, { key: 'puzzle:easy:check', group: 'Easy · Check' }, { key: 'puzzle:easy:best', group: 'Easy · Best move' },
+      { key: 'puzzle:normal:mate', group: 'Normal · Checkmate' }, { key: 'puzzle:normal:check', group: 'Normal · Check' }, { key: 'puzzle:normal:best', group: 'Normal · Best move' },
+      { key: 'puzzle:hard:mate', group: 'Hard · Checkmate' }, { key: 'puzzle:hard:check', group: 'Hard · Check' }, { key: 'puzzle:hard:best', group: 'Hard · Best move' },
+    ];
     const box = $('#lb-body'), chips = $('#lb-chips');
     $('#lb-reset').classList.toggle('hidden', !all.length);
     if (!groups.length) {

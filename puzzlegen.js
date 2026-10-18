@@ -1,7 +1,7 @@
 /**
  * Puzzle generator: builds random positions and proves they are solvable with the rules engine in chess.js.
  *   mate  : White to move, checkmate in 1 or a forced checkmate in 2 (every Black reply is covered).
- *   check : Black never moves. White has to give check within N of its own moves (N = the shortest way, so it is always possible).
+ *   check : White must give a safe check (checking piece not capturable) within N moves; Black replies after each non-checking move.
  *   best  : White to move, one move is clearly the best (found by a small material search).
  * No DOM in here, so it can be tested from node.
  */
@@ -144,26 +144,65 @@
   }
 
   /* ---------------------------------------------------------------- check */
-  /** Black never moves. Shortest number of White moves that gives check (max maxD), with the moves. */
+  /** After White's move that checks: is the checking piece safe from capture? */
+  function isSafeCheck(g, checkerSq) {
+    if (!g.inCheck(BLACK)) return false;
+    for (const m of g.legalMoves()) {
+      if (m.to === checkerSq) return false;   // Black can capture the checker
+    }
+    return true;
+  }
+
+  /**
+   * Alternating search: White moves, and if not a safe check Black replies (any legal), then White again.
+   * Returns { path: [white moves as plain], replies: [black replies as plain or null] } or null.
+   * path.length is the number of White moves (the limit).
+   */
   function checkPath(board, maxD, cap) {
     const g = blank();
-    const keyOf = (b) => { let k = ''; for (const s of SQUARES) k += String.fromCharCode(48 + b[s]); return k; };
-    let frontier = [{ b: Uint8Array.from(board), path: [] }];
-    const seen = new Set([keyOf(board)]);
+    const keyOf = (b, turn) => {
+      let k = '';
+      for (const s of SQUARES) k += String.fromCharCode(48 + b[s]);
+      return k + turn;
+    };
+    // node: board after Black's last reply (White to move), whitePath, blackReplies
+    let frontier = [{ b: Uint8Array.from(board), path: [], replies: [] }];
+    const seen = new Set([keyOf(board, WHITE)]);
     for (let d = 1; d <= maxD; d++) {
       const next = [];
       for (const node of frontier) {
         g.board.set(node.b); g.turn = WHITE; g.ep = -1; g.castling = 0; g.history = [];
         for (const m of g.legalMoves()) {
           g.makeMove(m);
-          if (g.inCheck(BLACK)) { const path = node.path.concat([plain(m)]); g.unmakeMove(); return path; }
-          if (d < maxD) {
-            const k = keyOf(g.board);
-            if (!seen.has(k)) { seen.add(k); next.push({ b: g.board.slice(), path: node.path.concat([plain(m)]) }); }
+          if (isSafeCheck(g, m.to)) {
+            const path = node.path.concat([plain(m)]);
+            const replies = node.replies.concat([null]); // no reply after final check
+            g.unmakeMove();
+            return { path, replies };
+          }
+          // Unsafe checks are not solutions; only quiet moves continue with a Black reply
+          if (d < maxD && !g.inCheck(BLACK)) {
+            const replies = g.legalMoves();
+            if (replies.length) {
+              const sample = replies.length <= 4 ? replies : [pick(replies), pick(replies), pick(replies)];
+              for (const r of sample) {
+                g.makeMove(r);
+                const k = keyOf(g.board, WHITE);
+                if (!seen.has(k)) {
+                  seen.add(k);
+                  next.push({
+                    b: g.board.slice(),
+                    path: node.path.concat([plain(m)]),
+                    replies: node.replies.concat([plain(r)]),
+                  });
+                }
+                g.unmakeMove();
+              }
+            }
           }
           g.unmakeMove();
         }
-        if (seen.size > (cap || 80000)) return null;
+        if (seen.size > (cap || 60000)) return null;
       }
       frontier = next;
       if (!frontier.length) return null;
@@ -175,15 +214,15 @@
     let white, black, want;
     if (diff === 'easy') { white = [pick([QUEEN, ROOK])]; black = pickN([PAWN, PAWN, KNIGHT, BISHOP], rnd(3)); want = [1, 2]; }
     else if (diff === 'normal') { white = [pick([ROOK, BISHOP, KNIGHT, ROOK])]; if (Math.random() < 0.35) white.push(PAWN); black = pickN(BLACK_POOL, 1 + rnd(3)); want = [2, 3]; }
-    else { white = [pick([KNIGHT, BISHOP, ROOK, KNIGHT])]; if (Math.random() < 0.4) white.push(pick([PAWN, KNIGHT, BISHOP])); black = pickN(BLACK_POOL, 2 + rnd(3)); want = [4, 5]; }
+    else { white = [pick([KNIGHT, BISHOP, ROOK, KNIGHT])]; if (Math.random() < 0.4) white.push(pick([PAWN, KNIGHT, BISHOP])); black = pickN(BLACK_POOL, 2 + rnd(3)); want = [3, 4]; }
     const g = randomPosition({ white, black, edge: Math.random() < 0.5 });
     if (!g) return null;
     if (!g.hasLegalMove()) return null;
     const lo = level === 0 ? want[0] : level === 1 ? Math.max(1, want[0] - 1) : 1;
-    const path = checkPath(g.board, level === 0 ? want[1] : 5);
-    if (!path || path.length < lo) return null;
-    if (level === 0 && path.length > want[1]) return null;
-    return { type: 'check', diff, limit: path.length, pos: posOf(g), path };
+    const found = checkPath(g.board, level === 0 ? want[1] : 5);
+    if (!found || !found.path || found.path.length < lo) return null;
+    if (level === 0 && found.path.length > want[1]) return null;
+    return { type: 'check', diff, limit: found.path.length, pos: posOf(g), path: found.path, replies: found.replies };
   }
 
   /* ----------------------------------------------------------------- best */
@@ -355,5 +394,5 @@
     setTimeout(step, 0);
   }
 
-  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, bestDefence, checkPath, sanPath, sanOf, tryMate, tryCheck, tryBest, uniq };
+  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, bestDefence, checkPath, isSafeCheck, sanPath, sanOf, tryMate, tryCheck, tryBest, uniq };
 })();

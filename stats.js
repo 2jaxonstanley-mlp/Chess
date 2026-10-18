@@ -171,11 +171,43 @@
       ${quality}`;
   }
 
-  function puzStat(k) {
-    let o = {};
-    try { o = (JSON.parse(localStorage.getItem('localPieces.puzzleStats2')) || {})[k] || {}; } catch (e) { /* ignore */ }
-    const mine = S.puz[k] || { s: 0, c: 0, m: 0, k: {} };
-    return { solved: Math.max(o.solved || 0, mine.s), missed: Math.max(o.missed || 0, mine.m), streak: o.streak || 0, best: o.best || 0, clean: mine.c, kinds: mine.k };
+  function puzRaw() {
+    try { return JSON.parse(localStorage.getItem('localPieces.puzzleStats2')) || {}; } catch (e) { return {}; }
+  }
+  /** Aggregate one difficulty across types (legacy + new keys). */
+  function puzStat(diff) {
+    const raw = puzRaw();
+    const mine = S.puz[diff] || { s: 0, c: 0, m: 0, k: {} };
+    let solved = mine.s || 0, missed = mine.m || 0, clean = mine.c || 0;
+    let best = 0, streak = 0;
+    const kinds = Object.assign({ mate: 0, check: 0, best: 0 }, mine.k || {});
+    // Legacy difficulty-only key
+    const leg = raw[diff] || {};
+    solved = Math.max(solved, leg.solved || 0);
+    missed = Math.max(missed, leg.missed || 0);
+    best = Math.max(best, leg.best || 0);
+    streak = Math.max(streak, leg.streak || 0);
+    // Per-type keys: easy:mate, etc.
+    ['mate', 'check', 'best'].forEach((t) => {
+      const o = raw[diff + ':' + t] || {};
+      solved += o.solved || 0;
+      missed += o.missed || 0;
+      best = Math.max(best, o.best || 0);
+      streak = Math.max(streak, o.streak || 0);
+      kinds[t] = (kinds[t] || 0) + (o.solved || 0);
+    });
+    return { solved, missed, streak, best, clean, kinds };
+  }
+  function puzTypeStat(type) {
+    const raw = puzRaw();
+    let best = 0, streak = 0, solved = 0;
+    DIFFS.forEach(([d]) => {
+      const o = raw[d + ':' + type] || {};
+      best = Math.max(best, o.best || 0);
+      streak = Math.max(streak, o.streak || 0);
+      solved += o.solved || 0;
+    });
+    return { best, streak, solved };
   }
   function puzzles() {
     const rows = DIFFS.map(([k, nm, col]) => ({ k, nm, col, s: puzStat(k) }));
@@ -183,14 +215,23 @@
     if (!solved && !missed) return empty('Solve a puzzle and your accuracy and streaks will appear here.');
     const kinds = { mate: 0, check: 0, best: 0 };
     rows.forEach((r) => Object.keys(r.s.kinds).forEach((x) => { if (kinds[x] != null) kinds[x] += r.s.kinds[x]; }));
-    const kTot = kinds.mate + kinds.check + kinds.best, bestStreak = Math.max(...rows.map((r) => r.s.best));
-    return `<div class="st-card"><div class="st-rec"><div><b>${solved}</b><small>Solved</small></div><div><b>${missed}</b><small>Misses</small></div><div><b>${pct(solved, solved + missed)}%</b><small>Accuracy</small></div><div><b>${bestStreak}</b><small>Best streak</small></div></div>
+    const kTot = kinds.mate + kinds.check + kinds.best;
+    const typeBest = Math.max(puzTypeStat('mate').best, puzTypeStat('check').best, puzTypeStat('best').best, ...rows.map((r) => r.s.best));
+    const typeRows = Object.keys(KINDS).map((k) => {
+      const ts = puzTypeStat(k);
+      return `<div class="st-q"><span class="st-qi">${spr(KINDS[k][1])}</span><span class="st-qn">${KINDS[k][0]}</span>` +
+        `<span class="st-qb"><i style="width:${Math.max(kinds[k] ? 3 : 0, pct(kinds[k], kTot || 1))}%;background:#f2c45a"></i></span>` +
+        `<b>${kinds[k] || 0}</b></div>` +
+        `<div class="st-note" style="margin:-.2rem 0 .5rem 2.4rem">Best streak ${ts.best} · current ${ts.streak}</div>`;
+    }).join('');
+    return `<div class="st-card"><div class="st-rec"><div><b>${solved}</b><small>Solved</small></div><div><b>${missed}</b><small>Misses</small></div><div><b>${pct(solved, solved + missed)}%</b><small>Accuracy</small></div><div><b>${typeBest}</b><small>Best streak</small></div></div>
         ${bar([{ v: solved, c: '#81b64c', l: 'Solved' }, { v: missed, c: '#ca3431', l: 'Missed' }])}</div>
       <h3 class="st-sub">By difficulty</h3>
       <div class="st-diffs">${rows.map((r) => `<div class="st-diff" style="--c:${r.col}"><b>${r.nm}</b>
         <span class="st-ring" style="--p:${pct(r.s.solved, r.s.solved + r.s.missed)}"><i>${pct(r.s.solved, r.s.solved + r.s.missed)}%</i></span>
-        <span>${r.s.solved} solved</span><span>${r.s.missed} missed</span><span>Streak ${r.s.streak} &middot; best ${r.s.best}</span></div>`).join('')}</div>
-      ${kTot ? `<h3 class="st-sub">By puzzle type</h3><div class="st-quality">${Object.keys(KINDS).map((k) => `<div class="st-q"><span class="st-qi">${spr(KINDS[k][1])}</span><span class="st-qn">${KINDS[k][0]}</span><span class="st-qb"><i style="width:${Math.max(kinds[k] ? 3 : 0, pct(kinds[k], kTot))}%;background:#f2c45a"></i></span><b>${kinds[k]}</b></div>`).join('')}</div>` : ''}
+        <span>${r.s.solved} solved</span><span>${r.s.missed} missed</span><span>Best streak ${r.s.best}</span></div>`).join('')}</div>
+      ${kTot ? `<h3 class="st-sub">By puzzle type</h3><div class="st-quality">${typeRows}</div>
+        <p class="st-note">Streaks are tracked separately for Checkmate, Check and Best move — one never replaces another.</p>` : ''}
       <div class="st-grid">${tile('Clean solves', rows.reduce((a, r) => a + r.s.clean, 0), 'no misses', '#26c2a3')}${tile('Puzzle rate', pct(solved, solved + missed) + '%', 'solved vs missed', '#f2c45a')}</div>`;
   }
 
