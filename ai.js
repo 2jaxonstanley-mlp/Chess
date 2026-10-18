@@ -922,7 +922,7 @@
     }
     if (cfg.book) {
       const bm = bookMove(g);
-      if (bm) { cb(bm); return; }
+      if (bm) { finish(bm); return; }   // finish applies polish for insane
     }
     if (g.mode === 'secret') ttDepth.fill(-1);   // hidden-information searches differ from game to game
 
