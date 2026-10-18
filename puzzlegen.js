@@ -3,6 +3,7 @@
  *   mate  : White to move, checkmate in 1 or a forced checkmate in 2 (every Black reply is covered).
  *   check : White must give a safe check (checking piece not capturable) within N moves; Black replies after each non-checking move.
  *   best  : White to move, one move is clearly the best (found by a small material search).
+ *   sac   : Hard only. White's best move is a sacrifice that gains material (or mate) in the end.
  * No DOM in here, so it can be tested from node.
  */
 (() => {
@@ -349,6 +350,82 @@
     return { type: 'best', diff, pos: posOf(g), good, explain, san: sanOf(g, top.move) };
   }
 
+  /* ---------------------------------------------------------------- sacrifice (hard) */
+  const SAC_POOL = [QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, KNIGHT, PAWN, PAWN, PAWN];
+
+  /**
+   * Immediate material delta for the side that just moved (positive = they gained material on the board
+   * right now, before the opponent answers). Used to detect "this move gives something away".
+   */
+  function staticGain(gBefore, m) {
+    const before = evalSide(gBefore);
+    gBefore.makeMove(m);
+    // from the opponent's view eval is negated; after White moves, evalSide is from Black's side
+    const afterForMover = -evalSide(gBefore);
+    gBefore.unmakeMove();
+    return afterForMover - before;
+  }
+
+  /**
+   * A sacrifice puzzle: the unique best move loses material immediately (or hangs a piece) but the
+   * deep search shows a net gain (extra material or mate). Always treated as hard.
+   */
+  function trySac(diff, level) {
+    const n = 5 + rnd(3);
+    const white = pickN(SAC_POOL, n);
+    const black = pickN(SAC_POOL, n - 1 + rnd(2));
+    // Prefer more pieces so exchanges and sacs are possible
+    if (Math.random() < 0.5) white.push(pick([QUEEN, ROOK, BISHOP]));
+    if (Math.random() < 0.5) black.push(pick([QUEEN, ROOK, BISHOP]));
+    const g = randomPosition({ white, black, edge: Math.random() < 0.35 });
+    if (!g || !g.hasLegalMove()) return null;
+
+    const D = level >= 2 ? 2 : 3;
+    const top = bestAt(g, D);
+    if (!top.move) return null;
+    if (top.score < -MATE / 2) return null;
+
+    // Must be a clear unique best (hard: wide margin)
+    const margin = level === 0 ? 180 : level === 1 ? 140 : 100;
+    if (rivalWithin(g, top.move, top.score, D, margin)) return null;
+
+    // Immediate material must drop (true sacrifice), unless it is a mate-forcing sac with hanging piece
+    const gain0 = staticGain(g, top.move);
+    const mated = top.score > MATE - 100;
+    // Need to give away at least a pawn of material on the board right away
+    if (gain0 > -80 && !mated) return null;
+    if (gain0 > -50 && mated) return null;   // mate sacs should still look like a real offer
+
+    // Deep search must show a real payoff (win material back or mate)
+    const now = evalSide(g);
+    const deepGain = top.score - now;
+    if (!mated && deepGain < 150) return null;
+    // Greedy 1-ply should NOT find the same move (otherwise it is not a hard sac to see)
+    if (level === 0) {
+      const greedy = bestAt(g, 1).move;
+      if (greedy && greedy.from === top.move.from && greedy.to === top.move.to) return null;
+    }
+
+    const good = uniq(g.legalMoves().filter((m) => m.from === top.move.from && m.to === top.move.to)).map(plain);
+    let explain;
+    if (mated) {
+      explain = 'Sacrifice that forces checkmate in ' + Math.max(1, Math.ceil((MATE - top.score) / 2)) + '.';
+    } else {
+      const lost = Math.round(Math.abs(gain0) / 100);
+      const won = Math.round(deepGain / 100);
+      explain = 'You give about ' + lost + ' point' + (lost === 1 ? '' : 's') + ' of material, then win roughly ' + won + ' back.';
+    }
+    return {
+      type: 'sac',
+      diff: 'hard',
+      pos: posOf(g),
+      good,
+      explain,
+      san: sanOf(g, top.move),
+      loss: Math.round(Math.abs(Math.min(0, gain0))),
+    };
+  }
+
   /* -------------------------------------------------------------- helpers */
   function sanOf(g, m) {
     let san = g.moveToSan(m);
@@ -385,7 +462,10 @@
       while (Date.now() < slice) {
         let p = null;
         try {
-          p = type === 'mate' ? tryMate(diff, n, level) : type === 'check' ? tryCheck(diff, level) : tryBest(diff, level);
+          p = type === 'mate' ? tryMate(diff, n, level)
+            : type === 'check' ? tryCheck(diff, level)
+            : type === 'sac' ? trySac(diff, level)
+            : tryBest(diff, level);
         } catch (e) { p = null; }
         if (p) { onDone(p); return; }
       }
@@ -394,5 +474,5 @@
     setTimeout(step, 0);
   }
 
-  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, bestDefence, checkPath, isSafeCheck, sanPath, sanOf, tryMate, tryCheck, tryBest, uniq };
+  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, bestDefence, checkPath, isSafeCheck, sanPath, sanOf, tryMate, tryCheck, tryBest, trySac, uniq };
 })();

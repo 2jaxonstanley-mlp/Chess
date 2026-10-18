@@ -44,7 +44,7 @@
     let changed = false;
     const keep = list.filter((x) => {
       if (x.cat !== 'puzzle') return true;
-      if (/^puzzle:(easy|normal|hard):(mate|check|best)$/.test(x.key)) return true;
+      if (/^puzzle:(easy|normal|hard):(mate|check|best|sac)$/.test(x.key)) return true;
       if (/^puzzle:(easy|normal|hard)$/.test(x.key)) return true; // legacy difficulty-only
       changed = true;
       return false;
@@ -129,6 +129,7 @@
       { key: 'puzzle:easy:mate', group: 'Easy · Checkmate' }, { key: 'puzzle:easy:check', group: 'Easy · Check' }, { key: 'puzzle:easy:best', group: 'Easy · Best move' },
       { key: 'puzzle:normal:mate', group: 'Normal · Checkmate' }, { key: 'puzzle:normal:check', group: 'Normal · Check' }, { key: 'puzzle:normal:best', group: 'Normal · Best move' },
       { key: 'puzzle:hard:mate', group: 'Hard · Checkmate' }, { key: 'puzzle:hard:check', group: 'Hard · Check' }, { key: 'puzzle:hard:best', group: 'Hard · Best move' },
+      { key: 'puzzle:hard:sac', group: 'Hard · Sacrifice' },
     ];
     const box = $('#lb-body'), chips = $('#lb-chips');
     $('#lb-reset').classList.toggle('hidden', !all.length);

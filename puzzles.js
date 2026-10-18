@@ -10,7 +10,7 @@
   const FILLED = { 1: '♟', 2: '♞', 3: '♝', 4: '♜', 5: '♛', 6: '♚' };
   const glyph = (p) => FILLED[p & 7] + '︎';
   const DIFF = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
-  const TITLE = { mate: 'Checkmate puzzles', check: 'Check puzzles', best: 'Best move' };
+  const TITLE = { mate: 'Checkmate puzzles', check: 'Check puzzles', best: 'Best move', sac: 'Sacrifice' };
   const PIECE_NAME = { 5: 'Queen', 4: 'Rook', 3: 'Bishop', 2: 'Knight' };
 
   let cfg = null;          // { type, diff }
@@ -132,6 +132,7 @@
     let goal = 'Find the best move for White.';
     if (P && P.type === 'mate') goal = 'Checkmate in ' + P.n + (P.n === 1 ? ' move.' : ' moves.');
     else if (P && P.type === 'check') goal = 'Safe check in ' + P.limit + (P.limit === 1 ? ' move' : ' moves') + ' (piece must not be capturable)' + (userMoves ? ' · ' + movesLeft() + ' left' : '') + '.';
+    else if (P && P.type === 'sac') goal = 'Find the winning sacrifice — give material to gain more.';
     $('#pz-goal').textContent = state === 'gen' ? 'Setting up the board…' : goal;
     const s = stats.get();
     $('#pz-diff').textContent = DIFF[cfg.diff];
@@ -154,6 +155,7 @@
     if (state === 'failed') return 'Out of moves. Undo a move or retry.';
     if (P.type === 'mate') return P.n === 2 && userMoves >= 1 ? 'Now deliver checkmate' : 'White to move: find the checkmate';
     if (P.type === 'check') return 'Give a safe check in ' + movesLeft() + (movesLeft() === 1 ? ' move' : ' moves') + ' or fewer. Black will reply.';
+    if (P.type === 'sac') return 'Sacrifice material to win more back (or force mate).';
     return 'Which move is best for White?';
   }
 
@@ -354,7 +356,8 @@
 
   function afterBest(m) {
     const ok = P.good.some((x) => x.f === m.from && x.t === m.to);
-    if (ok) { log.push(plain(m)); userMoves++; solve(); } else wrong('Not the best move. Try again');
+    if (ok) { log.push(plain(m)); userMoves++; solve(); }
+    else wrong(P.type === 'sac' ? 'Not the sacrifice. Look for a move that gives material to gain more.' : 'Not the best move. Try again');
   }
 
   function solve() {
@@ -375,7 +378,7 @@
     }
     updateInfo();
     let msg;
-    if (P.type === 'best') msg = 'Correct! ' + P.san + '. ' + P.explain;
+    if (P.type === 'best' || P.type === 'sac') msg = 'Correct! ' + P.san + '. ' + P.explain;
     else if (P.type === 'mate') msg = 'Checkmate! Puzzle solved.';
     else msg = 'Check! Solved in ' + userMoves + (userMoves === 1 ? ' move.' : ' moves.');
     setStatus(msg, 'good');
@@ -386,7 +389,7 @@
     if (busy || state === 'solved' || state === 'gen' || !P) return;
     stats.miss();
     let from = -1;
-    if (P.type === 'best') from = P.good[0].f;
+    if (P.type === 'best' || P.type === 'sac') from = P.good[0].f;
     else if (P.type === 'mate') {
       if (P.n === 2 && userMoves >= 1) { const ms = PG.mateMoves(g, true); if (ms.length) from = ms[0].from; }
       else from = P.sol[0].f;
@@ -412,7 +415,7 @@
     setStatus('Playing solution…', 'dim');
 
     const steps = [];             // sequence of plain moves (White and Black) to animate
-    if (P.type === 'best') {
+    if (P.type === 'best' || P.type === 'sac') {
       steps.push(P.good[0]);
     } else if (P.type === 'mate') {
       steps.push(P.sol[0]);
@@ -439,7 +442,7 @@
         render();
         updateInfo();
         let msg = 'Solution played.';
-        if (P.type === 'best') msg = 'Best move: ' + P.san + '. ' + P.explain;
+        if (P.type === 'best' || P.type === 'sac') msg = (P.type === 'sac' ? 'Sacrifice' : 'Best move') + ': ' + P.san + '. ' + P.explain;
         else if (P.type === 'mate') msg = P.n === 1 ? 'Checkmate solution.' : 'Forced mate solution.';
         else msg = 'Safe check solution.';
         setStatus(msg, 'good');
@@ -507,6 +510,7 @@
     { id: 'mate', icon: 3, name: 'Checkmate', sub: 'Find the winning blow.' },
     { id: 'check', icon: 5, name: 'Check', sub: 'Safe check — Black replies each turn.' },
     { id: 'best', icon: 4, name: 'Best move', sub: 'Find the strongest move.' },
+    { id: 'sac', icon: 2, name: 'Sacrifice', sub: 'Hard: give material to gain more.' },
   ];
   const LEVELS = [
     { id: 'easy', name: 'Easy', sub: 'Clear and straightforward.', n: 1 },
@@ -533,7 +537,12 @@
         ${KINDS.map((k) => `<button class="pz-opt" data-k="${k.id}"><span class="pz-ic"><i class="ic-sp" style="--i:${k.icon}"></i></span><span class="pz-text"><span class="pz-name">${k.name}</span><span class="pz-sub">${k.sub}</span></span></button>`).join('')}
       </div>
       <button class="btn wide" id="pz-x">Cancel</button>`, true);
-    document.querySelectorAll('[data-k]').forEach((b) => { b.onclick = () => askDiff(b.dataset.k); });
+    document.querySelectorAll('[data-k]').forEach((b) => {
+      b.onclick = () => {
+        if (b.dataset.k === 'sac') { cfg = { type: 'sac', diff: 'hard' }; LP.closeSheet(); newPuzzle(); }
+        else askDiff(b.dataset.k);
+      };
+    });
     $('#pz-x').onclick = LP.closeSheet;
   }
 
