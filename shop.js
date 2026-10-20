@@ -20,24 +20,26 @@
   /* ------------------------------------------------------------------ items */
   const BOARDS = [
     ['walnut', 'Walnut', '#e8d3b0', '#a67c52', 'common'], ['ocean', 'Ocean', '#dfe9ee', '#5f8fa8', 'common'],
-    ['sage', 'Sage', '#e9eddc', '#8fa876', 'common'], ['slate', 'Slate', '#5f6c75', '#42535d', 'common'],
+    ['slate', 'Slate', '#5f6c75', '#42535d', 'common'],
     ['sand', 'Sand', '#f3e6c8', '#c9a66b', 'common'], ['rose', 'Rose', '#f6e3e3', '#c78a93', 'common'],
-    ['dusk', 'Dusk', '#b9c2d9', '#4a5b82', 'rare'], ['forest', 'Forest', '#d8e2c4', '#3f6b45', 'rare'],
+    ['forest', 'Forest', '#d8e2c4', '#3f6b45', 'rare'],
     ['amethyst', 'Amethyst', '#e6dcef', '#7c5ea8', 'rare'], ['coral', 'Coral', '#fbe4d8', '#e0795a', 'rare'],
   ].map(([id, name, l, d, r]) => ({ id, name, l, d, r }));
   BOARDS.push({ id: 'grass', name: 'Grass & Dirt', l: '#0e7a06', d: '#70420a', li: 'url(board-grass.png)', di: 'url(board-dirt.png)', r: 'epic' });
+  BOARDS.push({ id: 'wood', name: 'Wooden', l: '#ecd0a0', d: '#9e6a3e', li: 'url(board-wood-light.png)', di: 'url(board-wood-dark.png)', wood: true, r: 'epic' });
   BOARDS.push({ id: 'neonboard', name: 'Neon Grid', l: '#1b1550', d: '#09071f', neon: true, r: 'legendary' });
   const PIECES = [];
   /* picture packs: one sprite sheet each (white P B Q K N R, then black P B Q K N R), and the CSS-drawn neon pack */
-  PIECES.push({ id: 'realism', name: 'Realism', pk: 'sheet', sheet: 'pk-realism.png', r: 'common' });
-  PIECES.push({ id: 'pixel', name: 'Pixel', pk: 'sheet', sheet: 'pk-pixel.png', px: 1, r: 'rare' });
-  PIECES.push({ id: 'pixelduo', name: 'Blue & Gold', pk: 'sheet', sheet: 'pk-pixelduo.png', px: 1, r: 'epic' });
+  PIECES.push({ id: 'realism', name: 'Realism', pk: 'sheet', sheet: 'pk-realism-hd.png', r: 'common' });
+  PIECES.push({ id: 'pixel', name: 'Pixel', pk: 'sheet', sheet: 'pk-pixel-hd.png', px: 1, r: 'rare' });
+  PIECES.push({ id: 'pixelduo', name: 'Blue & Gold', pk: 'sheet', sheet: 'pk-pixelduo-hd.png', px: 1, r: 'epic' });
+  PIECES.push({ id: 'wood', name: 'Wooden', pk: 'sheet', sheet: 'pk-wood-hd.png', r: 'epic' });
   PIECES.push({ id: 'neon', name: 'Neon', pk: 'neon', r: 'legendary' });
   const HATS = [
     ['cap', 'Cap', '\u{1F9E2}', 'common'], ['grad', 'Graduate', '\u{1F393}', 'common'], ['sun', 'Sun Hat', '\u{1F452}', 'common'], ['hard', 'Hard Hat', '⛑️', 'common'],
     ['top', 'Top Hat', '\u{1F3A9}', 'rare'], ['helm', 'Helmet', '\u{1FA96}', 'rare'], ['blossom', 'Blossom', '\u{1F338}', 'rare'], ['clover', 'Clover', '\u{1F340}', 'rare'],
   ].map(([id, name, e, r]) => ({ id, name, e, r }));
-  const RETRO = { id: '', name: 'Retro', pk: 'sheet', sheet: 'pk-retro.png' };   // the main skin everyone starts with
+  const RETRO = { id: '', name: 'Retro', pk: 'sheet', sheet: 'pk-retro-hd.png' };   // the main skin everyone starts with
   const CRATES = {
     board: { name: 'Board Crate', slot: 'board', items: BOARDS, color: '#7cb342', badge: '▦' },
     piece: { name: 'Piece Crate', slot: 'piece', items: PIECES, color: '#f08c3a', badge: '<i class="ic-sp" style="--i:2;width:100%;height:100%"></i>' },
@@ -50,10 +52,15 @@
   let S = Object.assign({ tokens: null, owned: {}, equipped: { board: '', piece: '', hat: '' } }, read(SKEY, {}));
   if (S.tokens == null) S.tokens = 5;                  // a welcome gift, enough for the first crate
   const saveS = () => write(SKEY, S);
+  // boards that were taken out of the shop: owners get the price of a crate back for each one
+  const REMOVED = { 'board:sage': 'Sage', 'board:dusk': 'Dusk' };
+  const refunded = [];
+  Object.keys(REMOVED).forEach((k) => { if (S.owned[k]) { delete S.owned[k]; S.tokens += COST; refunded.push(REMOVED[k]); } });
   // anything equipped that no longer exists (removed items) falls back to the default look
   const stillThere = (slot, id) => !id || (CRATES[slot] && CRATES[slot].items.some((x) => x.id === id));
   ['board', 'piece', 'hat'].forEach((k) => { if (!stillThere(k, S.equipped[k])) S.equipped[k] = ''; });
   saveS();
+  if (refunded.length) setTimeout(() => popup('The ' + refunded.join(' and ') + ' board' + (refunded.length > 1 ? 's were' : ' was') + ' removed. Refunded <b>' + refunded.length * COST + '</b> tokens'), 1800);
 
   /* ------------------------------------------------------------------ cosmetics */
   const find = (slot, id) => CRATES[slot].items.find((x) => x.id === id);
@@ -67,7 +74,7 @@
     root.setProperty('--pw', p && p.w ? p.w : '#ffffff');
     root.setProperty('--pb', p && p.b ? p.b : '#1a1a1a');
     root.setProperty('--sheet', p && p.sheet ? 'url(' + p.sheet + ')' : 'none');
-    document.body.dataset.bd = b && b.neon ? 'neon' : '';
+    document.body.dataset.bd = b && b.neon ? 'neon' : b && b.wood ? 'wood' : '';
     document.body.dataset.pack = '1';
     PK = p && p.pk ? p.pk : '';
     PX = p && p.px ? '1' : '';
@@ -150,6 +157,34 @@
   }
   ensureDay();
 
+  /* Endless goals. Each one has levels that never run out. Level k needs base x k (progress starts again at 0 on every level)
+     and pays 1 + floor(k / 4) tokens, so the reward rises by 1 token every 4 levels (4 x the first goal).
+       capture: base 5 pieces  -> 5, 10, 15 (1 token each), 20 (2 tokens) ... (counts every capture, Rush included)
+       wins   : base 2 games   -> 2, 4, 6 (1 token each), 8 (2 tokens), 16 (3 tokens) ... (Classic or Secret Queen, beating Medium or tougher) */
+  const EKEY = 'localPieces.endless';
+  const ENDLESS = {
+    capture: { base: 5, text: (n) => 'Capture ' + n + ' pieces', ic: '⚔️', col: '#ef6a4c', title: 'Pieces captured', rule: 'Counts every piece you capture, in Classic, Secret Queen, TAS and Capture Rush.' },
+    wins:    { base: 2, text: (n) => 'Win ' + n + (n === 1 ? ' game' : ' games'), ic: '\u{1F3C6}', col: '#f2c45a', title: 'Games won', rule: 'Win in Classic or Secret Queen against a Medium or tougher computer.' },
+  };
+  let E = read(EKEY, {});
+  ['capture', 'wins'].forEach((k) => { E[k] = Object.assign({ lv: 1, p: 0, done: 0 }, E[k] || {}); });
+  const eTarget = (k, lv) => ENDLESS[k].base * lv;
+  const eReward = (k, lv) => 1 + Math.floor(lv / 4);
+  const MEDIUM_UP = { medium: 1, hard: 1, insane: 1, godly: 1 };
+  function endlessTick(k, n) {
+    const e = E[k];
+    e.p += n;
+    let got = 0, last = 0;
+    while (e.p >= eTarget(k, e.lv)) {
+      e.p -= eTarget(k, e.lv);
+      got += eReward(k, e.lv);
+      last = eTarget(k, e.lv);
+      e.lv++; e.done++;
+    }
+    write(EKEY, E);
+    if (got) { S.tokens += got; saveS(); popup(coin + ' Endless goal complete: ' + esc(ENDLESS[k].text(last)) + ' <b>+' + got + '</b>'); }
+  }
+
   function tick(ev, amount) {
     ensureDay();
     [[D, DEFS, 'Daily'], [W, WDEFS, 'Weekly']].forEach(([box, defs, label]) => {
@@ -163,6 +198,7 @@
         }
       });
     });
+    if (ev === 'capture') endlessTick('capture', amount);
     write(DKEY, D); write(WKEY, W);
     refresh();
   }
@@ -173,7 +209,7 @@
     if (LP.stats && LP.stats.event) LP.stats.event(name, p);
     if (name === 'game') {
       tick('play', 1);
-      if (p && p.won) { tick('win', 1); if (HARD[p.level]) tick('hardwin', 1); }
+      if (p && p.won) { tick('win', 1); if (HARD[p.level]) tick('hardwin', 1); if ((p.mode === 'basic' || p.mode === 'secret') && MEDIUM_UP[p.level]) { endlessTick('wins', 1); refresh(); } }
       if (p && p.mode === 'secret') tick('secret', 1);
     } else tick(name, typeof p === 'number' ? p : 1);
   }
@@ -186,11 +222,23 @@
   function renderTasks() {
     ensureDay();
     $('#tk-tokens').textContent = S.tokens;
-    const weekly = tkTab === 'weekly';
+    const life = tkTab === 'life', weekly = tkTab === 'weekly';
     const box = weekly ? W : D, defs = weekly ? WDEFS : DEFS;
     const dn = D.list.filter((t) => t.done).length, wn = W.list.filter((t) => t.done).length;
-    $('#tk-tabs').innerHTML = `<button class="${weekly ? '' : 'on'}" data-tk="daily">Daily <em>${dn}/${D.list.length}</em></button><button class="${weekly ? 'on' : ''}" data-tk="weekly">Weekly <em>${wn}/${W.list.length}</em></button>`;
+    const on = (k) => (tkTab === k ? 'on' : '');
+    $('#tk-tabs').innerHTML = `<button class="${on('daily')}" data-tk="daily">Daily <em>${dn}/${D.list.length}</em></button><button class="${on('weekly')}" data-tk="weekly">Weekly <em>${wn}/${W.list.length}</em></button><button class="${on('life')}" data-tk="life">Endless <em>${E.capture.done + E.wins.done}</em></button>`;
     document.querySelectorAll('[data-tk]').forEach((b) => { b.onclick = () => { tkTab = b.dataset.tk; renderTasks(); }; });
+    if (life) {
+      const doneAll = E.capture.done + E.wins.done;
+      $('#tk-reset').innerHTML = 'Never resets. Every goal you finish makes the next one bigger. <span class="tk-hard">' + doneAll + ' finished</span>';
+      const cur = (k) => { const e = E[k], d = ENDLESS[k], n = eTarget(k, e.lv), pct = Math.round(100 * e.p / n);
+        return `<div class="tk-card wk"><div class="tk-top"><span class="tk-ic" style="color:${d.col}" aria-hidden="true">${d.ic}</span><b>${esc(d.text(n))}</b><span class="tk-rw">${coin}+${eReward(k, e.lv)}</span></div>
+          <div class="tk-bar"><i style="width:${e.p ? Math.max(pct, 8) : 0}%"></i><span>${e.p} / ${n}</span></div></div>`; };
+      const nxt = (k) => { const e = E[k], d = ENDLESS[k], n = eTarget(k, e.lv + 1);
+        return `<div class="tk-card soon"><div class="tk-top"><span class="tk-ic" style="color:${d.col}" aria-hidden="true">${d.ic}</span><b><small class="tk-next">Next</small> ${esc(d.text(n))}</b><span class="tk-rw">${coin}+${eReward(k, e.lv + 1)}</span></div></div>`; };
+      $('#tk-list').innerHTML = ['capture', 'wins'].map((k) => `<h3 class="sh-sub">${ENDLESS[k].title} <em class="tk-lv">Level ${E[k].lv}</em></h3>${cur(k)}${nxt(k)}<p class="note">${ENDLESS[k].rule}</p>`).join('');
+      return;
+    }
     $('#tk-reset').innerHTML = (weekly ? 'New weekly quests in <b>' : 'New tasks in <b>') + fmtMs(weekly ? leftWeek() : leftDay()) + '</b>' + (weekly ? ' <span class="tk-hard">Harder goals, 5 to 8 tokens each</span>' : '');
     $('#tk-list').innerHTML = box.list.map((t) => {
       const d = defs[t.k], pct = Math.round(100 * t.p / t.n);
@@ -210,17 +258,23 @@
     return Object.keys(RARITY).filter((r) => have.has(r)).map((r) => [r, Math.round(100 * RARITY[r].w / tot)]);
   };
   const PVSHAPES = 'pbqknr';
+  /** The white king of the piece set that is equipped right now (accessory previews are drawn on it). */
+  function kingHtml() {
+    const p = find('piece', S.equipped.piece) || RETRO;
+    if (p.pk === 'neon') return '<b class="piece w pvk-neon" data-pk="neon" data-k="k"></b>';
+    return `<i class="ic-sp"${p.px ? ' data-px="1"' : ''} style="--i:3;background-image:url(${p.sheet})"></i>`;
+  }
   function preview(slot, it) {
     if (slot === 'board') {
       const st = `--a:${it.l};--b:${it.d}` + (it.li ? `;--ai:${it.li};--bi:${it.di}` : '');
-      return `<span class="pv-board${it.li ? ' tex' : ''}${it.neon ? ' neon' : ''}" style="${st}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
+      return `<span class="pv-board${it.li ? ' tex' : ''}${it.neon ? ' neon' : ''}${it.wood ? ' smooth' : ''}" style="${st}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
     }
     if (slot === 'piece') {
       if (it.pk === 'sheet') return `<span class="pv-king pv-sheet" style="--sheet:url(${it.sheet})"><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${3 / 11 * 100}%"></b><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${9 / 11 * 100}%"></b></span>`;
       if (it.pk === 'neon') return `<span class="pv-king pv-neon"><b class="piece w" data-pk="neon" data-k="k"></b><b class="piece b" data-pk="neon" data-k="n"></b></span>`;
       return `<span class="pv-king"><b style="color:${it.w}">♚︎</b><b style="color:${it.b}">♚︎</b></span>`;
     }
-    return `<span class="pv-hat"><em>${it.e}</em><i class="ic-sp" style="--i:3"></i></span>`;
+    return `<span class="pv-hat"><em>${it.e}</em>${kingHtml()}</span>`;     // worn by the king of the piece set that is equipped now
   }
   const dflt = { board: { id: '', name: 'Classic', l: '#eeeed2', d: '#769656' }, piece: RETRO, hat: { id: '', name: 'None', e: '' } };
 

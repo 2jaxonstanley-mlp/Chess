@@ -112,7 +112,10 @@
       '<input id="pf-name" type="text" maxlength="16" autocomplete="off" autocapitalize="words" placeholder="Player" enterkeyhint="done">' +
       '<div class="pf-cards">' + card('basic') + card('secret') + '</div>' +
       '<p class="note">Your rating changes when you play one-player games against the computer. Beating a harder computer earns more.</p>' +
-      '<div class="row"><button class="btn" id="pf-x">Close</button><button class="btn primary" id="pf-ok">Save</button></div>', true);
+      '<button class="btn wide" id="pf-tour" style="margin-top:.8rem">Replay tutorial</button>' +
+      '<div class="row" style="margin-top:.6rem"><button class="btn" id="pf-x">Close</button><button class="btn primary" id="pf-ok">Save</button></div>', true);
+    const tour = $('#pf-tour');
+    if (tour) tour.onclick = () => { setName($('#pf-name').value); if (LP.tutorial) LP.tutorial.replay(); };
     $('#pf-name').value = P.name;
     const preview = $('#pf-av-preview');
     const clearBtn = $('#pf-clear');

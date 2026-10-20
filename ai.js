@@ -18,6 +18,14 @@
   const INF = 1e9;
   const VAL = [0, 100, 320, 335, 500, 900, 0];
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  /** Run fn on the next turn of the event loop without the 4 ms (or more) delay setTimeout adds between search iterations. */
+  const defer = (() => {
+    if (typeof MessageChannel === 'undefined') return (fn) => setTimeout(fn, 0);
+    const q = [];
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => { const f = q.shift(); if (f) f(); if (!q.length && ch.port1.unref) ch.port1.unref(); };   // (unref: lets node tests exit)
+    return (fn) => { q.push(fn); if (ch.port1.ref) ch.port1.ref(); ch.port2.postMessage(0); };
+  })();
 
   /* ------------------------------------------------------------------ hashing */
   let seed = 0x9e3779b9;
@@ -692,12 +700,13 @@
     easy:    { maxDepth: 1, time: 300,  q: 0, noise: 120, blunder: 0.18 },
     medium:  { maxDepth: 2, time: 500,  q: 1, noise: 90,  blunder: 0.10 },        // about an average club beginner, roughly 1000
     hard:    { maxDepth: 3, time: 700,  q: 2, noise: 40,  blunder: 0.03, book: true },  // a solid improving player, roughly 1500
-    insane:  { maxDepth: 30, time: 4200, q: 8, noise: 0,  blunder: 0, book: true, polish: true },   // plays book lines, then double-checks its move so it avoids labelled mistakes and goes for brilliant/best moves
+    insane:  { maxDepth: 30, time: 1800, q: 8, noise: 0,  blunder: 0, book: true, polish: true },   // plays book lines, then double-checks its move so it avoids labelled mistakes and goes for brilliant/best moves
     // Godly: searches 5 full moves (10 plies), keeps its 3 best moves and picks one at random 3/6, 2/6, 1/6
-    godly:   { maxDepth: 14, time: 6000, q: 8, noise: 0,  blunder: 0, multi: 5, pick: 3, weights: [3, 2, 1], castle: 120, guard: true, window: 70, mate: true },
-    hint:    { maxDepth: 30, time: 3800, q: 8, noise: 0,  blunder: 0, multi: 3, pick: 3 },   // TAS: the 3 best moves
+    godly:   { maxDepth: 14, time: 2600, q: 8, noise: 0,  blunder: 0, multi: 5, pick: 3, weights: [3, 2, 1], castle: 120, guard: true, window: 70, mate: true },
+    hint:    { maxDepth: 30, time: 2200, q: 8, noise: 0,  blunder: 0, multi: 3, pick: 3 },   // TAS: the 3 best moves
   };
   window.__aiLevels = LEVELS;
+  window.__aiNodes = () => nodes;
   window.__aiLastDepth = () => lastDepth;
 
 
@@ -840,9 +849,9 @@
         prevTop = found[0].m; prevTopScore = found[0].sc;
       } else { prevTop = found[0].m; prevTopScore = found[0].sc; }
       depth++;
-      setTimeout(iterate, 0);
+      defer(iterate);
     };
-    setTimeout(iterate, 0);
+    defer(iterate);
   }
 
   /** The best moves for the side to move: cb([{ move, score }]) best first. */
@@ -865,21 +874,9 @@
   function polish(g, pick) {
     try {
       const MR = window.MoveRating;
-      if (!MR || !MR.rateAll || g.mode !== 'basic') return pick;
-      const list = MR.rateAll(g);
-      const key = (m) => m.from + '-' + m.to + '-' + (m.promo || 0);
-      const mine = list.find((x) => key(x.move) === key(pick));
-      const cls = { brilliant: 5, great: 4, best: 3, book: 2 };
-      const bad = (x) => x.rating && (x.rating.id === 'inaccuracy' || x.rating.id === 'mistake' || x.rating.id === 'blunder');
-      const score = (x) => (x.rating && cls[x.rating.id] ? cls[x.rating.id] : 1);
-      const pool = list.filter((x) => !bad(x));
-      if (!pool.length || !mine) return pick;
-      const bestOf = (arr) => arr.slice().sort((a, b) => score(b) - score(a) || a.loss - b.loss)[0];
-      let choice = mine;
-      if (bad(mine)) choice = bestOf(pool);
-      else if (score(mine) < 3) { const c = bestOf(pool); if (score(c) >= 3 && c.loss <= 10) choice = c; }
-      else if (score(mine) < 5) { const c = pool.find((x) => x.rating && x.rating.id === 'brilliant'); if (c) choice = c; }
-      return g.legalMovesFrom(choice.move.from).find((x) => x.to === choice.move.to && x.promo === choice.move.promo) || pick;
+      if (!MR || !MR.polish || window.AIAnalyse === undefined) return pick;
+      const m = MR.polish(MR.clone(g), pick);
+      return g.legalMovesFrom(m.from).find((x) => x.to === m.to && x.promo === m.promo && (x.q || 0) === (m.q || 0)) || pick;
     } catch (e) { return pick; }
   }
 
@@ -998,9 +995,74 @@
       }
       if (aborted) { finish(best); return; }
       depth++;
-      setTimeout(iterate, 0);
+      defer(iterate);
     };
-    setTimeout(iterate, 0);
+    defer(iterate);
+  };
+
+  /* ---------------------------------------------------------------- move analysis (used by the move-strength labels) */
+  /**
+   * Score the moves of position g with a short iterative-deepening search on the TRUE position (nothing is hidden, so
+   * Secret Queen games are judged with the real queens). Synchronous and bounded by `ms`.
+   * Returns { depth, legal, top: [{ move, score }] (best 3, scores from the mover's side), played: { score, exact } }.
+   * `played` is { from, to, promo, q } or null.
+   */
+  window.AIAnalyse = {
+    clone: (g) => cloneForSearch(g, 0),
+    MATE,
+    run(g, played, ms, maxDepth) {
+      const c = cloneForSearch(g, 0);
+      const root = c.legalMoves();
+      if (!root.length) return { depth: 0, legal: 0, top: [], played: null };
+      if (g.mode === 'secret') ttDepth.fill(-1);
+      const cfg = { q: 4 };
+      prepare(g, c, cfg);
+      const t0 = now();
+      deadline = t0 + (ms || 450); nodes = 0; aborted = false;
+      const K = Math.min(3, root.length);
+      let found = [], prev = new Map(), depthDone = 0;
+      for (let depth = 1; depth <= (maxDepth || 9); depth++) {
+        aborted = false;
+        const ordered = root.slice().sort((a, b) => (prev.get(b) ?? -INF) - (prev.get(a) ?? -INF));
+        const list = [], sm = new Map();
+        let cut = -INF;
+        for (const m of ordered) {
+          c.makeMove(m);
+          const sc = -negamax(c, depth - 1, -INF, -cut, 1, cfg.q, true);
+          c.unmakeMove();
+          if (aborted) break;
+          sm.set(m, sc);
+          if (list.length < K || sc > cut) {
+            list.push({ m, sc }); list.sort((a, b) => b.sc - a.sc);
+            if (list.length > K) list.pop();
+            if (list.length === K) cut = list[K - 1].sc;
+          }
+        }
+        if (aborted) break;
+        found = list; prev = sm; depthDone = depth;
+        if (list[0].sc > MATE - 100 && depth >= 3) break;           // a forced mate is settled
+        if (depth >= 4 && now() - t0 > (ms || 450) * 0.5) break;    // the next depth would not finish in time
+      }
+      const same = (a, b) => a.from === b.from && a.to === b.to && (a.promo || 0) === (b.promo || 0) && (a.q || 0) === (b.q || 0);
+      let pl = null;
+      if (played) {
+        const pm = root.find((x) => same(x, played));
+        if (pm) {
+          const hit = found.find((t) => t.m === pm);
+          if (hit) pl = { score: hit.sc, exact: true };
+          else if (prev.has(pm)) {
+            // searched at the last depth but it fell below the top three: re-search it with a full window
+            aborted = false; deadline = now() + (ms || 450) * 0.6;
+            c.makeMove(pm);
+            const sc = -negamax(c, Math.max(0, depthDone - 1), -INF, INF, 1, cfg.q, true);
+            c.unmakeMove();
+            pl = aborted ? { score: Math.min(prev.get(pm), found[found.length - 1].sc), exact: false } : { score: sc, exact: true };
+          }
+        }
+      }
+      if (!found.length) found = [{ m: root[0], sc: 0 }];
+      return { depth: depthDone, legal: root.length, top: found.map((t) => ({ move: t.m, score: t.sc })), played: pl };
+    },
   };
 
   /** The computer's own secret queen: a random piece that is not the king or queen. */

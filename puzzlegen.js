@@ -54,14 +54,26 @@
       }
       return false;
     };
+    const putNear = (col, t) => {                       // a Black piece close to its king (the way a defence really looks)
+      for (let i = 0; i < 30; i++) {
+        const s = pick(SQUARES);
+        if (g.board[s] || dist(s, bk) > 2) continue;
+        const rk = rankOf(s);
+        if (t === PAWN && (rk === 0 || rk === 7)) continue;
+        g.board[s] = col | t;
+        return true;
+      }
+      return put(col, t);
+    };
     for (const t of r.white) if (!put(WHITE, t)) return null;
-    for (const t of r.black) if (!put(BLACK, t)) return null;
+    for (const t of r.black) if (!(r.near && Math.random() < r.near ? putNear(BLACK, t) : put(BLACK, t))) return null;
     if (g.inCheck(BLACK) || g.inCheck(WHITE)) return null;
     return g;
   }
 
   /* ----------------------------------------------------------------- mate */
   const isMate = (g) => g.inCheck(g.turn) && !g.hasLegalMove();
+  const isCapture = (g, m) => !!g.board[m.to] || m.flags === 2;
 
   /** Every White move that checkmates right now. */
   function mateMoves(g, first) {
@@ -75,73 +87,168 @@
     return out;
   }
 
-  /** White's first moves that force mate on the next move whatever Black does (and that do not mate at once). */
-  function forcedMate2(g, firstOnly) {
-    const firsts = [];
-    for (const m1 of g.legalMoves()) {
-      g.makeMove(m1);
-      const replies = g.legalMoves();
-      let ok = replies.length > 0 && !isMate(g);
-      if (ok) {
-        for (const r of replies) {
-          g.makeMove(r);
-          const has = mateMoves(g, true).length > 0;
-          g.unmakeMove();
-          if (!has) { ok = false; break; }
-        }
+  /* A small forced-mate solver. `budget` caps the work; when it runs out `blown` is set and the answer is "no". */
+  let budget = 0, blown = false;
+  const setBudget = (n) => { budget = n; blown = false; };
+
+  /** White to move: can White force checkmate within k moves? checksOnly: before the last move White may only give check. */
+  function wMates(g, k, checksOnly) {
+    if (mateMoves(g, true).length) return true;
+    if (k <= 1 || blown) return false;
+    const quiet = [];
+    for (const m of g.legalMoves()) {
+      if (--budget < 0) { blown = true; return false; }
+      g.makeMove(m);
+      const chk = g.inCheck(g.turn);
+      if (chk || !checksOnly) {
+        if (chk) { const ok = blackLoses(g, k - 1, checksOnly); g.unmakeMove(); if (ok) return true; if (blown) return false; continue; }
+        g.unmakeMove(); quiet.push(m); continue;
       }
       g.unmakeMove();
-      if (ok) { firsts.push(m1); if (firstOnly) break; }
     }
-    return firsts;
+    for (const m of quiet) {
+      if (--budget < 0) { blown = true; return false; }
+      g.makeMove(m);
+      const ok = blackLoses(g, k - 1, checksOnly);
+      g.unmakeMove();
+      if (ok) return true;
+      if (blown) return false;
+    }
+    return false;
+  }
+  /** Black to move (not checkmated): does every reply let White mate within k moves? */
+  function blackLoses(g, k, checksOnly) {
+    const rep = g.legalMoves();
+    if (!rep.length) return false;                 // stalemate (a mate is handled by the caller)
+    for (const r of rep) {
+      if (--budget < 0) { blown = true; return false; }
+      g.makeMove(r);
+      const w = wMates(g, k, checksOnly);
+      g.unmakeMove();
+      if (!w) return false;
+    }
+    return true;
   }
 
-  /** After White's first move: the Black reply that leaves White the fewest mating moves (the stubbornest defence). */
-  function bestDefence(g) {
+  /** White's first moves that force checkmate in `n` moves (n = 2 or 3). For n = 3 the second move has to be a check. */
+  function mateFirsts(g, n, firstOnly) {
+    const out = [];
+    for (const m1 of uniq(g.legalMoves())) {
+      g.makeMove(m1);
+      const ok = !isMate(g) && blackLoses(g, n - 1, n >= 3);
+      g.unmakeMove();
+      if (blown) return null;
+      if (ok) { out.push(m1); if (firstOnly) break; }
+    }
+    return out;
+  }
+
+  /** The forced mate in 2 first moves (kept for older code). */
+  function forcedMate2(g, firstOnly) { return mateFirsts(g, 2, firstOnly) || []; }
+
+  /** Can White (to move) mate within k moves? Used to check the player's moves; generous budget, never throws. */
+  function canMate(g, k) { setBudget(250000); const r = wMates(g, k, false); return r; }
+  /** Black to move after the player's move: is every reply answered by a mate within k moves? */
+  function forcedWithin(g, k) {
+    setBudget(250000);
+    const r = blackLoses(g, k, false);
+    return { ok: r, unsure: blown };
+  }
+
+  /** A White move that mates in at most k moves (a mate itself, else the first forced line found). */
+  function findMateMove(g, k) {
+    const mm = mateMoves(g, true);
+    if (mm.length) return mm[0];
+    for (const checks of [true, false]) {
+      setBudget(250000);
+      const ms = g.legalMoves();
+      for (const m of ms) {
+        g.makeMove(m);
+        const ok = !isMate(g) && (checks ? g.inCheck(g.turn) : true) && blackLoses(g, k - 1, checks && k >= 3);
+        g.unmakeMove();
+        if (ok) return m;
+        if (blown) break;
+      }
+    }
+    return null;
+  }
+
+  /** After White's move: the Black reply that gives White the fewest ways to carry on (the stubbornest defence). k = moves White still has. */
+  function bestDefence(g, k) {
+    const rep = g.legalMoves();
+    if (!rep.length) return null;
     let best = null, bestN = 1e9;
-    for (const r of g.legalMoves()) {
+    setBudget(120000);
+    for (const r of rep) {
       g.makeMove(r);
-      const n = uniq(mateMoves(g)).length;
+      let n = 0;
+      if (!k || k <= 1) n = uniq(mateMoves(g)).length;
+      else {
+        for (const m of g.legalMoves()) {
+          g.makeMove(m);
+          if (g.inCheck(g.turn) && (isMate(g) || blackLoses(g, k - 1, k >= 3))) n++;
+          g.unmakeMove();
+          if (blown) break;
+        }
+        if (blown) { blown = false; budget = 120000; }
+      }
       g.unmakeMove();
       if (n < bestN || (n === bestN && Math.random() < 0.5)) { best = r; bestN = n; }
     }
     return best;
   }
 
-  const MATE_POOL = { easy: [QUEEN, ROOK], normal: [QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, PAWN], hard: [QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, PAWN, PAWN] };
   const BLACK_POOL = [PAWN, PAWN, PAWN, KNIGHT, BISHOP, ROOK, QUEEN];
-
   function pickN(pool, n) { const a = []; for (let i = 0; i < n; i++) a.push(pick(pool)); return a; }
 
-  /** One attempt at a mate puzzle; returns a puzzle or null. level: 0 strict, 1 relaxed, 2 anything that is valid. */
-  function tryMate(diff, n, level) {
+  /**
+   * One attempt at a mate puzzle (a forced mate in n = 2 or 3 moves); returns a puzzle or null.
+   * level: 0 strict, 1 relaxed, 2 anything that is valid.
+   * Mate in 3 puzzles have to start with a capture (take something first), and mate in 1 is not used at all.
+   */
+  function tryMate(diff, n, level, forSac) {
     let white, black;
-    if (diff === 'easy') { white = [QUEEN]; if (Math.random() < 0.4) white.push(ROOK); black = pickN([PAWN, PAWN, KNIGHT, BISHOP], rnd(3)); }
-    else if (diff === 'normal') { white = pickN(MATE_POOL.normal, 2 + rnd(2)); black = pickN(BLACK_POOL, 1 + rnd(3)); }
-    else { white = pickN(MATE_POOL.hard, 3 + rnd(2)); black = pickN(BLACK_POOL, 3 + rnd(3)); }
-    const g = randomPosition({ white, black, edge: Math.random() < 0.75 });
-    if (!g) return null;
-    const nBlack = black.length;
-    const checks = () => { let c = 0; for (const m of uniq(g.legalMoves())) { g.makeMove(m); if (g.inCheck(g.turn) && !isMate(g)) c++; g.unmakeMove(); } return c; };
-    const mates = uniq(mateMoves(g));
     if (n === 1) {
+      if (diff === 'easy') { white = [pick([QUEEN, ROOK]), pick([QUEEN, ROOK, BISHOP, KNIGHT, PAWN])]; if (Math.random() < 0.5) white.push(pick([PAWN, KNIGHT, BISHOP])); black = pickN([PAWN, PAWN, PAWN, KNIGHT, BISHOP, ROOK], 3 + rnd(3)); }
+      else { white = pickN([QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, PAWN], 4 + rnd(2)); black = pickN(BLACK_POOL, 4 + rnd(3)); }
+    } else if (n === 2) {
+      white = pickN([QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, PAWN], (diff === 'hard' ? 5 : 4) + rnd(2));
+      black = pickN(BLACK_POOL, (diff === 'hard' ? 5 : 4) + rnd(3));
+    } else { white = pickN([QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, PAWN, PAWN], 5 + rnd(3)); black = pickN(BLACK_POOL, 5 + rnd(3)); }
+    const g = randomPosition({ white, black, edge: Math.random() < 0.75, near: 0.55 });
+    if (!g) return null;
+    if (n === 1) {
+      const mates = uniq(mateMoves(g));
       if (!mates.length) return null;
       const types = mates.map((m) => g.board[m.from] & 7);
       if (level === 0) {
-        if (diff === 'easy' && (mates.length > 2 || types.some((t) => t !== QUEEN && t !== ROOK))) return null;
-        if (diff === 'normal' && (mates.length > 3 || (types.every((t) => t === QUEEN) && Math.random() > 0.15))) return null;
-        if (diff === 'hard' && (mates.length !== 1 || nBlack < 3 || checks() < 2)) return null;
-      } else if (level === 1 && diff === 'hard' && mates.length > 2) return null;
+        if (diff === 'easy' && (mates.length > 3 || types.some((t) => t !== QUEEN && t !== ROOK))) return null;
+        if (diff === 'normal' && (mates.length > 2 || (types.every((t) => t === QUEEN) && Math.random() > 0.15))) return null;
+      }
       return { type: 'mate', n: 1, diff, pos: posOf(g), sol: mates.map(plain) };
     }
-    if (mates.length) return null;                     // that would be a mate in 1, not a mate in 2
-    const firsts = uniq(forcedMate2(g));
-    if (!firsts.length) return null;
-    if (level === 0) {
-      if (diff === 'normal' && firsts.length > 2) return null;
-      if (diff === 'hard' && (firsts.length !== 1 || nBlack < 3 || checks() < 2)) return null;
-    } else if (level === 1 && diff === 'hard' && firsts.length > 2) return null;
-    return { type: 'mate', n: 2, diff, pos: posOf(g), sol: firsts.map(plain) };
+    setBudget(n === 2 ? 60000 : 200000);
+    if (mateMoves(g, true).length) return null;                       // an immediate mate would make it a mate in 1
+    if (n === 3) {
+      // quick reject: a mate in 2 would make this a mate in 2 puzzle
+      setBudget(60000);
+      if (wMates(g, 2, false)) return null;
+      if (blown) return null;
+      setBudget(200000);
+    }
+    const firsts = mateFirsts(g, n, false);
+    if (!firsts || !firsts.length) return null;
+    if (n === 3) {
+      if (!forSac && !firsts.some((m) => isCapture(g, m))) return null;   // the idea is to take a piece first
+      if (level === 0 && diff === 'hard' && firsts.length > 3) return null;
+      if (level === 0 && diff === 'normal' && firsts.length > 5) return null;
+    } else {
+      if (level === 0 && diff === 'normal' && firsts.length > 3) return null;
+      if (level === 0 && diff === 'hard' && firsts.length > 2) return null;
+    }
+    // put the capturing moves first so the hint and the shown solution take a piece
+    const ordered = firsts.slice().sort((a, b) => (isCapture(g, b) ? 1 : 0) - (isCapture(g, a) ? 1 : 0));
+    return { type: 'mate', n, diff, pos: posOf(g), sol: ordered.map(plain) };
   }
 
   /* ---------------------------------------------------------------- check */
@@ -213,14 +320,14 @@
 
   function tryCheck(diff, level) {
     let white, black, want;
-    if (diff === 'easy') { white = [pick([QUEEN, ROOK])]; black = pickN([PAWN, PAWN, KNIGHT, BISHOP], rnd(3)); want = [1, 2]; }
-    else if (diff === 'normal') { white = [pick([ROOK, BISHOP, KNIGHT, ROOK])]; if (Math.random() < 0.35) white.push(PAWN); black = pickN(BLACK_POOL, 1 + rnd(3)); want = [2, 3]; }
-    else { white = [pick([KNIGHT, BISHOP, ROOK, KNIGHT])]; if (Math.random() < 0.4) white.push(pick([PAWN, KNIGHT, BISHOP])); black = pickN(BLACK_POOL, 2 + rnd(3)); want = [3, 4]; }
-    const g = randomPosition({ white, black, edge: Math.random() < 0.5 });
+    if (diff === 'easy') { white = [pick([QUEEN, ROOK]), pick([PAWN, KNIGHT, BISHOP, ROOK])]; if (Math.random() < 0.5) white.push(pick([PAWN, KNIGHT])); black = pickN([PAWN, PAWN, PAWN, KNIGHT, BISHOP, ROOK], 3 + rnd(2)); want = [1, 2]; }
+    else if (diff === 'normal') { white = pickN([ROOK, ROOK, BISHOP, KNIGHT, KNIGHT, PAWN], 3 + rnd(2)); black = pickN(BLACK_POOL, 5 + rnd(3)); want = [2, 3]; }
+    else { white = pickN([ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, PAWN, PAWN], 4 + rnd(3)); black = pickN(BLACK_POOL, 6 + rnd(4)); want = [3, 4]; }
+    const g = randomPosition({ white, black, edge: Math.random() < 0.4, near: 0.5 });
     if (!g) return null;
     if (!g.hasLegalMove()) return null;
     const lo = level === 0 ? want[0] : level === 1 ? Math.max(1, want[0] - 1) : 1;
-    const found = checkPath(g.board, level === 0 ? want[1] : 5);
+    const found = checkPath(g.board, level === 0 ? want[1] : 5, 90000);
     if (!found || !found.path || found.path.length < lo) return null;
     if (level === 0 && found.path.length > want[1]) return null;
     return { type: 'check', diff, limit: found.path.length, pos: posOf(g), path: found.path, replies: found.replies };
@@ -321,28 +428,32 @@
   const BEST_POOL = [QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, PAWN, PAWN, PAWN, PAWN];
 
   function tryBest(diff, level) {
-    const n = diff === 'hard' ? 4 + rnd(3) : 3 + rnd(3);
+    const n = diff === 'hard' ? 5 + rnd(3) : diff === 'normal' ? 4 + rnd(3) : 3 + rnd(3);
     const white = pickN(BEST_POOL, n), black = pickN(BEST_POOL, n - rnd(2));
     const g = randomPosition({ white, black, edge: false });
     if (!g || !g.hasLegalMove()) return null;
-    const D = 3;
-    const margin = diff === 'easy' ? 250 : level >= 2 ? 120 : diff === 'hard' ? 150 : 200;
-    let mid = null;
-    if (diff === 'hard' && level === 0) mid = bestAt(g, 2).move;   // hard: the answer must be deeper than a two-move look
+    const D = diff === 'hard' ? (level >= 2 ? 3 : 5) : 3;           // how deep the answer has to be proven
+    const margin = diff === 'easy' ? 250 : level >= 2 ? 120 : diff === 'hard' ? 200 : 150;
+    // cheap first: a harder puzzle must not be found by a short look
+    let shallow = null;
+    if (diff === 'hard' && level < 1) shallow = bestAt(g, 2).move;
+    if (diff === 'hard' && level < 2) { const q3 = bestAt(g, 3); if (!q3.move || (q3.score - evalSide(g) < 100 && q3.score < MATE - 100)) return null; }   // a quiet position has nothing to find
     const top = bestAt(g, D);
     if (!top.move) return null;
     const mated = top.score > MATE - 100;
     if (!mated && top.score < -MATE / 2) return null;
+    if (shallow && level === 0 && shallow.from === top.move.from && shallow.to === top.move.to) return null;
     if (rivalWithin(g, top.move, top.score, D, margin)) return null;
+    // the best move has to matter: it must win material (or mate) compared with where we started
+    const now = evalSide(g);
+    if (diff !== 'easy' && level < 2 && !mated && top.score - now < (diff === 'hard' ? 150 : 100)) return null;
     if (level === 0) {
       const greedy = bestAt(g, 1).move;
       const same = greedy.from === top.move.from && greedy.to === top.move.to;
       if (diff === 'easy' && (!same || !g.board[top.move.to])) return null;
-      if (diff === 'normal' && same) return null;
-      if (diff === 'hard' && mid && mid.from === top.move.from && mid.to === top.move.to) return null;
+      if (diff !== 'easy' && same) return null;
     }
     const good = uniq(g.legalMoves().filter((m) => m.from === top.move.from && m.to === top.move.to)).map(plain);
-    const now = evalSide(g);
     let explain;
     if (mated) explain = 'It forces checkmate in ' + Math.max(1, Math.ceil((MATE - top.score) / 2)) + '.';
     else if (top.score - now >= 150) explain = 'It wins about ' + Math.round((top.score - now) / 100) + ' points of material.';
@@ -350,80 +461,126 @@
     return { type: 'best', diff, pos: posOf(g), good, explain, san: sanOf(g, top.move) };
   }
 
-  /* ---------------------------------------------------------------- sacrifice (hard) */
+  /* ---------------------------------------------------------------- sacrifice */
   const SAC_POOL = [QUEEN, ROOK, ROOK, BISHOP, BISHOP, KNIGHT, KNIGHT, KNIGHT, PAWN, PAWN, PAWN];
 
-  /**
-   * Immediate material delta for the side that just moved (positive = they gained material on the board
-   * right now, before the opponent answers). Used to detect "this move gives something away".
-   */
-  function staticGain(gBefore, m) {
-    const before = evalSide(gBefore);
-    gBefore.makeMove(m);
-    // from the opponent's view eval is negated; after White moves, evalSide is from Black's side
-    const afterForMover = -evalSide(gBefore);
-    gBefore.unmakeMove();
-    return afterForMover - before;
+  /** Does move m (White) score at least T for White when searched `depth` plies deep (material search)? */
+  function atLeast(g, m, depth, T) {
+    g.makeMove(m);
+    const v = -nega(g, depth - 1, -INF, -T + 1, 1);
+    g.unmakeMove();
+    return v >= T;
+  }
+  function scoreOf(g, m, depth) {
+    g.makeMove(m);
+    const v = -nega(g, depth - 1, -INF, INF, 1);
+    g.unmakeMove();
+    return v;
   }
 
   /**
-   * A sacrifice puzzle: the unique best move loses material immediately (or hangs a piece) but the
-   * deep search shows a net gain (extra material or mate). Always treated as hard.
+   * A sacrifice puzzle: White's best move gives up material (more than the best quiet or capturing alternative would cost)
+   * but wins more back, or forces checkmate.
+   *   easy   : a sacrifice that forces mate in 2, or one whose win shows within 3 plies.
+   *   normal : a sacrifice that forces mate in 3, or one whose win needs 5 plies to see (a 3-ply look sees nothing).
+   *   hard   : a big sacrifice (a rook or more) that forces mate in 3, or a material sacrifice that needs 5 plies and is the only way.
+   * "Sacrifice" means: after the opponent has taken what it can, White is at least two pawns worse off than after the best safe move.
    */
   function trySac(diff, level) {
-    const n = 5 + rnd(3);
-    const white = pickN(SAC_POOL, n);
-    const black = pickN(SAC_POOL, n - 1 + rnd(2));
-    // Prefer more pieces so exchanges and sacs are possible
-    if (Math.random() < 0.5) white.push(pick([QUEEN, ROOK, BISHOP]));
-    if (Math.random() < 0.5) black.push(pick([QUEEN, ROOK, BISHOP]));
-    const g = randomPosition({ white, black, edge: Math.random() < 0.35 });
+    const nW = (diff === 'easy' ? 4 : 5) + rnd(3), nB = (diff === 'easy' ? 4 : 5) + rnd(3);
+    const g = randomPosition({ white: pickN(SAC_POOL, nW), black: pickN(SAC_POOL, nB), edge: false, near: 0.3 });
     if (!g || !g.hasLegalMove()) return null;
-
-    const D = level >= 2 ? 2 : 3;
-    const top = bestAt(g, D);
-    if (!top.move) return null;
-    if (top.score < -MATE / 2) return null;
-
-    // Must be a clear unique best (hard: wide margin)
-    const margin = level === 0 ? 180 : level === 1 ? 140 : 100;
-    if (rivalWithin(g, top.move, top.score, D, margin)) return null;
-
-    // Immediate material must drop (true sacrifice), unless it is a mate-forcing sac with hanging piece
-    const gain0 = staticGain(g, top.move);
-    const mated = top.score > MATE - 100;
-    // Need to give away at least a pawn of material on the board right away
-    if (gain0 > -80 && !mated) return null;
-    if (gain0 > -50 && mated) return null;   // mate sacs should still look like a real offer
-
-    // Deep search must show a real payoff (win material back or mate)
-    const now = evalSide(g);
-    const deepGain = top.score - now;
-    if (!mated && deepGain < 150) return null;
-    // Greedy 1-ply should NOT find the same move (otherwise it is not a hard sac to see)
-    if (level === 0) {
-      const greedy = bestAt(g, 1).move;
-      if (greedy && greedy.from === top.move.from && greedy.to === top.move.to) return null;
+    const ms = uniq(g.legalMoves());
+    const after = new Map();
+    let V0 = -INF;
+    for (const m of ms) {
+      g.makeMove(m);
+      const a = -qs(g, -INF, INF, 0);
+      g.unmakeMove();
+      after.set(key(m), a);
+      if (a > V0) V0 = a;
     }
-
-    const good = uniq(g.legalMoves().filter((m) => m.from === top.move.from && m.to === top.move.to)).map(plain);
-    let explain;
-    if (mated) {
-      explain = 'Sacrifice that forces checkmate in ' + Math.max(1, Math.ceil((MATE - top.score) / 2)) + '.';
+    const need = diff === 'hard' && level === 0 ? 450 : 200;
+    const sacs = ms.filter((m) => after.get(key(m)) <= V0 - 200).sort((x, y) => after.get(key(x)) - after.get(key(y)));
+    if (!sacs.length) return null;
+    const tier = level >= 2 ? 'easy' : diff;
+    const T = 150;
+    let found = null, mate3Tries = 0, matTries = 0;
+    const wantMat = level < 2 && Math.random() < 0.5;                    // half of the puzzles win material, half force mate
+    for (const m of sacs) {
+      const cost = V0 - after.get(key(m));
+      g.makeMove(m);
+      let kind = null, mateN = 0;
+      const gaveCheck = g.inCheck(g.turn);
+      if (!wantMat && !isMate(g) && g.legalMoves().length) {
+        setBudget(30000);
+        if (blackLoses(g, 1, false)) { kind = 'mate'; mateN = 2; }
+        else if (tier !== 'easy' && (gaveCheck ? mate3Tries < 5 : mate3Tries < 2)) { mate3Tries++; setBudget(60000); if (blackLoses(g, 2, true)) { kind = 'mate'; mateN = 3; } }
+      }
+      g.unmakeMove();
+      if (kind === 'mate') {
+        if (tier === 'easy' && mateN === 2) { found = { m, kind, mateN, cost }; break; }
+        if (tier === 'normal' && mateN === 3) { found = { m, kind, mateN, cost }; break; }
+        if (tier === 'hard' && mateN === 3 && cost >= need) { found = { m, kind, mateN, cost }; break; }
+        if (level > 0 && tier !== 'easy' && (mateN === 2 || cost >= 200)) { found = { m, kind, mateN, cost }; break; }
+        continue;
+      }
+      if (matTries >= 24) continue;
+      matTries++;
+      if (tier === 'easy') { if (atLeast(g, m, 3, V0 + T)) { found = { m, kind: 'mat', D: 3, cost }; break; } continue; }
+      if (level === 0 && atLeast(g, m, 3, V0 + 100)) continue;            // too easy to see for this level
+      if (cost < need && tier === 'hard') continue;
+      if (atLeast(g, m, 5, V0 + T)) { found = { m, kind: 'mat', D: 5, cost }; break; }
+    }
+    if (!found) return null;
+    const { m } = found;
+    let good, explain;
+    if (found.kind === 'mate') {
+      // the sacrifice has to be the way (normal and hard): no other first move forces the same mate
+      const firsts = found.mateN === 2 ? mateFirsts(g, 2, false) : (setBudget(200000), mateFirsts(g, 3, false));
+      if (!firsts || !firsts.length) return null;
+      if (tier !== 'easy' && level === 0 && firsts.length > 1) return null;
+      if (firsts.length > 3) return null;
+      if (!firsts.some((x) => key(x) === key(m))) return null;
+      if (mateMoves(g, true).length) return null;                         // an immediate mate would spoil the puzzle
+      good = firsts.map(plain);
+      explain = 'It gives up material but forces checkmate in ' + found.mateN + '.';
     } else {
-      const lost = Math.round(Math.abs(gain0) / 100);
-      const won = Math.round(deepGain / 100);
-      explain = 'You give about ' + lost + ' point' + (lost === 1 ? '' : 's') + ' of material, then win roughly ' + won + ' back.';
+      const sc = scoreOf(g, m, found.D);
+      const rival = rivalWithin(g, m, sc, found.D, tier === 'easy' ? 150 : level === 0 ? 150 : 100);
+      if (rival) return null;
+      good = [plain(m)];
+      const lost = Math.max(1, Math.round(found.cost / 100));
+      const won = Math.max(1, Math.round((sc - V0) / 100));
+      explain = 'It costs about ' + lost + ' point' + (lost === 1 ? '' : 's') + ' of material at first, but wins about ' + won + ' more than any safe move.';
     }
-    return {
-      type: 'sac',
-      diff: 'hard',
-      pos: posOf(g),
-      good,
-      explain,
-      san: sanOf(g, top.move),
-      loss: Math.round(Math.abs(Math.min(0, gain0))),
-    };
+    return { type: 'sac', diff, pos: posOf(g), good, explain, san: sanOf(g, m), loss: found.cost };
+  }
+
+  /**
+   * Normal / Hard sacrifice puzzles that end in checkmate: a forced mate in 2 or 3 where every winning first move gives up
+   * material (it costs at least two pawns, for Hard a rook or more) compared with the best ordinary move.
+   */
+  function trySacMate(diff, level) {
+    const n = diff === 'normal' ? 2 : (Math.random() < 0.55 ? 3 : 2);
+    const p = tryMate(diff === 'normal' ? 'normal' : 'hard', n, level >= 1 ? 1 : 0, true);
+    if (!p) return null;
+    const g = fromPos(p.pos);
+    const ms = uniq(g.legalMoves());
+    let V0 = -INF;
+    const after = new Map();
+    for (const m of ms) {
+      g.makeMove(m);
+      const a = -qs(g, -INF, INF, 0);
+      g.unmakeMove();
+      after.set(key(m), a);
+      if (a > V0) V0 = a;
+    }
+    const cost = Math.min(...p.sol.map((x) => V0 - after.get(x.f + '-' + x.t)));
+    const need = level >= 2 ? 200 : diff === 'hard' && n === 2 ? 450 : 200;
+    if (!(cost >= need)) return null;
+    const m0 = g.legalMovesFrom(p.sol[0].f).find((x) => x.to === p.sol[0].t && (x.promo || 0) === (p.sol[0].p || 0));
+    return { type: 'sac', diff, pos: p.pos, good: p.sol, explain: 'It gives up material but forces checkmate in ' + n + '.', san: sanOf(g, m0), loss: cost };
   }
 
   /* -------------------------------------------------------------- helpers */
@@ -454,17 +611,17 @@
   function make(type, diff, onDone) {
     const t0 = Date.now();
     let n = 1;
-    if (type === 'mate') n = diff === 'easy' ? 1 : diff === 'normal' ? (Math.random() < 0.5 ? 1 : 2) : (Math.random() < 0.65 ? 2 : 1);
+    if (type === 'mate') n = diff === 'easy' ? 1 : diff === 'normal' ? (Math.random() < 0.5 ? 1 : 2) : (Math.random() < 0.45 ? 2 : 3);
     const step = () => {
       const slice = Date.now() + 40;
       const age = Date.now() - t0;
-      const level = age < 3000 ? 0 : age < 6000 ? 1 : 2;
+      const level = age < 4500 ? 0 : age < 9000 ? 1 : 2;
       while (Date.now() < slice) {
         let p = null;
         try {
           p = type === 'mate' ? tryMate(diff, n, level)
             : type === 'check' ? tryCheck(diff, level)
-            : type === 'sac' ? trySac(diff, level)
+            : type === 'sac' ? (diff !== 'easy' && Math.random() < 0.85 ? trySacMate(diff, level) : trySac(diff, level))
             : tryBest(diff, level);
         } catch (e) { p = null; }
         if (p) { onDone(p); return; }
@@ -474,5 +631,5 @@
     setTimeout(step, 0);
   }
 
-  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, bestDefence, checkPath, isSafeCheck, sanPath, sanOf, tryMate, tryCheck, tryBest, trySac, uniq };
+  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, mateFirsts, canMate, forcedWithin, findMateMove, bestDefence, isCapture, checkPath, isSafeCheck, sanPath, sanOf, tryMate, tryCheck, tryBest, trySac, trySacMate, uniq };
 })();

@@ -217,6 +217,7 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 }
 .square.light { background-color: var(--light-sq); }
 .square.dark { background-color: var(--dark-sq); }
+/* hint dots are white with the 'difference' blend, which inverts whatever is under them: black on white, red on blue, always readable */
 
 .square.last::before,
 .square.selected::before {
@@ -236,7 +237,8 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
   width: 30%;
   height: 30%;
   border-radius: 50%;
-  background: rgba(0, 0, 0, .2);
+  background: #fff;
+  mix-blend-mode: difference;
   pointer-events: none;
   animation: dot .15s var(--ease) both;
 }
@@ -244,7 +246,8 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
   width: 100%;
   height: 100%;
   border-radius: 0;
-  background: radial-gradient(circle, transparent 58%, rgba(0,0,0,.2) 60%);
+  background: radial-gradient(circle, transparent 58%, #fff 60%);
+  mix-blend-mode: difference;
 }
 @keyframes dot { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
@@ -285,7 +288,7 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
   box-shadow: 0 0 0 1.5px #fff;
   z-index: 2;
 }
-.square.legal.secret::after { right: auto; top: auto; width: 30%; height: 30%; box-shadow: none; background: rgba(0,0,0,.2); }
+.square.legal.secret::after { right: auto; top: auto; width: 30%; height: 30%; box-shadow: none; background: #fff; mix-blend-mode: difference; }
 
 /* pick mode */
 .picking .square.pickable { cursor: pointer; }
@@ -973,7 +976,7 @@ body[data-bd="neon"] .board-wrap { box-shadow: 0 0 0 2px #3df2ff, 0 0 18px rgba(
 .sh-tile.eq .sh-st { color: #81b64c; font-weight: 700; }
 
 /* menu icons drawn from the Realism sprites (no text or emoji) */
-.ic-sp { display: block; width: 76%; height: 76%; background: url(pk-realism.png) no-repeat; background-size: 1200% 100%; background-position: calc(var(--i) * 100% / 11) 50%; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
+.ic-sp { display: block; width: 76%; height: 76%; background: url(pk-realism-hd.png) no-repeat; background-size: 1200% 100%; background-position: calc(var(--i) * 100% / 11) 50%; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
 .ic-play { width: 0; height: 0; border-style: solid; border-width: .55rem 0 .55rem .9rem; border-color: transparent transparent transparent #fff; margin-left: .2rem; }
 .ic-check { width: .5rem; height: 1rem; border: solid #fff; border-width: 0 .22rem .22rem 0; transform: rotate(45deg) translate(-.1rem, -.1rem); }
 .ic-gem { width: 1.05rem; height: 1.05rem; background: currentColor; transform: rotate(45deg); border-radius: .15rem; }
@@ -1040,3 +1043,60 @@ body[data-pack] .piece:not([data-pk]), body[data-pack] .cp:not([data-pk]) { colo
 .pv-hat .ic-sp { width: 3.4rem; height: 3.4rem; margin-top: .5rem; } .sh-pv .pv-hat .ic-sp { width: 4.4rem; height: 4.4rem; } .cr-item .pv-hat .ic-sp { width: 6rem; height: 6rem; }
 /* accessories sit on the king's sprite (the sprite itself hides its text glyph, so the hat needs its own colour) */
 .piece[data-hat]::after { color: #fff !important; font-size: .5em; top: -6%; z-index: 2; text-shadow: none !important; }
+
+/* ---------- first-time tour ---------- */
+.tut { position: fixed; inset: 0; z-index: 90; display: none; }
+.tut.on { display: block; }
+.tut-block { position: absolute; inset: 0; }
+.tut-hole { position: absolute; border-radius: 12px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .78), 0 0 0 2px #fff, 0 0 18px 2px rgba(255, 255, 255, .45); transition: left .25s var(--ease), top .25s var(--ease), width .25s var(--ease), height .25s var(--ease); pointer-events: none; }
+.tut-card { position: absolute; width: min(340px, calc(100vw - 20px)); background: var(--panel); border: 1px solid #555; border-radius: 14px; padding: 1rem 1.1rem 1rem; box-shadow: 0 10px 34px rgba(0, 0, 0, .6); animation: rise .25s var(--ease) both; }
+.tut-step { color: var(--muted); font-size: .85rem; margin-bottom: .2rem; }
+.tut-card h3 { font-size: 1.25rem; margin-bottom: .35rem; }
+.tut-card p { color: #ddd; line-height: 1.35; margin-bottom: .8rem; }
+.tut-dots { display: flex; gap: .3rem; justify-content: center; margin-bottom: .8rem; }
+.tut-dots i { width: .45rem; height: .45rem; border-radius: 50%; background: #555; }
+.tut-dots i.on { background: #fff; }
+.tut-btns { display: flex; gap: .5rem; }
+.tut-btns .btn { flex: 1; }
+.tut-btns .tut-next { flex: 1.4; }
+body.tut-open { overflow: hidden; }
+
+/* ---------- wooden board and accessory previews on the equipped piece ---------- */
+body[data-bd="wood"] .square.light, body[data-bd="wood"] .square.dark { background-size: 300% 300%; image-rendering: auto; }
+body[data-bd="wood"] .square:nth-child(6n+1) { background-position: 0% 0%; }
+body[data-bd="wood"] .square:nth-child(6n+2) { background-position: 100% 25%; }
+body[data-bd="wood"] .square:nth-child(6n+3) { background-position: 35% 100%; }
+body[data-bd="wood"] .square:nth-child(6n+4) { background-position: 80% 60%; }
+body[data-bd="wood"] .square:nth-child(6n+5) { background-position: 10% 70%; }
+body[data-bd="wood"] .square:nth-child(6n+6) { background-position: 60% 10%; }
+.pv-board.smooth i { image-rendering: auto !important; background-size: 300% 300% !important; }
+.pv-board.smooth i:nth-child(3n+1) { background-position: 0% 0% !important; } .pv-board.smooth i:nth-child(3n+2) { background-position: 100% 40% !important; } .pv-board.smooth i:nth-child(3n) { background-position: 40% 100% !important; }
+.ic-sp[data-px="1"] { image-rendering: pixelated; }
+.pv-hat .pvk-neon { display: block; width: 3.4rem; height: 3.4rem; font-size: 3rem; margin-top: .5rem; }
+.sh-pv .pv-hat .pvk-neon { width: 4.4rem; height: 4.4rem; font-size: 3.9rem; }
+.cr-item .pv-hat .pvk-neon { width: 6rem; height: 6rem; font-size: 5.3rem; }
+
+.tk-card.soon { opacity: .55; }
+.tk-card.soon .tk-top { margin-bottom: 0; }
+
+/* ---------- update log + connection bar ---------- */
+#news-btn { position: relative; }
+#news-btn.unread::after { content: ''; position: absolute; top: .3rem; right: .3rem; width: .6rem; height: .6rem; border-radius: 50%; background: #ff5a5f; box-shadow: 0 0 0 2px var(--bg); }
+.log-list { display: grid; gap: .9rem; max-height: min(60vh, 460px); overflow-y: auto; margin-bottom: 1rem; padding-right: .2rem; }
+.log-entry { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: .75rem .85rem; }
+.log-head { display: flex; justify-content: space-between; align-items: baseline; gap: .6rem; margin-bottom: .4rem; }
+.log-head b { font-size: 1.05rem; }
+.log-head time { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+.log-entry ul { margin: 0; padding-left: 1.1rem; color: #ddd; display: grid; gap: .25rem; line-height: 1.3; }
+.netbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 120; display: flex; align-items: center; justify-content: center; gap: .6rem; padding: .7rem 1rem calc(.7rem + env(safe-area-inset-bottom)); background: #3a1c1e; border-top: 1px solid #7a2f33; color: #fff; transform: translateY(110%); transition: transform .3s var(--ease); }
+.netbar.show { transform: none; }
+.netbar.on { background: #1c3a26; border-top-color: #2f7a47; }
+.nb-dot { width: .6rem; height: .6rem; border-radius: 50%; background: #ff5a5f; flex: none; animation: nbpulse 1.2s ease-in-out infinite; }
+.netbar.on .nb-dot { background: #4ade80; animation: none; }
+.nb-btn { background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: .3rem .7rem; font: inherit; cursor: pointer; }
+.netbar.on .nb-btn { display: none; }
+@keyframes nbpulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+.tk-next { color: var(--muted); font-weight: 400; margin-right: .3rem; }
+.tk-lv { font-style: normal; font-size: .85rem; color: var(--muted); font-weight: 400; margin-left: .4rem; }
+.sh-sub + .tk-card { margin-top: .3rem; }

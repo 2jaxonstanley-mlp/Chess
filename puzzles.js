@@ -1,6 +1,6 @@
 /**
- * Puzzle screen: Checkmate (mate in 1 / forced mate in 2), Check (safe check within N moves; Black replies),
- * and Best move. The positions come from puzzlegen.js. Progress is saved so the menu can offer "Continue playing".
+ * Puzzle screen: Checkmate (mate in 1 to 3), Check (safe check within N moves; Black replies),
+ * Best move and Sacrifice (Easy / Normal / Hard each). The positions come from puzzlegen.js. Progress is saved so the menu can offer "Continue playing".
  */
 (() => {
   'use strict';
@@ -132,7 +132,7 @@
     let goal = 'Find the best move for White.';
     if (P && P.type === 'mate') goal = 'Checkmate in ' + P.n + (P.n === 1 ? ' move.' : ' moves.');
     else if (P && P.type === 'check') goal = 'Safe check in ' + P.limit + (P.limit === 1 ? ' move' : ' moves') + ' (piece must not be capturable)' + (userMoves ? ' · ' + movesLeft() + ' left' : '') + '.';
-    else if (P && P.type === 'sac') goal = 'Find the winning sacrifice — give material to gain more.';
+    else if (P && P.type === 'sac') goal = 'Find the winning sacrifice: give material to gain more.';
     $('#pz-goal').textContent = state === 'gen' ? 'Setting up the board…' : goal;
     const s = stats.get();
     $('#pz-diff').textContent = DIFF[cfg.diff];
@@ -153,7 +153,7 @@
 
   function prompt() {
     if (state === 'failed') return 'Out of moves. Undo a move or retry.';
-    if (P.type === 'mate') return P.n === 2 && userMoves >= 1 ? 'Now deliver checkmate' : 'White to move: find the checkmate';
+    if (P.type === 'mate') return P.n >= 2 && userMoves >= 1 ? (P.n - userMoves === 1 ? 'Now deliver checkmate' : 'Keep forcing: checkmate in ' + (P.n - userMoves) + ' more') : 'White to move: find the checkmate' + (P.n > 1 ? ' in ' + P.n : '');
     if (P.type === 'check') return 'Give a safe check in ' + movesLeft() + (movesLeft() === 1 ? ' move' : ' moves') + ' or fewer. Black will reply.';
     if (P.type === 'sac') return 'Sacrifice material to win more back (or force mate).';
     return 'Which move is best for White?';
@@ -268,31 +268,25 @@
   }
 
   function afterMate(m) {
-    if (P.n === 1 || userMoves >= 1) {
-      if (PG.isMate(g)) { log.push(plain(m)); userMoves++; solve(); } else wrong(P.n === 1 ? 'That is not checkmate' : 'That is not checkmate. Look for the mating move');
-      return;
+    const remaining = P.n - userMoves;                  // moves White has left, counting the one just made
+    if (PG.isMate(g)) { log.push(plain(m)); userMoves++; solve(); return; }
+    if (remaining <= 1) { wrong(P.n === 1 ? 'That is not checkmate' : 'That is not checkmate. Look for the mating move'); return; }
+    // not mate yet: it has to leave Black no defence, i.e. checkmate is still forced within the moves left
+    let ok = userMoves === 0 && (P.sol || []).some((x) => x.f === m.from && x.t === m.to);
+    if (!ok) {
+      const r = PG.forcedWithin(g, remaining - 1);
+      ok = r.ok;
     }
-    // first move of a mate in 2: it has to leave Black no defence
-    const replies = g.legalMoves();
-    let ok = replies.length > 0 && !PG.isMate(g);
-    if (ok) {
-      for (const r of replies) {
-        g.makeMove(r);
-        const has = PG.mateMoves(g, true).length > 0;
-        g.unmakeMove();
-        if (!has) { ok = false; break; }
-      }
-    }
-    if (!ok) { wrong('That does not force checkmate next move'); return; }
+    if (!ok) { wrong('That does not force checkmate in time'); return; }
     log.push(plain(m));
-    userMoves = 1;
+    userMoves++;
     busy = true;
     const my = token;
     setStatus('Black replies…', 'dim');
     updateInfo();
     setTimeout(() => {
       if (my !== token) return;
-      const r = PG.bestDefence(g);
+      const r = PG.bestDefence(g, P.n - userMoves) || g.legalMoves()[0];
       g.makeMove(r);
       log.push(Object.assign(plain(r), { r: 1 }));
       last = [r.from, r.to];
@@ -391,7 +385,7 @@
     let from = -1;
     if (P.type === 'best' || P.type === 'sac') from = P.good[0].f;
     else if (P.type === 'mate') {
-      if (P.n === 2 && userMoves >= 1) { const ms = PG.mateMoves(g, true); if (ms.length) from = ms[0].from; }
+      if (userMoves >= 1) { const mv = PG.findMateMove(g, P.n - userMoves); if (mv) from = mv.from; }
       else from = P.sol[0].f;
     } else {
       const path = PG.checkPath(g.board, Math.max(1, movesLeft()));
@@ -419,11 +413,8 @@
       steps.push(P.good[0]);
     } else if (P.type === 'mate') {
       steps.push(P.sol[0]);
-      // Mate in 2: show one Black defence then a mating move if we can compute it
-      if (P.n === 2) {
-        steps.push({ _defence: true });
-        steps.push({ _mate2: true });
-      }
+      // longer mates: show Black's stubbornest defence, then the next forcing move, and so on
+      for (let k = 1; k < P.n; k++) { steps.push({ _defence: true }); steps.push({ _mate2: true }); }
     } else if (P.type === 'check' && P.path) {
       P.path.forEach((wm, i) => {
         steps.push(wm);
@@ -432,7 +423,7 @@
     }
 
     const my = token;
-    let i = 0;
+    let i = 0, wm = 0;                        // wm: White moves played so far
     const playNext = () => {
       if (my !== token) return;
       if (i >= steps.length) {
@@ -443,7 +434,7 @@
         updateInfo();
         let msg = 'Solution played.';
         if (P.type === 'best' || P.type === 'sac') msg = (P.type === 'sac' ? 'Sacrifice' : 'Best move') + ': ' + P.san + '. ' + P.explain;
-        else if (P.type === 'mate') msg = P.n === 1 ? 'Checkmate solution.' : 'Forced mate solution.';
+        else if (P.type === 'mate') msg = P.n === 1 ? 'Checkmate solution.' : 'Forced mate in ' + P.n + ' (one way of defending shown).';
         else msg = 'Safe check solution.';
         setStatus(msg, 'good');
         // Next puzzle button is already glowing via updateInfo
@@ -452,7 +443,7 @@
       const step = steps[i++];
       // Dynamic mate-in-2 continuation
       if (step._defence) {
-        const r = PG.bestDefence(g);
+        const r = PG.bestDefence(g, P.n - wm);
         if (r) {
           g.makeMove(r);
           log.push(Object.assign(plain(r), { r: 1 }));
@@ -464,9 +455,9 @@
         return;
       }
       if (step._mate2) {
-        const ms = PG.mateMoves(g, true);
-        if (ms.length) {
-          const m = ms[0];
+        const m = PG.findMateMove(g, P.n - wm);
+        if (m) {
+          wm++;
           g.makeMove(m);
           log.push(plain(m));
           last = [m.from, m.to];
@@ -478,6 +469,7 @@
       }
       const m = findMove(g, step);
       if (!m) { setTimeout(playNext, 200); return; }
+      if (!step.r) wm++;
       g.makeMove(m);
       log.push(step.r ? Object.assign({}, step) : plain(m));
       last = [m.from, m.to];
@@ -507,23 +499,30 @@
 
   /* ------------------------------------------------------------------- setup */
   const KINDS = [
-    { id: 'mate', icon: 3, name: 'Checkmate', sub: 'Find the winning blow.' },
+    { id: 'mate', icon: 3, name: 'Checkmate', sub: 'Mate in 1, 2 or 3: find the forced win.' },
     { id: 'check', icon: 5, name: 'Check', sub: 'Safe check — Black replies each turn.' },
     { id: 'best', icon: 4, name: 'Best move', sub: 'Find the strongest move.' },
-    { id: 'sac', icon: 2, name: 'Sacrifice', sub: 'Hard: give material to gain more.' },
+    { id: 'sac', icon: 2, name: 'Sacrifice', sub: 'Give material to win more, or to force mate.' },
   ];
   const LEVELS = [
     { id: 'easy', name: 'Easy', sub: 'Clear and straightforward.', n: 1 },
     { id: 'normal', name: 'Normal', sub: 'A little more to think about.', n: 2 },
     { id: 'hard', name: 'Hard', sub: 'Tricky and well defended.', n: 3 },
   ];
+  // what each level means for each kind of puzzle (shown in the level picker)
+  const SUBS = {
+    mate: { easy: 'Mate in 1. Clear and straightforward.', normal: 'Mate in 1 or 2 with a busier board.', hard: 'Mate in 2 or 3 on a crowded board.' },
+    check: { easy: 'A safe check, a couple of moves at most.', normal: 'More pieces defending, up to 3 moves.', hard: 'A crowded board: the safe check takes 3 moves.' },
+    best: { easy: 'Win something clear.', normal: 'The best move is not the obvious capture.', hard: 'A deep tactic that a short look misses.' },
+    sac: { easy: 'A simple sacrifice that wins quickly.', normal: 'A sacrifice that leads to mate or a bigger win.', hard: 'A big sacrifice and a deep combination.' },
+  };
   const meter = (n) => `<span class="pz-lv lv${n}" aria-hidden="true"><i class="${n >= 1 ? 'on' : ''}"></i><i class="${n >= 2 ? 'on' : ''}"></i><i class="${n >= 3 ? 'on' : ''}"></i></span>`;
 
   function askDiff(type) {
     const kind = KINDS.find((k) => k.id === type);
     LP.openSheet(`<h2>${esc(kind.name)}<span class="sub">How hard should it be?</span></h2>
       <div class="pz-options">
-        ${LEVELS.map((l) => `<button class="pz-opt" data-d="${l.id}">${meter(l.n)}<span class="pz-text"><span class="pz-name">${l.name}</span><span class="pz-sub">${l.sub}</span></span></button>`).join('')}
+        ${LEVELS.map((l) => `<button class="pz-opt" data-d="${l.id}">${meter(l.n)}<span class="pz-text"><span class="pz-name">${l.name}</span><span class="pz-sub">${(SUBS[type] && SUBS[type][l.id]) || l.sub}</span></span></button>`).join('')}
       </div>
       <div class="row"><button class="btn" id="pz-dback">Back</button><button class="btn" id="pz-dx">Cancel</button></div>`, true);
     document.querySelectorAll('[data-d]').forEach((b) => { b.onclick = () => { cfg = { type, diff: b.dataset.d }; LP.closeSheet(); newPuzzle(); }; });
@@ -538,10 +537,7 @@
       </div>
       <button class="btn wide" id="pz-x">Cancel</button>`, true);
     document.querySelectorAll('[data-k]').forEach((b) => {
-      b.onclick = () => {
-        if (b.dataset.k === 'sac') { cfg = { type: 'sac', diff: 'hard' }; LP.closeSheet(); newPuzzle(); }
-        else askDiff(b.dataset.k);
-      };
+      b.onclick = () => askDiff(b.dataset.k);
     });
     $('#pz-x').onclick = LP.closeSheet;
   }

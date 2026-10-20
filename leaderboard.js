@@ -126,8 +126,8 @@
     inTab.slice().sort((a, b) => b.date - a.date).forEach((x) => { if (!groups.find((g) => g.key === x.key)) groups.push({ key: x.key, group: x.group }); });
     const puz = tab === 'puzzle';
     if (puz) groups = [
-      { key: 'puzzle:easy:mate', group: 'Easy · Checkmate' }, { key: 'puzzle:easy:check', group: 'Easy · Check' }, { key: 'puzzle:easy:best', group: 'Easy · Best move' },
-      { key: 'puzzle:normal:mate', group: 'Normal · Checkmate' }, { key: 'puzzle:normal:check', group: 'Normal · Check' }, { key: 'puzzle:normal:best', group: 'Normal · Best move' },
+      { key: 'puzzle:easy:mate', group: 'Easy · Checkmate' }, { key: 'puzzle:easy:check', group: 'Easy · Check' }, { key: 'puzzle:easy:best', group: 'Easy · Best move' }, { key: 'puzzle:easy:sac', group: 'Easy · Sacrifice' },
+      { key: 'puzzle:normal:mate', group: 'Normal · Checkmate' }, { key: 'puzzle:normal:check', group: 'Normal · Check' }, { key: 'puzzle:normal:best', group: 'Normal · Best move' }, { key: 'puzzle:normal:sac', group: 'Normal · Sacrifice' },
       { key: 'puzzle:hard:mate', group: 'Hard · Checkmate' }, { key: 'puzzle:hard:check', group: 'Hard · Check' }, { key: 'puzzle:hard:best', group: 'Hard · Best move' },
       { key: 'puzzle:hard:sac', group: 'Hard · Sacrifice' },
     ];

@@ -163,8 +163,19 @@
     }
   }
 
-  /** A private copy of a position (classic rules) so searching never touches the real game. */
+  /** A private copy of a position so analysing never touches the real game. Keeps Secret Queen state (nothing hidden). */
   function clone(g) {
+    const c = new Chess();
+    c.mode = g.mode === 'secret' ? 'secret' : 'basic';
+    c.board.set(g.board);
+    c.turn = g.turn; c.castling = g.castling; c.ep = g.ep; c.halfmove = g.halfmove; c.fullmove = g.fullmove;
+    if (g.secretQueen) c.secretQueen = { [WHITE]: g.secretQueen[WHITE], [BLACK]: g.secretQueen[BLACK] };
+    if (g.revealed) c.revealed = { [WHITE]: g.revealed[WHITE], [BLACK]: g.revealed[BLACK] };
+    c.history = [];
+    return c;
+  }
+  /** Material-only classic copy of a position (for spotting sacrifices). */
+  function plain(g) {
     const c = new Chess();
     c.mode = 'basic';
     c.board.set(g.board);
@@ -173,108 +184,107 @@
     return c;
   }
 
-  const D = 3;
-  const INF = 1e6;
+  const MATE = 100000;
+  const isMateScore = (v) => Math.abs(v) > MATE - 200;
+  /** Expected score (0 to 1) for the side to move: a centipawn lead matters less the bigger it already is. */
+  const wp = (cp) => (cp > MATE - 200 ? 1 : cp < -MATE + 200 ? 0 : 1 / (1 + Math.pow(10, -cp / 400)));
+  const same = (a, b) => a.from === b.from && a.to === b.to && (a.promo || 0) === (b.promo || 0) && (a.q || 0) === (b.q || 0);
 
-  /** Rate move m (a legal move of position g before it was played). Returns one of RATINGS. */
+  /** Facts about move mv in position g (true rules): material before, material once the opponent has taken what it can, mate. */
+  function facts(g, mv) {
+    const f = { before: 0, afterQs: 0, isMate: false, captured: !!(g.board[mv.to] || mv.flags === 2) };
+    PG.setHorizon(true);
+    try {
+      f.before = PG.evalSide(plain(g));
+      g.makeMove(mv);
+      f.isMate = !g.hasLegalMove() && g.inCheck(g.turn);
+      if (!f.isMate) f.afterQs = -PG.qs(plain(g), -1e6, 1e6, 0);          // material once the opponent has taken what it can
+      g.unmakeMove();
+    } catch (e) { /* ignore */ } finally { PG.setHorizon(false); }
+    return f;
+  }
+
+  /** Turn an analysis into a label. A = { top: [{ move, score }], legal }, P = the score of this move. */
+  function classify(g, mv, f, A, P, bookInfo) {
+    const B = A.top[0].score;
+    const wB = wp(B), wP = wp(P);
+    const loss = Math.max(0, wB - Math.min(wP, wB));
+    const second = A.top.length > 1 ? wp(A.top[1].score) : 0;
+    const gap = A.top.length > 1 ? wB - second : 1;              // how far the best move stands out from the next one
+    const sac = f.afterQs <= f.before - 150;                      // gives up material that the opponent can really take
+    const bigSac = f.afterQs <= f.before - 250;
+    const top = same(A.top[0].move, mv) || loss <= 0.004;
+
+    // missed a forced mate or a decisive win
+    if ((B > MATE - 100 && !(P > MATE - 100) && wP >= 0.3) || (wB >= 0.9 && wP >= 0.5 && wP < 0.72 && loss >= 0.2)) return RATINGS.missedwin;
+
+    let r = null;
+    if (loss <= 0.008) {
+      if (bigSac && wP >= 0.42 && f.before < 500) r = RATINGS.brilliant;
+      else if (top && gap >= 0.13 && wB >= 0.3 && wB < 0.97 && A.legal > 2 && !f.captured) r = RATINGS.great;
+      else if (top && gap >= 0.035) r = RATINGS.best;
+    } else if (loss <= 0.07 && sac && wP >= 0.38 && !f.captured) r = RATINGS.interesting;
+    else if (loss <= 0.03 && gap >= 0.035) r = RATINGS.good;
+    else if (loss <= 0.07) r = null;
+    else if (loss <= 0.14) r = RATINGS.inaccuracy;
+    else if (loss <= 0.25) r = RATINGS.mistake;
+    else r = RATINGS.blunder;
+
+    // first departure from known theory is a novelty when the move is still sound
+    if (bookInfo && bookInfo.inBook && bookInfo.set && bookInfo.set.size && !bookInfo.set.has(mv.from + '-' + mv.to) && loss <= 0.03) return RATINGS.novelty;
+    return r;
+  }
+
+  function bookOf(g) {
+    if (!book) buildBook();
+    const inBook = g.mode !== 'secret' && g.fullmove <= 12;
+    return { inBook, set: inBook ? book.get(boardKey(g)) : null };
+  }
+
+  /** The strength of move m (a legal move of position g0 before it was played). Returns one of RATINGS, or null for an ordinary move. */
   function rate(g0, m) {
     const g = clone(g0);
     const legal = g.legalMoves();
-    if (legal.length <= 1) return RATINGS.forced;      // only legal move
-    if (!book) buildBook();
-    const inBook = g.fullmove <= 12;
-    const set = inBook ? book.get(boardKey(g)) : null;
-    const key = m.from + '-' + m.to;
-    if (set && set.has(key)) return RATINGS.book;
-
-    PG.setHorizon(true);
-    try {
-      const r = rateIn(g, legal, m);
-      // First departure from theory in the opening is a novelty (when the move is still decent)
-      if (inBook && set && set.size && !set.has(key) && r && (r.id === 'best' || r.id === 'good' || r.id === 'great')) {
-        return RATINGS.novelty;
-      }
-      return r;
-    } finally { PG.setHorizon(false); }
+    if (legal.length <= 1) return RATINGS.forced;
+    const mv = legal.find((x) => same(x, m));
+    if (!mv) return null;
+    const bk = bookOf(g);
+    if (bk.set && bk.set.has(mv.from + '-' + mv.to)) return RATINGS.book;
+    const f = facts(g, mv);
+    if (f.isMate) return g.turn === WHITE ? RATINGS.matewhite : RATINGS.mateblack;
+    const A = window.AIAnalyse.run(g0, mv, 450, 9);
+    if (!A.top.length || !A.played) return null;
+    return classify(g, mv, f, A, A.played.score, bk);
   }
 
-  /** Rate every legal move of g0 at once (one shared search for the best score). Returns [{ move, rating }]. */
-  function rateAll(g0) {
+  const ORDER = { brilliant: 7, great: 6, best: 5, book: 5, novelty: 4, interesting: 3, good: 3, none: 2, inaccuracy: 1, mistake: 0, blunder: -1, missedwin: -1 };
+  /**
+   * For the Insane computer: check the move it chose the way the labels will. If it would be labelled an inaccuracy,
+   * mistake, blunder or missed win it is swapped for the best-labelled of the analysis' top three moves, and a
+   * sound sacrifice (brilliant / interesting at no cost) is preferred over an ordinary move of the same strength.
+   */
+  function polish(g0, pick) {
     const g = clone(g0);
     const legal = g.legalMoves();
-    if (!book) buildBook();
-    const inBook = g.fullmove <= 12;
-    const set = inBook ? book.get(boardKey(g)) : null;
-    const out = [];
-    PG.setHorizon(true);
-    try {
-      const top = legal.length > 1 ? PG.bestAt(g, D) : null;
-      for (const mv of legal) {
-        let rating = null;
-        const key = mv.from + '-' + mv.to;
-        if (legal.length <= 1) rating = RATINGS.forced;
-        else if (set && set.has(key)) rating = RATINGS.book;
-        else {
-          lastInfo = null;
-          rating = rateIn(g, legal, { from: mv.from, to: mv.to, promo: mv.promo || 0 }, top);
-          if (inBook && set && set.size && rating && (rating.id === 'best' || rating.id === 'good' || rating.id === 'great')) {
-            rating = RATINGS.novelty;
-          }
-        }
-        out.push({ move: mv, rating, loss: rating && (rating.id === 'book' || rating.id === 'forced') ? 0 : (lastInfo ? lastInfo.loss : 0) });
-      }
-    } finally { PG.setHorizon(false); }
-    return out;
-  }
-
-  let lastInfo = null;
-  function rateIn(g, legal, m, topIn) {
-    const mv = legal.find((x) => x.from === m.from && x.to === m.to && (x.promo || 0) === (m.promo || 0));
-    if (!mv) return null;
-    const before = PG.evalSide(g);                                   // material, from the mover's side
-    const top = topIn || PG.bestAt(g, D);
-    const piece = g.board[mv.from] & 7, captured = g.board[mv.to] || mv.flags === 2;
-    const whiteToMove = g.turn === WHITE;
-    g.makeMove(mv);
-    // Checkmate delivered by this move? (stalemate is not labelled)
-    let isMate = false;
-    try {
-      if (typeof g.isCheckmate === 'function') isMate = g.isCheckmate();
-      else if (!g.legalMoves().length && g.inCheck(g.turn)) isMate = true;
-    } catch (e) { /* ignore */ }
-    const played = -PG.nega(g, D - 1, -INF, INF, 1);
-    const afterQs = -PG.qs(g, -INF, INF, 0);                         // material once the opponent has taken what it can
-    g.unmakeMove();
-
-    if (isMate) return whiteToMove ? RATINGS.matewhite : RATINGS.mateblack;
-
-    const mates = (v) => Math.abs(v) > PG.MATE - 100;
-    let loss = Math.max(0, top.score - played);
-    if (mates(top.score) && mates(played) && top.score > 0 && played > 0) loss = 0;   // still mating
-    loss = Math.min(loss, 3000);
-    lastInfo = { loss, played };
-
-    // Missed a forced mate / crushing win
-    if (mates(top.score) && top.score > 0 && (loss > 250 || !mates(played) || played <= 0)) {
-      return RATINGS.missedwin;
-    }
-
-    if (loss <= 10) {
-      if (afterQs <= before - 250 && played >= before - 100 && played > -300) return RATINGS.brilliant;
-      if (!captured && legal.length > 2 && !PG.rivalWithin(g, mv, top.score, D, 150)) return RATINGS.great;
-      // "Best" only when the move clearly stands out; otherwise leave unlabeled
-      if (!PG.rivalWithin(g, mv, top.score, D, 30)) return RATINGS.best;
-      return null;
-    }
-    // Interesting: speculative / slight sac that is not really wrong
-    if (loss < 70 && afterQs <= before - 150 && played >= before - 200) return RATINGS.interesting;
-    // Good is rare: a close second that still beats most of the field (not every solid move)
-    if (loss < 35 && !PG.rivalWithin(g, mv, top.score, D, 90)) return RATINGS.good;
-    // Ordinary fine moves stay quiet — no badge
-    if (loss < 100) return null;
-    if (loss < 180) return RATINGS.inaccuracy;
-    if (loss < 320) return RATINGS.mistake;
-    return RATINGS.blunder;
+    const mv = legal.find((x) => same(x, pick));
+    if (!mv || legal.length <= 1) return pick;
+    const A = window.AIAnalyse.run(g0, mv, 450, 9);
+    if (!A.top.length || !A.played) return pick;
+    const bk = bookOf(g);
+    const cands = [{ move: mv, score: A.played.score }];
+    A.top.forEach((t) => { if (!cands.some((c) => same(c.move, t.move))) cands.push({ move: legal.find((x) => same(x, t.move)) || t.move, score: t.score }); });
+    let bestC = null, bestK = -9;
+    cands.forEach((c, i) => {
+      const f = facts(g, c.move);
+      let rid;
+      if (f.isMate) rid = 'brilliant';
+      else if (bk.set && bk.set.has(c.move.from + '-' + c.move.to)) rid = 'book';
+      else { const rr = classify(g, c.move, f, A, c.score, bk); rid = rr ? rr.id : 'none'; }
+      // the engine's own choice wins ties; a sound sacrifice beats a plain move of equal rank
+      const k = ORDER[rid] + (i === 0 ? 0.5 : 0) + c.score / 1e7;
+      if (k > bestK) { bestK = k; bestC = c; }
+    });
+    return bestC ? (legal.find((x) => same(x, bestC.move)) || pick) : pick;
   }
 
   /* Optional artwork: drop icon-<id>.png into the game folder and they replace the text symbols automatically. */
@@ -286,5 +296,5 @@
   }
   const iconHtml = (x) => (x.hasImg ? `<img class="ri" src="${x.img}" alt="${x.label}">` : x.sym.replace(/&/g, '&amp;').replace(/</g, '&lt;'));
 
-  window.MoveRating = { rate, rateAll, clone, iconHtml, openingName, RATINGS, get: (id) => RATINGS[id] || null };
+  window.MoveRating = { rate, polish, clone, iconHtml, openingName, RATINGS, get: (id) => RATINGS[id] || null };
 })();

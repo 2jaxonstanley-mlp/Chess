@@ -159,7 +159,7 @@
   }
 
   /* ---------------------------------------------------------- move strength */
-  const ratingsOn = () => opts.ratings && mode !== 'secret' && !!window.MoveRating;
+  const ratingsOn = () => opts.ratings && !!window.MoveRating;
   function ratingIdAt(i) {
     if (i < 0) return null;
     if (phase === 'replay') return (replay && replay.data.ratings && replay.data.ratings[i]) || null;
@@ -180,7 +180,7 @@
 
   function rateLastMove(before, m) {
     const idx = fullMoves.length - 1;
-    const mm = { from: m.from, to: m.to, promo: m.promo || 0 };
+    const mm = { from: m.from, to: m.to, promo: m.promo || 0, q: m.q || 0 };
     setTimeout(() => {
       try { const rr = window.MoveRating.rate(before, mm); ratings[idx] = rr ? rr.id : null; } catch (e) { ratings[idx] = null; }
       if (phase === 'replay') return;
@@ -846,7 +846,7 @@
     updateControls();
     thinkingStatus();
     const t0 = Date.now();
-    const minWait = bots ? 1200 + Math.random() * 400 : 2000 + Math.random() * 500;   // never instant, however fast the search is
+    const minWait = bots ? 450 + Math.random() * 250 : 600 + Math.random() * 300;   // never quite instant, so you can follow the move
     const seen = new Map();
     posKeys.slice(0, viewPly + 1).forEach((k) => seen.set(k, (seen.get(k) || 0) + 1));
     setTimeout(() => {
@@ -859,7 +859,7 @@
           if (m) doMove(m); else updateControls();
         }, Math.max(0, minWait - (Date.now() - t0)));
       });
-    }, 80);
+    }, 20);
   }
 
   boardEl.addEventListener('click', (e) => {
@@ -1180,7 +1180,7 @@
         let list = res.map((r) => r.move);
         if (mate) list = [mate.move, ...list.filter((m) => !(m.from === mate.move.from && m.to === mate.move.to && m.promo === mate.move.promo))];
         show(list, mate);
-      }, Math.max(0, 900 - (Date.now() - t0)));
+      }, Math.max(0, 400 - (Date.now() - t0)));
     });
   });
 
