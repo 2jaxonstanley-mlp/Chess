@@ -18,6 +18,7 @@
       'Accessories are now drawn pictures instead of emoji, with 8 new ones: Party Hat, Cowboy Hat, Antlers, Wizard Hat, Pirate Hat, Horns, Crown and Halo',
       'When you equip an accessory you pick which pieces wear it',
       'When you equip a piece set you pick whether both teams, White only or Black only use it',
+      'New hand-drawn coin and crate pictures',
       'Legal move dots now invert the colour of the tile underneath, so they are readable on every board',
     ] },
     { id: 'u3', date: '2026-10-20', title: 'Faster bots, wood and lifetime goals', items: [

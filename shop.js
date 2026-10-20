@@ -95,7 +95,7 @@
   const HAT_W = { k: 52, q: 52, b: 44, n: 50, r: 54, p: 46 };       // accessory width as % of the piece
   function hatPos(skinId, kind) {
     const a = (ANCH[skinId] || ANCH[''])[kind] || [50, 10], w = HAT_W[kind];
-    return { x: a[0], y: Math.round((a[1] + (kind === 'k' ? 8 : 3) - 0.5625 * w) * 10) / 10, w };
+    return { x: a[0], y: Math.round((a[1] + (kind === 'k' ? 12 : 3) - 0.5625 * w) * 10) / 10, w };
   }
   const skinFor = (isBlack) => ((S.skinTeam || 'wb').indexOf(isBlack ? 'b' : 'w') >= 0 ? (find('piece', S.equipped.piece) || RETRO) : RETRO);
   /* pieces get their picture/neon look and the accessory: found by their glyph, so no other file has to know about it */
@@ -371,7 +371,7 @@
     $('#sh-list').innerHTML = `<div class="sh-tabs" role="tablist">${Object.keys(TABS).map((k) => `<button role="tab" class="${k === tab ? 'on' : ''}" data-tab="${k}">${TABS[k]}</button>`).join('')}</div>
       <section class="sh-crate" style="--c:${c.color}">
         <div class="sh-head">
-          <span class="crate big" style="--c:${c.color}"><i></i><u>${c.badge}</u></span>
+          <span class="crate big" data-c="${slot}"></span>
           <span class="sh-title"><b>${c.name}</b>
             <span class="sh-prog"><i style="width:${pct}%"></i></span>
             <span class="sh-cnt">${got} of ${c.items.length} found</span></span>
@@ -411,7 +411,7 @@
     S.owned[slot + ':' + it.id] = true;
     if (dup) S.tokens += RARITY[it.r].refund;
     saveS(); refresh();
-    LP.openSheet(`<div class="cr-stage"><span class="crate big shake" style="--c:${c.color}"><i></i><u>${c.badge}</u></span><p class="cr-hint">Opening...</p></div>`);
+    LP.openSheet(`<div class="cr-stage"><span class="crate big shake" data-c="${slot}"></span><p class="cr-hint">Opening...</p></div>`);
     setTimeout(() => {
       const rc = RARITY[it.r].c;
       LP.openSheet(`<div class="cr-reveal" style="--rc:${rc}">
