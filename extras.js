@@ -12,6 +12,14 @@
 
   /* ------------------------------------------------------------------ update log */
   const LOG = [
+    { id: 'u4', date: '2026-10-21', title: 'New boards, pieces and accessories', items: [
+      'Added the Marble, Realism and Cosmic boards',
+      'Added the Sandy and Silver & Gold piece sets',
+      'Accessories are now drawn pictures instead of emoji, with 8 new ones: Party Hat, Cowboy Hat, Antlers, Wizard Hat, Pirate Hat, Horns, Crown and Halo',
+      'When you equip an accessory you pick which pieces wear it',
+      'When you equip a piece set you pick whether both teams, White only or Black only use it',
+      'Legal move dots now invert the colour of the tile underneath, so they are readable on every board',
+    ] },
     { id: 'u3', date: '2026-10-20', title: 'Faster bots, wood and lifetime goals', items: [
       'Added Endless goals in Tasks: capture 5, then 10, then 15 pieces and so on, and win 2, then 4, then 6 games (Classic or Secret Queen vs Medium or tougher). They never end, progress restarts each level, and rewards rise every 4 levels',
       'Added the Wooden board and Wooden pieces to the shop',

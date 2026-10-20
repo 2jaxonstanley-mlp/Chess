@@ -797,15 +797,13 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; bord
 .pv-board i:nth-child(8n+1), .pv-board i:nth-child(8n+3), .pv-board i:nth-child(8n+6), .pv-board i:nth-child(8n+8) { background: var(--a); }
 .pv-board i:nth-child(8n+2), .pv-board i:nth-child(8n+4), .pv-board i:nth-child(8n+5), .pv-board i:nth-child(8n+7) { background: var(--b); }
 .pv-king { display: flex; gap: .1rem; } .pv-king b { font-size: 2.8rem; line-height: 1; text-shadow: 0 0 2px #000, 0 0 2px #000; }
-.pv-hat { position: relative; display: block; } .pv-hat b { font-size: 3rem; line-height: 1; color: #bdbdbd; display: block; }
-.pv-hat em { position: absolute; left: 50%; top: -.35rem; transform: translateX(-50%); font-style: normal; font-size: 1.7rem; line-height: 1; z-index: 1; }
+.pv-hat { position: relative; display: block; padding-top: .7rem; } .pv-hat b { font-size: 3rem; line-height: 1; color: #bdbdbd; display: block; }
 .pv-none { font-size: 2.2rem; color: #888; }
 .cr-reveal { text-align: center; } .cr-rar { display: inline-block; color: var(--rc); border: 1px solid var(--rc); border-radius: 999px; padding: .15rem .8rem; font-weight: 700; font-size: .85rem; letter-spacing: .1em; text-transform: uppercase; }
 .cr-item { display: grid; place-items: center; height: 8rem; margin: .8rem 0 .2rem; animation: spawn .45s cubic-bezier(.2,.9,.3,1.2); filter: drop-shadow(0 0 16px var(--rc)); }
-.cr-item .pv-board { width: 6rem; height: 6rem; } .cr-item .pv-king b { font-size: 4.5rem; } .cr-item .pv-hat b { font-size: 5rem; } .cr-item .pv-hat em { font-size: 2.8rem; top: -.5rem; }
+.cr-item .pv-board { width: 6rem; height: 6rem; } .cr-item .pv-king b { font-size: 4.5rem; } .cr-item .pv-hat b { font-size: 5rem; }
 .reward-toast { position: fixed; left: 50%; bottom: 1.4rem; transform: translate(-50%, 160%); background: #2f2f2f; border: 1px solid #555; color: #fff; padding: .7rem 1.1rem; border-radius: 12px; z-index: 99; transition: transform .3s var(--ease); max-width: 92vw; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 .reward-toast.show { transform: translate(-50%, 0); }
-.piece[data-hat]::after { content: attr(data-hat); position: absolute; left: 50%; top: -2%; transform: translateX(-50%); font-size: .46em; line-height: 1; text-shadow: none; pointer-events: none; }
 
 /* computer level picker */
 .lv-list { display: grid; gap: .55rem; margin-bottom: .8rem; }
@@ -970,7 +968,7 @@ body[data-bd="neon"] .board-wrap { box-shadow: 0 0 0 2px #3df2ff, 0 0 18px rgba(
 .sh-pv .pv-board { width: 5rem; height: 5rem; }
 .sh-pv .pv-king b[data-pk="sheet"], .sh-pv .pv-neon b.piece { width: 3.7rem; height: 3.7rem; font-size: 3.3rem; }
 .sh-pv .pv-king b { font-size: 3.7rem; }
-.sh-pv .pv-hat b { font-size: 4rem; } .sh-pv .pv-hat em { font-size: 2.2rem; top: -.5rem; }
+.sh-pv .pv-hat b { font-size: 4rem; }
 .sh-nm { font-size: 1.05rem; }
 .sh-st { font-size: .8rem; color: var(--muted); }
 .sh-tile.eq .sh-st { color: #81b64c; font-weight: 700; }
@@ -1040,9 +1038,8 @@ body[data-pack] .piece:not([data-pk]), body[data-pack] .cp:not([data-pk]) { colo
 .st-bars { display: flex; align-items: flex-end; gap: .3rem; height: 6.5rem; background: var(--panel); border-radius: 14px; padding: .8rem .8rem .6rem; }
 .st-bars span { flex: 1; height: 100%; display: flex; align-items: flex-end; } .st-bars i { display: block; width: 100%; background: #ff9a4d; border-radius: 4px 4px 0 0; } .st-bars .neg i { background: #ca3431; }
 
-.pv-hat .ic-sp { width: 3.4rem; height: 3.4rem; margin-top: .5rem; } .sh-pv .pv-hat .ic-sp { width: 4.4rem; height: 4.4rem; } .cr-item .pv-hat .ic-sp { width: 6rem; height: 6rem; }
+.pv-hat .ic-sp { width: 3.4rem; height: 3.4rem; } .sh-pv .pv-hat .ic-sp { width: 4.4rem; height: 4.4rem; } .cr-item .pv-hat .ic-sp { width: 6rem; height: 6rem; }
 /* accessories sit on the king's sprite (the sprite itself hides its text glyph, so the hat needs its own colour) */
-.piece[data-hat]::after { color: #fff !important; font-size: .5em; top: -6%; z-index: 2; text-shadow: none !important; }
 
 /* ---------- first-time tour ---------- */
 .tut { position: fixed; inset: 0; z-index: 90; display: none; }
@@ -1072,7 +1069,7 @@ body[data-bd="wood"] .square:nth-child(6n+6) { background-position: 60% 10%; }
 .pv-board.smooth i { image-rendering: auto !important; background-size: 300% 300% !important; }
 .pv-board.smooth i:nth-child(3n+1) { background-position: 0% 0% !important; } .pv-board.smooth i:nth-child(3n+2) { background-position: 100% 40% !important; } .pv-board.smooth i:nth-child(3n) { background-position: 40% 100% !important; }
 .ic-sp[data-px="1"] { image-rendering: pixelated; }
-.pv-hat .pvk-neon { display: block; width: 3.4rem; height: 3.4rem; font-size: 3rem; margin-top: .5rem; }
+.pv-hat .pvk-neon { display: block; width: 3.4rem; height: 3.4rem; font-size: 3rem; }
 .sh-pv .pv-hat .pvk-neon { width: 4.4rem; height: 4.4rem; font-size: 3.9rem; }
 .cr-item .pv-hat .pvk-neon { width: 6rem; height: 6rem; font-size: 5.3rem; }
 
@@ -1100,3 +1097,22 @@ body[data-bd="wood"] .square:nth-child(6n+6) { background-position: 60% 10%; }
 .tk-next { color: var(--muted); font-weight: 400; margin-right: .3rem; }
 .tk-lv { font-style: normal; font-size: .85rem; color: var(--muted); font-weight: 400; margin-left: .4rem; }
 .sh-sub + .tk-card { margin-top: .3rem; }
+
+/* accessories: a little drawn picture sitting on the piece's head (shop.js sets --hx / --hy / --hw from the piece set) */
+.piece[data-hat]::after { content: ''; position: absolute; left: var(--hx, 50%); top: var(--hy, -8%); width: var(--hw, 40%); aspect-ratio: 64 / 40; transform: translateX(-50%); background: var(--hat-img) center / contain no-repeat; pointer-events: none; z-index: 3; text-shadow: none; }
+.pvh { position: relative; display: inline-block; line-height: 0; }
+.pvh em { position: absolute; transform: translateX(-50%); aspect-ratio: 64 / 40; background: var(--hat-img) center / contain no-repeat; z-index: 2; pointer-events: none; }
+.pv-hat .pvh { display: block; }
+/* pickers shown when you equip something */
+.eq-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; margin-bottom: .7rem; }
+.eq-chip { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: .2rem; min-height: 6.2rem; padding: .3rem .2rem .5rem; border: 2px solid #3a3a3a; border-radius: 12px; background: #1f1f1f; color: #bbb; font: inherit; font-size: .9rem; cursor: pointer; }
+.eq-chip.on { border-color: #fff; color: #fff; background: #2b2b2b; }
+.eq-chip .pv-hat { padding-top: .5rem; } .eq-chip .pv-hat .ic-sp { width: 2.9rem; height: 2.9rem; }
+.eq-chip:not(.on) .pv-hat { opacity: .55; }
+.eq-teams { display: grid; gap: .5rem; margin-bottom: .8rem; }
+.eq-team { display: flex; align-items: center; gap: 1rem; padding: .5rem .9rem; border: 2px solid #3a3a3a; border-radius: 12px; background: #1f1f1f; color: #fff; font: inherit; font-size: 1.05rem; cursor: pointer; text-align: left; }
+.eq-team.on { border-color: #fff; background: #2b2b2b; }
+.eq-pair { display: flex; gap: .2rem; } .eq-pair .ic-sp { width: 3rem; height: 3rem; }
+.eq-pair .pvk-neon { display: block; width: 3rem; height: 3rem; font-size: 2.7rem; position: relative; }
+body[data-bd="tile"] .square.light, body[data-bd="tile"] .square.dark { image-rendering: auto; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+.pv-board.tile i { image-rendering: auto !important; }
