@@ -813,7 +813,12 @@
     }
   }
   function markMoves() {
-    document.querySelectorAll('#rv-moves .rvm').forEach((b) => b.classList.toggle('cur', +b.dataset.i === R.ply - 1));
+    const box = $('#rv-moves');
+    let cur = null;
+    box.querySelectorAll('.rvm').forEach((b) => { const on = +b.dataset.i === R.ply - 1; b.classList.toggle('cur', on); if (on) cur = b; });
+    // keep the current move centred in the bar (only the bar scrolls, never the page)
+    const left = cur ? cur.offsetLeft - (box.clientWidth - cur.offsetWidth) / 2 : 0;
+    if (box.scrollTo) box.scrollTo({ left: Math.max(0, left), behavior: 'smooth' }); else box.scrollLeft = Math.max(0, left);
   }
 
   /* ---- the speech bubble, the rating under the board and the main button */
@@ -1242,9 +1247,12 @@
     const rv = document.createElement('section');
     rv.id = 'review'; rv.className = 'page';
     rv.innerHTML = `<div class="rv-wrap">
-        <div class="rv-top">
-          <button id="rv-back" class="rv-back" aria-label="Back to Analyze"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
-          <div id="rv-tl" class="rv-tl"></div>
+        <div class="rv-head">
+          <div class="rv-top">
+            <button id="rv-back" class="rv-back" aria-label="Back to Analyze"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <div id="rv-tl" class="rv-tl"></div>
+          </div>
+          <div class="rv-movebar"><div id="rv-moves" class="rv-moves" aria-label="Moves"></div></div>
         </div>
         <div id="rv-eval" class="rv-eval"></div>
         <h2 id="rv-title" class="rv-title">Analyse your game</h2>
@@ -1260,14 +1268,19 @@
           <button id="rv-main" class="rv-main">Begin</button>
           <button id="rv-next" class="rv-arrow" aria-label="Next move"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
         </div>
-        <h3 class="rv-mh">Moves</h3>
-        <div id="rv-moves" class="rv-moves"></div>
       </div>`;
     const anchor = $('#sheet-bg');
     app.insertBefore(lib, anchor);
     app.insertBefore(rv, anchor);
     $('#an-back').onclick = () => LP.showPage('menu');
     $('#rv-back').onclick = () => leave();
+    // on a computer the mouse wheel scrolls the move bar sideways
+    $('#rv-moves').addEventListener('wheel', (ev) => {
+      const box = ev.currentTarget;
+      if (box.scrollWidth <= box.clientWidth || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) return;
+      box.scrollLeft += ev.deltaY;
+      ev.preventDefault();
+    }, { passive: false });
     const nav = (d) => {
       cancelRetry(true);
       setPly(R.ply + d, true);

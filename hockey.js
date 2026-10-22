@@ -17,14 +17,19 @@
   const speedFor = (d) => 3.2 + 1.9 * d;      // gliding speed grows with the distance of the move
   const KNIGHT = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
   const QUEEN = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  // every = reaction time in seconds: how long the computer waits between decisions (randomised by +/-20%).
+  // The weaker the computer, the slower it reacts. Insane and Godly keep their original speed.
   const LEVELS = {
-    dumb:   { every: 1.5,  noise: 1e6 },
-    easy:   { every: 1.0,  noise: 140 },
-    medium: { every: 0.65, noise: 55 },
-    hard:   { every: 0.42, noise: 20 },
+    dumb:   { every: 3.0,  noise: 1e6 },
+    easy:   { every: 2.0,  noise: 140 },
+    medium: { every: 1.2,  noise: 55 },
+    hard:   { every: 0.65, noise: 20 },
     insane: { every: 0.3,  noise: 7 },
     godly:  { every: 0.2,  noise: 0 },
   };
+  const levelOf = () => LEVELS[cfg && cfg.level] || LEVELS.medium;
+  // the first reaction after a serve: never quicker than before (0.8s match start, 0.6s after a goal), but slow bots wait their full reaction time
+  const firstReact = (base) => Math.max(base, levelOf().every);
   const GLYPH = { q: '♛︎', n: '♞︎' };
 
   let cfg = null;        // { players, level, piece, names }
@@ -179,7 +184,7 @@
   }
 
   function botThink(b) {
-    const lv = LEVELS[cfg.level] || LEVELS.medium;
+    const lv = levelOf();
     const q = S.q[b];
     if (q.mv) return;
     const opts = destinations(b, q.f, q.r, cfg.piece);
@@ -293,7 +298,7 @@
       }
       if (cfg.players === 1) {
         botClock -= dt;
-        if (botClock <= 0) { botThink(1); botClock = (LEVELS[cfg.level] || LEVELS.medium).every * (0.8 + Math.random() * 0.4); }
+        if (botClock <= 0) { botThink(1); botClock = levelOf().every * (0.8 + Math.random() * 0.4); }
       }
       if (goal) scored(goal === 1 ? 0 : 1);
     } else if (phase === 'goal' && now >= freezeUntil) {
@@ -308,7 +313,7 @@
     S = newState();
     S.p.y = serveTo === 0 ? 2.2 : 5.8;
     queued = [null, null];
-    botClock = 0.6;
+    botClock = firstReact(0.6);
     setScore();
   }
 
@@ -357,7 +362,7 @@
     LP.setSides({ w: 'p1', b: 'p2' });
     LP.showPage('hockey');
     phase = 'play';
-    botClock = 0.8;
+    botClock = firstReact(0.8);
     cancelAnimationFrame(raf);
     last = performance.now();
     raf = requestAnimationFrame(frame);
