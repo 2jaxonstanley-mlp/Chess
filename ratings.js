@@ -23,6 +23,8 @@
     forced:      { id: 'forced',      phrase: 'forced',               label: 'Forced',       sym: '□',  color: '#78787d' },
     matewhite:   { id: 'matewhite',   phrase: 'checkmate',            label: 'Checkmate',    sym: '#',  color: '#ebebee' },
     mateblack:   { id: 'mateblack',   phrase: 'checkmate',            label: 'Checkmate',    sym: '#',  color: '#19191c' },
+    resignwhite: { id: 'resignwhite', phrase: 'a forfeit',            label: 'Forfeit',      sym: '⚑',  color: '#c7c7c7' },
+    resignblack: { id: 'resignblack', phrase: 'a forfeit',            label: 'Forfeit',      sym: '⚑',  color: '#2d2d2d' },
   };
 
   const BOOK_LINES = [
@@ -241,6 +243,42 @@
     return { inBook, set: inBook ? book.get(boardKey(g)) : null };
   }
 
+  /** True when move m is the next move of a known opening line (cheap: no search). Used for the Book label while a game is played. */
+  function isBook(g0, m) {
+    try {
+      if (g0.mode === 'secret') return false;
+      const g = clone(g0);
+      const bk = bookOf(g);
+      return !!(bk.set && bk.set.has(m.from + '-' + m.to));
+    } catch (e) { return false; }
+  }
+
+  /**
+   * Full analysis of one move for the Analyze feature. Returns { rating, best, bestScore, playedScore, top, depth, book, forced, isMate }.
+   * ms / depth control how thorough the search is.
+   */
+  function analyse(g0, m, ms, depth) {
+    const g = clone(g0);
+    const legal = g.legalMoves();
+    const mv = legal.find((x) => same(x, m));
+    const out = { rating: null, best: null, bestScore: 0, playedScore: 0, top: [], depth: 0, book: false, forced: legal.length <= 1, isMate: false, legal: legal.length, facts: null };
+    if (!mv) return out;
+    if (legal.length <= 1) { out.rating = RATINGS.forced; out.best = mv; return out; }
+    const bk = bookOf(g);
+    const f = facts(g, mv);
+    out.facts = f;
+    if (bk.set && bk.set.has(mv.from + '-' + mv.to)) { out.rating = RATINGS.book; out.book = true; }
+    if (f.isMate) { out.rating = g.turn === WHITE ? RATINGS.matewhite : RATINGS.mateblack; out.isMate = true; out.best = mv; return out; }
+    const A = window.AIAnalyse.run(g0, mv, ms || 900, depth || 11);
+    if (!A.top.length) return out;
+    out.top = A.top.map((t) => ({ move: legal.find((x) => same(x, t.move)) || t.move, score: t.score }));
+    out.best = out.top[0].move; out.bestScore = out.top[0].score; out.depth = A.depth;
+    out.playedScore = A.played ? A.played.score : out.bestScore - 400;
+    if (!out.book) out.rating = A.played ? classify(g, mv, f, A, A.played.score, bk) : null;
+    out.wBest = wp(out.bestScore); out.wPlayed = wp(out.playedScore);
+    return out;
+  }
+
   /** The strength of move m (a legal move of position g0 before it was played). Returns one of RATINGS, or null for an ordinary move. */
   function rate(g0, m) {
     const g = clone(g0);
@@ -296,5 +334,5 @@
   }
   const iconHtml = (x) => (x.hasImg ? `<img class="ri" src="${x.img}" alt="${x.label}">` : x.sym.replace(/&/g, '&amp;').replace(/</g, '&lt;'));
 
-  window.MoveRating = { rate, polish, clone, iconHtml, openingName, RATINGS, get: (id) => RATINGS[id] || null };
+  window.MoveRating = { rate, polish, clone, iconHtml, openingName, isBook, analyse, wp, MATE, RATINGS, get: (id) => RATINGS[id] || null };
 })();

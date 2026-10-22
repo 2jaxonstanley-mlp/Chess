@@ -22,13 +22,14 @@
       { sel: '#acct', t: 'Your profile', d: 'Tap here to set your name and picture and to see your ratings. Your rating changes when you play the computer.' },
       { sel: '#news-btn', t: 'Update log', d: 'See what changed in each update, with the date. A red dot shows when there is something new.' },
       { sel: '#settings-btn', t: 'Settings', d: 'Turn legal move hints, move labels (Brilliant, Blunder and so on) and board auto-flip on or off.' },
-      { sel: () => all('#menu .modes')[0].children[0], t: 'Classic', d: 'Normal chess, against a friend on one screen or against the computer at five levels.' },
-      { sel: () => all('#menu .modes')[0].children[1], t: 'Secret Queen', d: 'Every player secretly turns one pawn into a hidden queen. Reveal it at the right moment.' },
-      { sel: () => [all('#menu .modes')[0].children[2], all('#menu .modes')[0].children[3]], t: 'TAS and Capture Rush', d: 'TAS is a game against the computer with hints, pause and saving. Capture Rush is a race: capture as much as you can before the clock runs out.' },
-      { sel: () => all('#menu .modes')[1], t: 'Puzzles', d: 'A fresh puzzle every time: Checkmate, Check, Best move and Sacrifice, each at Easy, Normal or Hard.' },
-      { sel: () => all('#menu .modes')[2], t: 'Tasks and the Shop', d: 'Finish daily and weekly tasks to earn tokens, then spend them on crates in the Shop for new boards, pieces and hats.' },
-      { sel: () => all('#menu .modes')[3], t: 'Stats', d: 'Your ratings, results, puzzle streaks, move quality and records, plus the leaderboard.' },
-      { t: 'You are ready', d: 'Leave a game halfway and "Continue playing" appears at the top. Finished games can be saved as replays at the bottom. You can replay this tour from your profile.' },
+      { sel: () => document.querySelector('.mgrp[data-g="classic"] .mgrp-h'), t: 'Menu sections', d: 'The menu is split into sections. Tap a section title to open or close it.' },
+      { sel: () => document.querySelector('.mode[data-mode="basic"]'), t: 'Classic', d: 'Normal chess with no clock, against a friend on one screen or against the computer at five levels.' },
+      { sel: () => [document.querySelector('.mode[data-mode="bullet"]'), document.querySelector('.mode[data-mode="rapid"]')], t: 'Bullet and Rapid', d: 'Timed chess. Bullet is 1 or 3 minutes each. Rapid is 5 or 10 minutes each with 2 seconds back every move. Run out of time and you lose.' },
+      { sel: () => document.querySelector('.mgrp[data-g="custom"]'), t: 'Custom modes', d: 'Secret Queen hides a queen in your army. TAS is a sandbox with hints and pause. Capture Rush is a race to capture. Chess x Air Hockey is queens against queens with a puck, first to 7.' },
+      { sel: () => document.querySelector('.mgrp[data-g="train"]'), t: 'Train', d: 'Puzzles give you a fresh challenge every time. Analyze reviews your saved games like a lesson, with a chance to try again from your mistakes.' },
+      { sel: () => document.querySelector('.mgrp[data-g="rewards"]'), t: 'Tasks and the Shop', d: 'Finish daily and weekly tasks to earn tokens, then spend them on crates in the Shop for new boards, pieces and accessories.' },
+      { sel: () => document.querySelector('.mgrp[data-g="progress"]'), t: 'Stats', d: 'Your ratings, results, puzzle streaks and records, plus the leaderboard.' },
+      { t: 'You are ready', d: 'Leave a game halfway and "Continue playing" appears at the top. Finish a game and tap Analyze game to save it and learn from it. You can replay this tour from your profile.' },
     ],
     game: [
       { sel: '#board', t: 'The board', d: 'Tap a piece to see where it can go, then tap a square to move. Dots show the legal moves.' },
@@ -143,6 +144,7 @@
   function start(part) {
     if (run) return;
     if (!ui) build();
+    if (part === 'menu' && LP.menuOpenAll) LP.menuOpenAll();
     run = { part, steps: TOURS[part], i: -1 };
     ui.root.classList.add('on');
     document.body.classList.add('tut-open');

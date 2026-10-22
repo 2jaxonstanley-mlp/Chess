@@ -189,6 +189,35 @@
     return moves[bestI];
   }
 
+  /** Every move of `side` scored by a search (points of advantage for that side, bigger is better). Used by Analyze. */
+  function rank(cells, side, depth, ms) {
+    const moves = allMoves(cells, side);
+    const work = cells.map((c) => (c ? { c: c.c, t: c.t } : null));
+    const sign = side === W ? 1 : -1;
+    let scores = null;
+    until = performance.now() + (ms || 600);
+    for (let d = 1; d <= depth; d++) {
+      abort = false; nodes = 0;
+      const cur = [];
+      for (const m of moves) {
+        const mover = work[m.from], cap = work[m.to];
+        work[m.to] = mover; work[m.from] = null;
+        let add = 0, terminal = false;
+        if (side === W && cap) add = 150 + 250 * VALUE[cap.t];
+        if (side === B && cap) { add = -UNIT * COST[cap.t]; terminal = true; }
+        if (side === B && mover.t === 'p' && (m.to >> 3) === 0) work[m.to] = { c: B, t: 'q' };
+        const v = terminal ? add : ab(work, side === W ? B : W, d - 1, -INF, INF, add);
+        work[m.from] = mover; work[m.to] = cap;
+        if (abort) break;
+        cur.push(v * sign);
+      }
+      if (abort || cur.length < moves.length) break;
+      scores = cur;
+    }
+    if (!scores) scores = moves.map((m) => (cells[m.to] ? 1 : 0));
+    return moves.map((m, i) => ({ from: m.from, to: m.to, score: scores[i] / UNIT })).sort((a, b) => b.score - a.score);
+  }
+
   /* ------------------------------------------------------------------ game state */
   let cfg = null;        // { players, level, human, names {w,b}, piece, hints }
   let g = null;          // the running round
@@ -592,20 +621,20 @@
     const lost = g.taken * COST[g.piece], got = g.score + lost;
     LP.openSheet(`<h2>Time is up<span class="sub">${esc(nameOf(W))} scored ${fmtPts(g.score)} point${Math.abs(g.score) === 1 ? '' : 's'}</span></h2>
       <p class="rush-note">${g.caps.length} piece${g.caps.length === 1 ? '' : 's'} captured for ${got} points${g.taken ? ', minus ' + lost + ' for losing the ' + PNAME[g.piece].toLowerCase() + ' ' + g.taken + (g.taken === 1 ? ' time' : ' times') : ''}.${lbLine() ? '<br>' + esc(lbLine()) : ''}</p>
-      <div class="row"><button class="btn" id="rs-watch">Watch replay</button><button class="btn" id="rs-save"${saved ? ' disabled' : ''}>${saved ? 'Saved' : 'Save replay'}</button></div>
+      <button class="btn primary wide" id="rs-analyze">Analyze game</button>
       <div class="row">${cfg.players === 0 ? '' : '<button class="btn" id="rs-swap">Swap sides</button>'}<button class="btn primary" id="rs-again">Play again</button></div>
       <button class="btn wide" id="rs-menu">Menu</button>`);
     $('#rs-again').onclick = () => newRound();
     if (cfg.players !== 0) $('#rs-swap').onclick = swapSides;
     $('#rs-menu').onclick = toMenu;
-    $('#rs-watch').onclick = () => { LP.closeSheet(); watch(buildReplay(), 'over'); };
-    $('#rs-save').onclick = () => {
+    $('#rs-analyze').onclick = () => {
+      const d = buildReplay();
       const list = LP.store.get();
-      list.unshift(buildReplay());
-      LP.store.set(list.slice(0, 30));
+      list.unshift(d);
+      LP.store.set(list.slice(0, 40));
       g.saved = true;
-      toast('Saved. Find it on the main menu.');
-      showOver();
+      LP.closeSheet();
+      if (LP.analyze) LP.analyze.begin(d.id);
     };
   }
 
@@ -615,6 +644,7 @@
       piece: g.piece, names: { w: cfg.names.w, b: cfg.names.b }, players: cfg.players,
       score: g.score, pts: 1, captures: g.caps.length, taken: g.taken, init: g.init, events: g.log, total: TOTAL,
       moves: g.log,   // lets the saved-replays list count them like any other game
+      human: cfg.players === 1 ? cfg.human : null, level: cfg.players === 1 ? cfg.level : null,
     };
   }
 
@@ -902,7 +932,7 @@
   }));
   $('#rush-scrub').addEventListener('input', rpGo(() => { rpStop(); showFrame(+$('#rush-scrub').value, false); }));
   $('#rr-exit').addEventListener('click', rpGo(closeReplay));
-  window.Rush = { watch: (d) => watch(d, 'menu'), resume, describe: (d) => 'Capture Rush \u00b7 ' + fmtTime(TOTAL - d.g.used) + ' left' };
+  window.Rush = { lab: { rank, gen, allMoves, attackedByBlack, whiteSquares, blackSquares, framesOf: (d) => framesOf(d), VALUE, COST, PNAME }, watch: (d) => watch(d, 'menu'), resume, describe: (d) => 'Capture Rush \u00b7 ' + fmtTime(TOTAL - d.g.used) + ' left' };
   document.querySelector('.mode[data-mode="rush"]').addEventListener('click', start);
 
   /** Headless round for testing the computer players: returns { score, taken, blacks }. */

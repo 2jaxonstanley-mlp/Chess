@@ -146,7 +146,7 @@
     LP.openSheet('<h2>Settings<span class="sub">Defaults for new games. Change them any time.</span></h2>' +
       '<div class="set-list">' +
         row('set-hints', 'Legal move hints', 'Show dots where the selected piece can move.', settings.hints) +
-        row('set-ratings', 'Move strength labels', 'Label moves Brilliant, Book, Blunder, and so on (Classic only).', settings.ratings) +
+        row('set-ratings', 'Opening book labels', 'Mark book moves and show the opening name while you play. Full move ratings are in Analyze game.', settings.ratings) +
         row('set-flip', 'Auto-flip board', 'In two-player games, turn the board toward the player to move.', settings.autoFlip) +
       '</div>' +
       '<p class="note">These apply automatically when you start a game — no more prompts each time.</p>' +

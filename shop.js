@@ -43,8 +43,9 @@
   const HATS = [
     ['cap', 'Cap', 'common'], ['grad', 'Graduate', 'common'], ['sun', 'Sun Hat', 'common'], ['hard', 'Hard Hat', 'common'], ['party', 'Party Hat', 'common'],
     ['top', 'Top Hat', 'rare'], ['helm', 'Helmet', 'rare'], ['blossom', 'Blossom', 'rare'], ['clover', 'Clover', 'rare'], ['cowboy', 'Cowboy Hat', 'rare'], ['antlers', 'Antlers', 'rare'],
-    ['wizard', 'Wizard Hat', 'epic'], ['pirate', 'Pirate Hat', 'epic'], ['horns', 'Horns', 'epic'],
-    ['crown', 'Crown', 'legendary'], ['halo', 'Halo', 'legendary'],
+    ['crown', 'Crown', 'rare'], ['halo', 'Halo', 'rare'],
+    ['wizard', 'Wizard Hat', 'epic'], ['pirate', 'Pirate Hat', 'epic'], ['horns', 'Horns', 'epic'], ['pawnhat', 'Pawn Hat', 'epic'],
+    ['mini', 'Mini Me', 'legendary'],
   ].map(([id, name, r]) => ({ id, name, r }));
   const RETRO = { id: '', name: 'Retro', pk: 'sheet', sheet: 'pk-retro-hd.png' };   // the main skin everyone starts with
   const CRATES = {
@@ -56,7 +57,18 @@
   /* ------------------------------------------------------------------ saved state */
   const read = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
   const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } };
-  let S = Object.assign({ tokens: null, owned: {}, equipped: { board: '', piece: '', hat: '' }, hatOn: 'k', skinTeam: 'wb' }, read(SKEY, {}));   // hatOn: piece types wearing the accessory, skinTeam: which teams use the equipped piece set
+  let S = Object.assign({ tokens: null, owned: {}, equipped: { board: '', piece: '', hat: '' } }, read(SKEY, {}));
+  /* Each player has their own piece set and accessory: slots.p1 is you (Player 1), slots.p2 is the opponent (the computer or a guest).
+     hatOn is the list of piece types (k q r b n p) that wear the accessory. */
+  if (!S.slots) {
+    const old = S.equipped || {}, tm = S.skinTeam || 'wb', on = S.hatOn || 'k';
+    S.slots = {
+      p1: { piece: tm.indexOf('w') >= 0 ? old.piece || '' : '', hat: old.hat || '', hatOn: on },
+      p2: { piece: tm.indexOf('b') >= 0 ? old.piece || '' : '', hat: old.hat || '', hatOn: on },
+    };
+  }
+  ['p1', 'p2'].forEach((k) => { S.slots[k] = Object.assign({ piece: '', hat: '', hatOn: 'k' }, S.slots[k] || {}); });
+  const slotOf = (isBlack) => { const m = (LP.sides && LP.sides()) || { w: 'p1', b: 'p2' }; return S.slots[m[isBlack ? 'b' : 'w']] || S.slots.p1; };
   if (S.tokens == null) S.tokens = 5;                  // a welcome gift, enough for the first crate
   const saveS = () => write(SKEY, S);
   // boards that were taken out of the shop: owners get the price of a crate back for each one
@@ -73,7 +85,7 @@
   const find = (slot, id) => CRATES[slot].items.find((x) => x.id === id);
   function apply() {
     const root = document.documentElement.style;
-    const b = find('board', S.equipped.board), p = find('piece', S.equipped.piece) || RETRO;
+    const b = find('board', S.equipped.board), p = find('piece', S.slots.p1.piece) || RETRO;
     root.setProperty('--light-sq', b ? b.l : '#eeeed2');
     root.setProperty('--dark-sq', b ? b.d : '#769656');
     root.setProperty('--light-img', b && b.li ? b.li : 'none');
@@ -93,17 +105,21 @@
   /* Where each piece set has its "head" (centre x and top y, as % of the picture), so accessories can sit on any piece of any set */
   const ANCH = {"silvergold":{"p":[50.0,34.8],"b":[49.0,17.6],"q":[49.6,16.0],"k":[50.0,2.7],"n":[52.7,23.0],"r":[49.6,25.0]},"sandy":{"p":[49.8,28.1],"b":[50.8,14.8],"q":[50.2,14.8],"k":[49.8,2.7],"n":[50.6,21.9],"r":[49.8,20.7]},"":{"p":[50.8,15.6],"b":[51.0,10.2],"q":[49.2,8.6],"k":[49.4,8.6],"n":[44.7,12.5],"r":[49.8,7.8]},"realism":{"p":[50.2,26.6],"b":[49.4,17.2],"q":[48.8,17.2],"k":[49.2,6.2],"n":[48.8,15.6],"r":[50.0,22.7]},"pixel":{"p":[49.8,23.4],"b":[49.4,6.2],"q":[49.4,7.0],"k":[49.8,6.2],"n":[52.3,7.0],"r":[49.4,13.3]},"pixelduo":{"p":[50.2,29.7],"b":[49.0,12.5],"q":[49.4,9.4],"k":[49.8,6.2],"n":[54.3,14.1],"r":[49.8,19.5]},"wood":{"p":[50.2,26.6],"b":[49.4,17.2],"q":[48.8,17.2],"k":[49.2,6.2],"n":[48.8,15.6],"r":[50.0,22.7]},"neon":{"p":[50.0,14.0],"b":[50.0,8.0],"q":[50.0,8.0],"k":[50.0,4.0],"n":[41.0,12.0],"r":[50.0,12.0]}};
   const HAT_W = { k: 52, q: 52, b: 44, n: 50, r: 54, p: 46 };       // accessory width as % of the piece
-  function hatPos(skinId, kind) {
-    const a = (ANCH[skinId] || ANCH[''])[kind] || [50, 10], w = HAT_W[kind];
+  const SPRITE_HATS = { pawnhat: 1, mini: 1 };       // drawn from piece pictures rather than a flat SVG
+  function hatPos(skinId, kind, hatId) {
+    const a = (ANCH[skinId] || ANCH[''])[kind] || [50, 10];
+    if (hatId === 'mini') return { x: 77, y: 57, w: 40 };                  // Mini Me stands in the bottom right corner of the square
+    if (hatId === 'pawnhat') { const w = HAT_W[kind] * 0.62; return { x: a[0], y: Math.round((a[1] + (kind === 'k' ? 12 : 3) - 0.9 * w) * 10) / 10, w: Math.round(w * 10) / 10 }; }
+    const w = HAT_W[kind];
     return { x: a[0], y: Math.round((a[1] + (kind === 'k' ? 12 : 3) - 0.5625 * w) * 10) / 10, w };
   }
-  const skinFor = (isBlack) => ((S.skinTeam || 'wb').indexOf(isBlack ? 'b' : 'w') >= 0 ? (find('piece', S.equipped.piece) || RETRO) : RETRO);
+  const skinOf = (slot) => find('piece', slot.piece) || RETRO;
   /* pieces get their picture/neon look and the accessory: found by their glyph, so no other file has to know about it */
   function tagKings() {
-    const h = find('hat', S.equipped.hat), on = S.hatOn || 'k';
     document.querySelectorAll('.piece, .cp').forEach((pe) => {
       const code = pe.textContent.charCodeAt(0), kind = KIND[code];
-      const sk = skinFor(pe.classList.contains('b')), pk = sk.pk || '', px = sk.px ? '1' : '';
+      const slot = slotOf(pe.classList.contains('b')), sk = skinOf(slot), pk = sk.pk || '', px = sk.px ? '1' : '';
+      const h = find('hat', slot.hat), on = slot.hatOn || 'k';
       if (pk && kind) {
         if (pe.dataset.pk !== pk) pe.dataset.pk = pk;
         if (pe.dataset.k !== kind) pe.dataset.k = kind;
@@ -118,7 +134,7 @@
         if (h && kind && on.indexOf(kind) >= 0) {
           const key = h.id + kind + (sk.id || '_');
           if (pe.dataset.hatk !== key) {
-            const hp = hatPos(sk.id || '', kind);
+            const hp = hatPos(sk.id || '', kind, h.id);
             pe.dataset.hat = h.id; pe.dataset.hatk = key;
             pe.style.setProperty('--hx', hp.x + '%'); pe.style.setProperty('--hy', hp.y + '%'); pe.style.setProperty('--hw', hp.w + '%');
           }
@@ -236,7 +252,7 @@
     if (LP.stats && LP.stats.event) LP.stats.event(name, p);
     if (name === 'game') {
       tick('play', 1);
-      if (p && p.won) { tick('win', 1); if (HARD[p.level]) tick('hardwin', 1); if ((p.mode === 'basic' || p.mode === 'secret') && MEDIUM_UP[p.level]) { endlessTick('wins', 1); refresh(); } }
+      if (p && p.won) { tick('win', 1); if (HARD[p.level]) tick('hardwin', 1); if ((p.mode === 'basic' || p.mode === 'secret' || p.mode === 'bullet' || p.mode === 'rapid') && MEDIUM_UP[p.level]) { endlessTick('wins', 1); refresh(); } }
       if (p && p.mode === 'secret') tick('secret', 1);
     } else tick(name, typeof p === 'number' ? p : 1);
   }
@@ -285,13 +301,20 @@
     return Object.keys(RARITY).filter((r) => have.has(r)).map((r) => [r, Math.round(100 * RARITY[r].w / tot)]);
   };
   const PVSHAPES = 'pbqknr';
-  /** An accessory drawn on one piece of the equipped set (kind k/q/r/b/n/p). show=false draws the piece alone. */
-  function hatOn(it, kind, show) {
-    const p = find('piece', S.equipped.piece) || RETRO, hp = hatPos(p.id || '', kind);
+  /** An accessory drawn on one piece (kind k/q/r/b/n/p) of a player's piece set (default: Player 1's). show=false draws the piece alone. */
+  function hatOn(it, kind, show, who) {
+    const p = skinOf(S.slots[who || 'p1']), hp = hatPos(p.id || '', kind, it.id);
     let pic;
     if (p.pk === 'neon') pic = `<b class="piece w pvk-neon" data-pk="neon" data-k="${kind}"></b>`;
     else pic = `<i class="ic-sp"${p.px ? ' data-px="1"' : ''} style="--i:${SHEET_AT[kind]};background-image:url(${p.sheet})"></i>`;
-    return `<span class="pv-hat"><span class="pvh">${show ? `<em data-hat="${it.id}" style="left:${hp.x}%;top:${hp.y}%;width:${hp.w}%"></em>` : ''}${pic}</span></span>`;
+    let em = '';
+    if (show) {
+      const pos = `left:${hp.x}%;top:${hp.y}%;width:${hp.w}%`;
+      if (it.id === 'pawnhat') em = `<em class="hs" style="${pos};background-image:url(pk-realism-hd.png);background-position:${6 / 11 * 100}% 50%"></em>`;
+      else if (it.id === 'mini') em = p.pk === 'neon' ? '' : `<em class="hs" style="${pos};background-image:url(${p.sheet});background-position:${SHEET_AT[kind] / 11 * 100}% 50%"></em>`;
+      else em = `<em data-hat="${it.id}" style="${pos}"></em>`;
+    }
+    return `<span class="pv-hat"><span class="pvh">${em}${pic}</span></span>`;
   }
   function preview(slot, it) {
     if (slot === 'board') {
@@ -310,40 +333,60 @@
 
   /* ------------------------------------------------------------------ equip choosers */
   const KNAMES = { k: 'King', q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight', p: 'Pawn' };
-  const finishEquip = (msg) => { saveS(); apply(); LP.closeSheet(); renderShop(); popup(msg); };
-  /** Accessory: ask which pieces wear it. */
-  function chooseHat(it) {
-    const on = new Set(S.equipped.hat === it.id ? (S.hatOn || 'k').split('') : ['k']);
-    const skin = find('piece', S.equipped.piece) || RETRO;
+  const finishEquip = (msg) => { S.equipped.piece = S.slots.p1.piece; S.equipped.hat = S.slots.p1.hat; saveS(); apply(); LP.closeSheet(); renderShop(); popup(msg); };
+  const WHO = { p1: 'Player 1', p2: 'Player 2', both: 'Both players' };
+  const whoList = (w) => (w === 'both' ? ['p1', 'p2'] : [w]);
+  /** Step 1 of equipping a piece set or accessory: who gets it. cb gets 'p1', 'p2' or 'both'. */
+  function chooseWho(title, cb, preview) {
+    LP.openSheet(`<h2>${title}<span class="sub">Player 1 is you. Player 2 is the computer or a guest.</span></h2>
+      <div class="eq-teams">${['p1', 'p2', 'both'].map((w) => `<button class="eq-team" data-w="${w}"><span class="eq-pair">${preview(w)}</span><b>${WHO[w]}</b></button>`).join('')}</div>
+      <div class="row"><button class="btn" id="eq-cancel">Cancel</button></div>`, true);
+    document.querySelectorAll('.eq-team').forEach((b) => { b.onclick = () => cb(b.dataset.w); });
+    $('#eq-cancel').onclick = () => { LP.closeSheet(); renderShop(); };
+  }
+  const kingPic = (skin, team) => skin.pk === 'neon' ? `<b class="piece ${team} pvk-neon" data-pk="neon" data-k="k"></b>`
+    : `<i class="ic-sp"${skin.px ? ' data-px="1"' : ''} style="--i:${team === 'w' ? 3 : 9};background-image:url(${skin.sheet})"></i>`;
+  /** Accessory, step 2: which pieces wear it. who = 'p1' | 'p2' | 'both' */
+  function chooseHatPieces(it, who) {
+    const first = whoList(who)[0];
+    const on = new Set(S.slots[first].hat === it.id ? (S.slots[first].hatOn || 'k').split('') : ['k']);
+    const skin = skinOf(S.slots[first]);
     const draw = () => {
-      LP.openSheet(`<h2>Wear ${esc(it.name)} on...<span class="sub">Tap the pieces that should wear it. Both teams wear it.</span></h2>
-        <div class="eq-chips">${'kqrbnp'.split('').map((k) => `<button class="eq-chip${on.has(k) ? ' on' : ''}" data-k="${k}">${skin.pk === 'neon' ? '' : hatOn(it, k, on.has(k))}<span>${KNAMES[k]}</span></button>`).join('')}</div>
+      LP.openSheet(`<h2>${esc(it.name)} on ${who === 'both' ? 'both players' : WHO[who]}<span class="sub">Tap the pieces that should wear it.</span></h2>
+        <div class="eq-chips">${'kqrbnp'.split('').map((k) => `<button class="eq-chip${on.has(k) ? ' on' : ''}" data-k="${k}">${skin.pk === 'neon' && (it.id === 'mini') ? '' : hatOn(it, k, on.has(k), first)}<span>${KNAMES[k]}</span></button>`).join('')}</div>
         <button class="btn wide" id="eq-all">${on.size === 6 ? 'Clear all' : 'Select all'}</button>
-        <div class="row"><button class="btn" id="eq-cancel">Cancel</button><button class="btn primary" id="eq-ok" ${on.size ? '' : 'disabled'}>Wear it</button></div>`, true);
+        <div class="row"><button class="btn" id="eq-back">Back</button><button class="btn primary" id="eq-ok" ${on.size ? '' : 'disabled'}>Wear it</button></div>`, true);
       document.querySelectorAll('.eq-chip').forEach((b) => { b.onclick = () => { const k = b.dataset.k; if (on.has(k)) on.delete(k); else on.add(k); draw(); }; });
       $('#eq-all').onclick = () => { if (on.size === 6) on.clear(); else 'kqrbnp'.split('').forEach((k) => on.add(k)); draw(); };
-      $('#eq-cancel').onclick = () => { LP.closeSheet(); renderShop(); };
+      $('#eq-back').onclick = () => chooseHat(it);
       $('#eq-ok').onclick = () => {
-        S.equipped.hat = it.id; S.hatOn = 'kqrbnp'.split('').filter((k) => on.has(k)).join('');
-        finishEquip(esc(it.name) + ' on ' + (on.size === 6 ? 'every piece' : [...'kqrbnp'].filter((k) => on.has(k)).map((k) => KNAMES[k].toLowerCase() + 's').join(', ')));
+        const kinds = 'kqrbnp'.split('').filter((k) => on.has(k)).join('');
+        whoList(who).forEach((w) => { S.slots[w].hat = it.id; S.slots[w].hatOn = kinds; });
+        finishEquip(esc(it.name) + ' on ' + (on.size === 6 ? 'every piece' : [...'kqrbnp'].filter((k) => on.has(k)).map((k) => KNAMES[k].toLowerCase() + 's').join(', ')) + ' for ' + (who === 'both' ? 'both players' : WHO[who]));
       };
     };
     draw();
   }
-  /** Piece set: ask which teams use it (the other team keeps the Retro set). */
-  function chooseTeams(it) {
-    const kingPic = (skin, team) => skin.pk === 'neon' ? `<b class="piece ${team} pvk-neon" data-pk="neon" data-k="k"></b>`
-      : `<i class="ic-sp"${skin.px ? ' data-px="1"' : ''} style="--i:${team === 'w' ? 3 : 9};background-image:url(${skin.sheet})"></i>`;
-    const opt = (t, label) => `<button class="eq-team${(S.equipped.piece === it.id ? (S.skinTeam || 'wb') : 'wb') === t ? ' on' : ''}" data-t="${t}"><span class="eq-pair">${kingPic(t.indexOf('w') >= 0 ? it : RETRO, 'w')}${kingPic(t.indexOf('b') >= 0 ? it : RETRO, 'b')}</span><b>${label}</b></button>`;
-    LP.openSheet(`<h2>Who gets ${esc(it.name)}?<span class="sub">The other team keeps the Retro pieces.</span></h2>
-      <div class="eq-teams">${opt('wb', 'Both teams')}${opt('w', 'White only')}${opt('b', 'Black only')}</div>
-      <div class="row"><button class="btn" id="eq-cancel">Cancel</button></div>`, true);
-    document.querySelectorAll('.eq-team').forEach((b) => { b.onclick = () => { S.equipped.piece = it.id; S.skinTeam = b.dataset.t; finishEquip(esc(it.name) + ' equipped for ' + (b.dataset.t === 'wb' ? 'both teams' : b.dataset.t === 'w' ? 'White' : 'Black')); }; });
-    $('#eq-cancel').onclick = () => { LP.closeSheet(); renderShop(); };
+  function chooseHat(it) {
+    chooseWho('Who wears ' + esc(it.name) + '?', (w) => chooseHatPieces(it, w), (w) => {
+      const s1 = skinOf(S.slots.p1), s2 = skinOf(S.slots.p2);
+      return w === 'both' ? kingPic(s1, 'w') + kingPic(s2, 'b') : w === 'p1' ? kingPic(s1, 'w') : kingPic(s2, 'b');
+    });
+  }
+  /** Piece set: who gets it. */
+  function choosePieceWho(it) {
+    chooseWho('Who gets ' + esc(it.name) + '?', (w) => {
+      whoList(w).forEach((x) => { S.slots[x].piece = it.id; });
+      S.equipped.piece = S.slots.p1.piece;
+      finishEquip((it.id ? esc(it.name) : 'Retro') + ' equipped for ' + (w === 'both' ? 'both players' : WHO[w]));
+    }, (w) => (w === 'both' ? kingPic(it, 'w') + kingPic(it, 'b') : w === 'p1' ? kingPic(it, 'w') : kingPic(it, 'b')));
   }
   function equipFlow(slot, id) {
-    if (id && slot === 'hat') return chooseHat(find('hat', id));
-    if (id && slot === 'piece') return chooseTeams(find('piece', id));
+    if (slot === 'hat') {
+      if (id) return chooseHat(find('hat', id));
+      return chooseWho('Remove the accessory from...', (w) => { whoList(w).forEach((x) => { S.slots[x].hat = ''; }); S.equipped.hat = S.slots.p1.hat; finishEquip('Accessory removed for ' + (w === 'both' ? 'both players' : WHO[w])); }, () => '<span class="pv-none">∅</span>');
+    }
+    if (slot === 'piece') return choosePieceWho(id ? find('piece', id) : RETRO);
     S.equipped[slot] = id; saveS(); apply(); LP.closeSheet(); renderShop();
     popup((id ? esc(find(slot, id).name) : dflt[slot].name) + ' equipped');
   }
@@ -360,13 +403,14 @@
     const sorted = c.items.slice().sort((x, y) => order.indexOf(x.r) - order.indexOf(y.r));
     const tiles = [dflt[slot]].concat(sorted).map((it) => {
       const isDef = it.id === '', owned = isDef || S.owned[slot + ':' + it.id];
-      const eq = S.equipped[slot] === it.id;
+      const used = slot === 'board' ? (S.equipped.board === it.id ? ['b'] : []) : ['p1', 'p2'].filter((w) => S.slots[w][slot] === it.id);
+      const eq = used.length > 0;
       const R = isDef ? { name: 'Starter', c: '#8a8a85' } : RARITY[it.r];
       return `<button class="sh-tile${owned ? '' : ' locked'}${eq ? ' eq' : ''}" style="--rc:${R.c}" data-slot="${slot}" data-id="${it.id}" ${owned ? '' : 'disabled'}>
         <span class="sh-rar">${R.name}</span>
         <span class="sh-pv">${isDef && slot === 'hat' ? '<span class="pv-none">∅</span>' : preview(slot, it)}</span>
         <span class="sh-nm">${esc(it.name)}</span>
-        <span class="sh-st">${owned ? (eq ? (slot === 'board' ? 'Equipped' : 'Equipped · change') : 'Tap to equip') : 'Not found yet'}</span></button>`;
+        <span class="sh-st">${owned ? (eq ? (slot === 'board' ? 'Equipped' : used.length === 2 ? 'P1 + P2' : used[0] === 'p1' ? 'Player 1' : 'Player 2') : 'Tap to equip') : 'Not found yet'}</span></button>`;
     }).join('');
     $('#sh-list').innerHTML = `<div class="sh-tabs" role="tablist">${Object.keys(TABS).map((k) => `<button role="tab" class="${k === tab ? 'on' : ''}" data-tab="${k}">${TABS[k]}</button>`).join('')}</div>
       <section class="sh-crate" style="--c:${c.color}">
@@ -450,6 +494,7 @@
   $('#tk-shop').addEventListener('click', () => openPage('shop'));
 
   LP.rewards = { event, addTokens, tokens: () => S.tokens };
+  LP.hatDebug = { hatPos, HATS, PIECES, skinOf };
   apply();
   refresh();
 })();

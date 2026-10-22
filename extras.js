@@ -12,6 +12,18 @@
 
   /* ------------------------------------------------------------------ update log */
   const LOG = [
+    { id: 'u5', date: '2026-10-22', title: 'Timed games, Air Hockey and Analyze', items: [
+      'The menu now has sections you can open and close: Classic, Custom, Train, Rewards, Progress and More',
+      'New timed games: Bullet (1 or 3 minutes, no extra time) and Rapid (5 or 10 minutes plus 2 seconds every move)',
+      'New Chess x Air Hockey: queens (or knights) against each other with a puck. Move any time, glide faster the further you go, hit harder the faster you move. First to 7',
+      'Added a Forfeit button',
+      'New Analyze: after a game, tap Analyze game for a lesson with a progress bar. It shows what you did well, what went wrong (free pieces, forks, missed wins), and lets you try again from those positions. Find saved games under Train',
+      'Removed the live move labels while you play, except Book moves. Everything else is in Analyze',
+      'TAS is now a sandbox: it is not saved or analysed',
+      'Equip pieces and accessories for Player 1, Player 2 or both. Accessories pick the player first, then the pieces',
+      'Accessory changes: Crown and Halo are now Rare, new Mini Me (Legendary) stands in the corner of its square, new Pawn Hat (Epic)',
+      'New game logo and browser tab icon, plus a Suggestions page under More',
+    ] },
     { id: 'u4', date: '2026-10-21', title: 'New boards, pieces and accessories', items: [
       'Added the Marble, Realism and Cosmic boards',
       'Added the Sandy and Silver & Gold piece sets',

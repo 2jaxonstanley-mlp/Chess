@@ -7,7 +7,10 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Local Pieces</title>
-  <link rel="stylesheet" href="styles.css?v=28">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css?v=29">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -29,7 +32,7 @@
       </div>
       <div class="menu-inner">
         <header class="hero">
-          <span class="hero-mark" aria-hidden="true"><i class="ic-sp" style="--i:4"></i></span>
+          <img class="hero-logo" src="logo.png" width="96" height="96" alt="" aria-hidden="true">
           <h1 class="logo">Local Pieces</h1>
           <p class="tagline">Chess, your way.</p>
         </header>
@@ -43,16 +46,38 @@
           <span class="mode-go" aria-hidden="true">&rsaquo;</span>
         </button>
 
-        <h2 class="menu-label">Play</h2>
-        <div class="modes">
+        <section class="mgrp" data-g="classic">
+          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Classic</span><span class="mgrp-s">Untimed and timed chess</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+          <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="basic" style="--accent:#8fc15b">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:3"></i></span>
             <span class="mode-text">
               <span class="mode-name">Classic</span>
-              <span class="mode-desc">The classic game of chess.</span>
+              <span class="mode-desc">The classic game of chess, no clock.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
+          <button class="mode" data-mode="bullet" style="--accent:#ffd35a">
+            <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></span>
+            <span class="mode-text">
+              <span class="mode-name">Bullet</span>
+              <span class="mode-desc">1 or 3 minutes each, no extra time.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="rapid" style="--accent:#5ec8c0">
+            <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg></span>
+            <span class="mode-text">
+              <span class="mode-name">Rapid</span>
+              <span class="mode-desc">5 or 10 minutes each, plus 2 seconds every move.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          </div></div>
+        </section>
+        <section class="mgrp" data-g="custom">
+          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Custom</span><span class="mgrp-s">Chess with a twist</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+          <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="secret" style="--accent:#b48cf2">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:2"></i></span>
             <span class="mode-text">
@@ -77,10 +102,19 @@
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-        </div>
-
-        <h2 class="menu-label">Train</h2>
-        <div class="modes">
+          <button class="mode" data-mode="hockey" style="--accent:#ff6b8a">
+            <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><circle cx="12" cy="12" r="2.5"/></svg></span>
+            <span class="mode-text">
+              <span class="mode-name">Chess x Air Hockey</span>
+              <span class="mode-desc">Queens against queens, with a puck. First to 7.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          </div></div>
+        </section>
+        <section class="mgrp" data-g="train">
+          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Train</span><span class="mgrp-s">Get better</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+          <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="puzzle" style="--accent:#f2c45a">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:0"></i></span>
             <span class="mode-text">
@@ -89,15 +123,24 @@
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-        </div>
-
-        <h2 class="menu-label">Rewards</h2>
-        <div class="modes">
+          <button class="mode" data-mode="analyze" style="--accent:#7cc4ff">
+            <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6M11 8v6"/></svg></span>
+            <span class="mode-text">
+              <span class="mode-name">Analyze</span>
+              <span class="mode-desc" id="analyze-desc">Review your games and learn from every mistake.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          </div></div>
+        </section>
+        <section class="mgrp" data-g="rewards">
+          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Rewards</span><span class="mgrp-s">Tokens and cosmetics</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+          <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="tasks" style="--accent:#3fbfa3">
             <span class="mode-ic" aria-hidden="true"><i class="ic-check"></i></span>
             <span class="mode-text">
               <span class="mode-name">Daily &amp; Weekly Tasks</span>
-              <span id="tasks-desc" class="mode-desc">Complete tasks to earn tokens.</span>
+              <span class="mode-desc" id="tasks-desc">Complete tasks to earn tokens.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
@@ -105,14 +148,15 @@
             <span class="mode-ic" aria-hidden="true"><i class="ic-gem"></i></span>
             <span class="mode-text">
               <span class="mode-name">Shop</span>
-              <span id="shop-desc" class="mode-desc">Spend tokens on crates.</span>
+              <span class="mode-desc" id="shop-desc">Spend tokens on crates.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-        </div>
-
-        <h2 class="menu-label">Progress</h2>
-        <div class="modes">
+          </div></div>
+        </section>
+        <section class="mgrp" data-g="progress">
+          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Progress</span><span class="mgrp-s">Your numbers</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+          <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="board" style="--accent:#e8c14a">
             <span class="mode-ic" aria-hidden="true"><i class="ic-star"></i></span>
             <span class="mode-text">
@@ -121,12 +165,40 @@
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
-        </div>
+          </div></div>
+        </section>
+        <section class="mgrp closed" data-g="more">
+          <button class="mgrp-h" type="button" aria-expanded="false"><span class="mgrp-t">More</span><span class="mgrp-s">Feedback</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+          <div class="mgrp-b"><div class="modes">
+          <button class="mode" data-mode="suggest" style="--accent:#ff9ecb">
+            <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.5 7.2L3 21l1.8-5.5A8 8 0 1 1 21 12z"/></svg></span>
+            <span class="mode-text">
+              <span class="mode-name">Suggestions</span>
+              <span class="mode-desc">Tell me what to add or fix.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          </div></div>
+        </section>
+      </div>
+    </section>
 
-        <div id="saved" class="saved hidden">
-          <h2>Saved replays</h2>
-          <ul id="saved-list"></ul>
+    <!-- SUGGESTIONS -->
+    <section id="suggest" class="page">
+      <header class="game-header">
+        <button id="sg-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span class="pz-head"><span class="mode-title">Suggestions</span></span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="lb-wrap">
+        <p class="sg-lead">Got an idea, found a bug, or want a new skin or game mode? Tell me. Write it below, then send it either way.</p>
+        <label for="sg-text" class="sg-label">Your suggestion</label>
+        <textarea id="sg-text" class="sg-text" rows="6" maxlength="1500" placeholder="What should I add or fix?"></textarea>
+        <div class="stack">
+          <a id="sg-gh" class="btn primary big sg-btn" target="_blank" rel="noopener">Post it on GitHub Issues</a>
+          <a id="sg-mail" class="btn big sg-btn">Send it by email</a>
         </div>
+        <p class="lb-hint">GitHub needs a free account. Email goes to 2jaxonstanley@gmail.com. Either one reaches me.</p>
       </div>
     </section>
 
@@ -143,6 +215,7 @@
           <div class="player-bar" id="top-bar">
             <span class="dot" id="top-dot"></span>
             <span class="pname" id="top-name"></span>
+            <span class="pclock hidden" id="top-clock"></span>
             <span class="captured" id="top-captured"></span>
           </div>
 
@@ -155,6 +228,7 @@
           <div class="player-bar" id="bottom-bar">
             <span class="dot" id="bottom-dot"></span>
             <span class="pname" id="bottom-name"></span>
+            <span class="pclock hidden" id="bottom-clock"></span>
             <span class="captured" id="bottom-captured"></span>
           </div>
 
@@ -178,6 +252,7 @@
             <button id="hint-btn" class="btn hidden">Hint</button>
             <button id="pause-btn" class="btn hidden">Pause</button>
             <button id="both-btn" class="btn hidden" aria-pressed="false">Both sides</button>
+            <button id="forfeit-btn" class="btn hidden">Forfeit</button>
             <button id="save-btn" class="btn hidden">Save TAS</button>
             <button id="reset-btn" class="btn">New game</button>
           </div>
@@ -248,6 +323,36 @@
             </div>
             <button id="rr-exit" class="btn wide">Close replay</button>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHESS x AIR HOCKEY -->
+    <section id="hockey" class="page">
+      <header class="game-header">
+        <button id="hk-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span class="mode-title">Chess x Air Hockey</span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="layout">
+        <div class="board-col">
+          <div class="player-bar" id="hk-top-bar">
+            <span class="dot b"></span>
+            <span class="pname" id="hk-top-name"></span>
+            <span class="hk-score" id="hk-top-score">0</span>
+          </div>
+          <div class="board-wrap hk-wrap">
+            <div id="hk-board" class="board"></div>
+            <div id="hk-layer" class="hk-layer"></div>
+            <div id="hk-toast" class="toast" role="status"></div>
+          </div>
+          <div class="player-bar" id="hk-bottom-bar">
+            <span class="dot w"></span>
+            <span class="pname" id="hk-bottom-name"></span>
+            <span class="hk-score" id="hk-bottom-score">0</span>
+          </div>
+          <div id="hk-status" class="status dim">&nbsp;</div>
+          <div class="controls"><button id="hk-pause" class="btn">Pause</button><button id="hk-reset" class="btn">New match</button></div>
         </div>
       </div>
     </section>
@@ -354,13 +459,16 @@
   <script src="leaderboard.js?v=30"></script>
   <script src="profile.js?v=23"></script>
   <script src="hats.js?v=1"></script>
-  <script src="shop.js?v=30"></script>
-    <script src="stats.js?v=28"></script>
-  <script src="rush.js?v=23"></script>
+  <script src="shop.js?v=31"></script>
+    <script src="stats.js?v=29"></script>
+  <script src="rush.js?v=24"></script>
   <script src="puzzlegen.js?v=30"></script>
   <script src="ratings.js?v=29"></script>
   <script src="puzzles.js?v=30"></script>
-  <script src="tutorial.js?v=3"></script>
-  <script src="extras.js?v=5"></script>
+  <script src="analyze.js?v=1"></script>
+  <script src="hockey.js?v=1"></script>
+  <script src="tutorial.js?v=4"></script>
+  <script src="extras.js?v=6"></script>
+  <script src="menu.js?v=1"></script>
 </body>
 </html>

@@ -42,6 +42,11 @@
   let hintToken = 0;
   let playBoth = false;        // TAS: you play the computer's turns too, so it stays still
   let initialSecrets = { [WHITE]: -1, [BLACK]: -1 };
+  let pendingTc = null;        // time control chosen for Bullet / Rapid: { base: seconds, inc: seconds }
+  let clock = null;            // the running clock of a timed game: { [WHITE]: ms, [BLACK]: ms, inc: ms, base: ms }
+  let lastTick = 0;
+  let resigned = null;         // the colour that forfeited, if any
+  let sidesCtx = { w: 'p1', b: 'p2' };   // which player (p1 / p2) each colour is, so the shop can give each player their own pieces
 
   let phase = 'menu';          // menu | names | pick-w | pick-b | play | over | replay
   let selected = -1;
@@ -72,7 +77,7 @@
   const isTas = () => mode === 'tas';
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
   const engineMode = (m) => (m === 'secret' ? 'secret' : 'basic');
-  const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS' };
+  const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS', bullet: 'Bullet', rapid: 'Rapid' };
   const LEVEL_LABEL = { dumb: 'Dumb', easy: 'Easy', medium: 'Medium', hard: 'Hard', insane: 'Insane', godly: 'Godly' };
   const cname = (c) => (c === WHITE ? 'White' : 'Black');
   const nameOf = (c) => viewNames[c] || cname(c);
@@ -360,6 +365,45 @@
     const live = phase === 'play' || phase === 'replay';
     $('#top-bar').classList.toggle('active', live && G.turn === topColor);
     $('#bottom-bar').classList.toggle('active', live && G.turn === botColor);
+    updateClocks();
+  }
+
+  /* ---------------------------------------------------------------- clocks */
+  const fmtClock = (ms) => {
+    ms = Math.max(0, ms);
+    if (ms < 10000) return (Math.floor(ms / 100) / 10).toFixed(1);
+    const t = Math.ceil(ms / 1000), m = Math.floor(t / 60), sec = t % 60;
+    return m + ':' + String(sec).padStart(2, '0');
+  };
+  function updateClocks() {
+    const topColor = flipped ? WHITE : BLACK, botColor = flipped ? BLACK : WHITE;
+    [['top', topColor], ['bottom', botColor]].forEach(([p, c]) => {
+      const el = $('#' + p + '-clock');
+      el.classList.toggle('hidden', !clock);
+      if (!clock) return;
+      el.textContent = fmtClock(clock[c]);
+      el.classList.toggle('low', clock[c] < 10000);
+      el.classList.toggle('run', phase === 'play' && sans.length > 0 && G.turn === c);
+    });
+  }
+  function clockTick() {
+    if (!clock || phase !== 'play' || bots || paused || sans.length < 1 || viewPly < sans.length) { lastTick = 0; return; }
+    const now = Date.now();
+    if (!lastTick) { lastTick = now; return; }
+    clock[game.turn] -= now - lastTick;
+    lastTick = now;
+    updateClocks();
+    if (clock[game.turn] <= 0) { clock[game.turn] = 0; updateClocks(); flagFall(game.turn); }
+  }
+  setInterval(clockTick, 100);
+  /** A side ran out of time: the other side wins, unless it only has a bare king left. */
+  function flagFall(loser) {
+    const winner = loser === WHITE ? BLACK : WHITE;
+    let others = 0;
+    for (let s2 = 0; s2 < 128; s2++) { if (s2 & 0x88) { s2 += 7; continue; } const p = game.board[s2]; if (p && (p & 24) === winner && (p & 7) !== KING) others++; }
+    aiToken++; aiBusy = false;
+    if (!others) endGame('material', winner); else endGame('time', winner);
+    clearSession();
   }
 
   /* ------------------------------------------------------------- move list */
@@ -457,7 +501,8 @@
     $('#controls').classList.toggle('tas', tas);
     $('#replay-controls').classList.toggle('hidden', phase !== 'replay');
     $('#hint-btn').classList.toggle('hidden', !tas);
-    $('#save-btn').classList.toggle('hidden', !tas);
+    $('#save-btn').classList.add('hidden');
+    $('#forfeit-btn').classList.toggle('hidden', tas || !!bots || phase !== 'play');
     const nav = (phase === 'play' || phase === 'over') && !aiBusy;
     $('#undo-btn').disabled = !nav || viewPly === 0;
     $('#redo-btn').disabled = !nav || viewPly >= sans.length;
@@ -471,7 +516,6 @@
     $('#both-btn').disabled = !(phase === 'play' || phase === 'over');
     updateHintGlow();
     updateQueenBtn();
-    $('#save-btn').disabled = !sans.length;
     $('#flip-btn').disabled = opts.autoFlip;
     document.querySelector('.layout').classList.toggle('replaying', phase === 'replay');
   }
@@ -484,20 +528,36 @@
   }
 
   /* ------------------------------------------------------------- menu/start */
-  document.querySelectorAll('.mode[data-mode="basic"], .mode[data-mode="secret"], .mode[data-mode="tas"]').forEach((b) => {
+  document.querySelectorAll('.mode[data-mode="basic"], .mode[data-mode="secret"], .mode[data-mode="tas"], .mode[data-mode="bullet"], .mode[data-mode="rapid"]').forEach((b) => {
     b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
 
   function chooseMode(m) {
-    if (m === 'tas') { askDifficulty(m); return; }   // TAS is single player only
+    if (m === 'tas') { pendingTc = null; askDifficulty(m); return; }   // TAS is single player only
+    if (m === 'bullet' || m === 'rapid') { askClock(m); return; }
+    pendingTc = null;
+    askPlayers(m, false);
+  }
+
+  /* Bullet: 1 or 3 minutes, no extra time. Rapid: 5 or 10 minutes plus 2 seconds every move. */
+  function askClock(m) {
+    const opts2 = m === 'bullet' ? [[60, 0, '1 minute', 'Each side gets 1 minute. No extra time.'], [180, 0, '3 minutes', 'Each side gets 3 minutes. No extra time.']]
+      : [[300, 2, '5 minutes + 2', 'Each side gets 5 minutes and 2 seconds back every move.'], [600, 2, '10 minutes + 2', 'Each side gets 10 minutes and 2 seconds back every move.']];
+    openSheet(`<h2>${m === 'bullet' ? 'Bullet' : 'Rapid'}<span class="sub">Pick the time for each side.</span></h2>
+      <div class="stack">${opts2.map((o, i) => `<button class="btn big tc" data-i="${i}"><b>${o[2]}</b><small>${o[3]}</small></button>`).join('')}<button class="btn" id="tc-x">Cancel</button></div>`, true);
+    sheet.querySelectorAll('.tc').forEach((b) => { b.onclick = () => { const o = opts2[+b.dataset.i]; pendingTc = { base: o[0], inc: o[1] }; askPlayers(m, true); }; });
+    $('#tc-x').onclick = closeSheet;
+  }
+
+  function askPlayers(m, noBots) {
     openSheet(`<h2>How many players?</h2>
       <div class="stack">
-        <button class="btn big" id="pl-0">0 players</button>
+        ${noBots ? '' : '<button class="btn big" id="pl-0">0 players</button>'}
         <button class="btn big" id="pl-1">1 player</button>
         <button class="btn big" id="pl-2">2 players</button>
         <button class="btn" id="pl-x">Cancel</button>
       </div>`, true);
-    $('#pl-0').onclick = () => askBot(m, WHITE, null);
+    if (!noBots) $('#pl-0').onclick = () => askBot(m, WHITE, null);
     $('#pl-1').onclick = () => askDifficulty(m);
     $('#pl-2').onclick = () => { closeSheet(); startGame(m, false, null); };
     $('#pl-x').onclick = closeSheet;
@@ -588,6 +648,10 @@
     over = null;
     replay = null;
     initialSecrets = { [WHITE]: -1, [BLACK]: -1 };
+    resigned = null;
+    lastTick = 0;
+    clock = pendingTc && (m === 'bullet' || m === 'rapid') ? { [WHITE]: pendingTc.base * 1000, [BLACK]: pendingTc.base * 1000, inc: pendingTc.inc * 1000, base: pendingTc.base * 1000 } : null;
+    sidesCtx = { w: 'p1', b: 'p2' };
     coverEl.classList.add('hidden');
     document.documentElement.classList.toggle('is-tas', m === 'tas');
     $('#mode-title').textContent = MODE_LABEL[m];
@@ -619,6 +683,7 @@
       kind: 'chess', mode, names: { [WHITE]: names[WHITE], [BLACK]: names[BLACK] }, ai, bots,
       opts: { autoFlip: opts.autoFlip, hints: opts.hints, ratings: opts.ratings }, ratings: ratings.slice(), secrets: initialSecrets,
       moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
+      clock: clock ? { w: clock[WHITE], b: clock[BLACK], inc: clock.inc, base: clock.base } : null,
     });
   }
   function clearSession() { const x = session.get(); if (x && x.kind === 'chess') session.clear(); }
@@ -643,6 +708,8 @@
     viewPly = fullMoves.length;
     while (viewPly > d.viewPly) { game.unmakeMove(); viewPly--; }
     playBoth = !!d.playBoth;
+    if (d.clock) { clock = { [WHITE]: d.clock.w, [BLACK]: d.clock.b, inc: d.clock.inc, base: d.clock.base }; pendingTc = { base: d.clock.base / 1000, inc: d.clock.inc / 1000 }; } else clock = null;
+    sidesCtx = ai ? { [ai.human === WHITE ? 'w' : 'b']: 'p1', [ai.human === WHITE ? 'b' : 'w']: 'p2' } : { w: 'p1', b: 'p2' };
     phase = 'play';
     showPage('game');
     flipped = false;
@@ -702,6 +769,7 @@
         ai.color = ai.human === WHITE ? BLACK : WHITE;
         names = { [ai.human]: name, [ai.color]: 'Computer (' + LEVEL_LABEL[ai.level] + ')' };
         viewNames = names;
+        sidesCtx = { [ai.human === WHITE ? 'w' : 'b']: 'p1', [ai.human === WHITE ? 'b' : 'w']: 'p2' };   // you are Player 1 whichever colour you play
         loadOptsFromSettings();
         opts.autoFlip = false;   // solo always faces your side
         closeSheet();
@@ -846,7 +914,8 @@
     updateControls();
     thinkingStatus();
     const t0 = Date.now();
-    const minWait = bots ? 450 + Math.random() * 250 : 600 + Math.random() * 300;   // never quite instant, so you can follow the move
+    const minWait = clock ? 60 + Math.random() * 90 : bots ? 450 + Math.random() * 250 : 600 + Math.random() * 300;   // never quite instant, so you can follow the move
+    const maxMs = clock ? Math.max(60, Math.min(2000, clock[game.turn] / 35)) : 0;   // under a clock the computer thinks for a small slice of the time it has left
     const seen = new Map();
     posKeys.slice(0, viewPly + 1).forEach((k) => seen.set(k, (seen.get(k) || 0) + 1));
     setTimeout(() => {
@@ -858,7 +927,7 @@
           aiBusy = false;
           if (m) doMove(m); else updateControls();
         }, Math.max(0, minWait - (Date.now() - t0)));
-      });
+      }, maxMs);
     }, 20);
   }
 
@@ -940,7 +1009,7 @@
     }
     hintMoves = [];
     showQueen = false;   // the queen is hidden again once the turn is done
-    const before = ratingsOn() ? window.MoveRating.clone(game) : null;   // the position before the move, for rating it
+    const bookMove = !isTas() && !!(window.MoveRating && window.MoveRating.isBook && window.MoveRating.isBook(game, m));   // only book moves are labelled while you play; everything else comes from Analyze game
     const san = game.moveToSan(m);
     const mover = game.turn;
     if (!bots && window.LP.rewards && (game.board[m.to] || m.flags === 2)) window.LP.rewards.event('capture', 1);
@@ -951,7 +1020,9 @@
     sans.push(full);
     fullMoves.push({ from: m.from, to: m.to, flags: m.flags, promo: m.promo || 0, q: m.q || 0 });
     viewPly = sans.length;
-    ratings[fullMoves.length - 1] = null;
+    ratings[fullMoves.length - 1] = bookMove ? 'book' : null;
+    if (clock && !bots) clock[mover] += clock.inc;
+    lastTick = 0;
     posKeys.push(positionKey(game));
     selected = -1;
     legalTargets = [];
@@ -961,7 +1032,6 @@
     const h = game.history[game.history.length - 1];
     if (h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, sans.length);
-    if (before) rateLastMove(before, m);
 
     let end = null;
     if (!canMove) end = check ? 'mate' : 'stalemate';
@@ -1000,19 +1070,23 @@
   /* --------------------------------------------------------------- end game */
   function endGame(type, mover) {
     phase = 'over';
+    clearTimeout(flipTimer);
     const why = { stalemate: 'Stalemate', material: 'Insufficient material', fifty: '50-move rule', repeat: 'Threefold repetition' };
-    over = type === 'mate'
-      ? { title: nameOf(mover) + ' wins', sub: 'Checkmate', result: mover === WHITE ? '1-0' : '0-1' }
+    const winner = type === 'mate' || type === 'resign' || type === 'time' ? mover : null;   // mover = the side that won (or that gave the mate)
+    const loser = winner === WHITE ? BLACK : WHITE;
+    if (type === 'resign') resigned = loser;
+    over = winner != null
+      ? { title: nameOf(winner) + ' wins', sub: type === 'mate' ? 'Checkmate' : type === 'resign' ? nameOf(loser) + ' forfeited' : nameOf(loser) + ' ran out of time', result: winner === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
     const lb = type === 'mate' ? recordWin(mover) : null;
     const Pf = window.LP.profile;
-    if (Pf && ai && !bots && !playBoth && Pf.MODES[mode]) over.elo = Pf.record(mode, ai.level, type === 'mate' ? (mover === ai.human ? 1 : 0) : 0.5);
+    if (Pf && ai && !bots && !playBoth && Pf.MODES[mode]) over.elo = Pf.record(mode, ai.level, winner != null ? (winner === ai.human ? 1 : 0) : 0.5);
     if (lb && lb.rank) over.note = lb.isBest ? 'New best: checkmate in ' + lb.entry.value + ' moves!' : '#' + lb.rank + ' on the leaderboard';
     if (!bots && !isTas() && window.LP.rewards) {
       const q = {};
       ratings.forEach((r, i) => { if (r && (!ai || (i % 2 === 0) === (ai.human === WHITE))) q[r] = (q[r] || 0) + 1; });
       window.LP.rewards.event('game', {
-        mode, won: type === 'mate' && (!ai || mover === ai.human), draw: type !== 'mate', level: ai ? ai.level : 'pvp',
+        mode, won: winner != null && (!ai || winner === ai.human), draw: winner == null, level: ai ? ai.level : 'pvp',
         moves: Math.ceil(fullMoves.length / 2), secs: Math.min(10800, Math.round((Date.now() - (gameStart || Date.now())) / 1000)), elo: over.elo || null, q,
       });
     }
@@ -1022,8 +1096,26 @@
       if (phase !== 'over' || !sheetBg.classList.contains('hidden')) return;
       if (lb && lb.isBest && window.LP.board) window.LP.board.askName(lb.entry, () => { if (phase === 'over') showOverSheet(); }, 'Your fastest win so far. Choose the name for the leaderboard.');
       else showOverSheet();
-    }, 800);
+    }, type === 'resign' ? 200 : 800);
   }
+
+  /** Give up the game: the other side wins. */
+  function resign(color) {
+    if (phase !== 'play' || bots || isTas()) return;
+    aiToken++; aiBusy = false;
+    endGame('resign', color === WHITE ? BLACK : WHITE);
+    clearSession();
+  }
+
+  $('#forfeit-btn').addEventListener('click', () => {
+    if (phase !== 'play' || bots || isTas()) return;
+    if (ai) { confirmSheet('Forfeit this game?', 'Forfeit', () => resign(ai.human)); return; }
+    openSheet(`<h2>Who forfeits?<span class="sub">The other player wins.</span></h2>
+      <div class="stack"><button class="btn big" id="ff-w">${esc(nameOf(WHITE))} (White)</button><button class="btn big" id="ff-b">${esc(nameOf(BLACK))} (Black)</button><button class="btn" id="ff-x">Cancel</button></div>`, true);
+    $('#ff-w').onclick = () => { closeSheet(); resign(WHITE); };
+    $('#ff-b').onclick = () => { closeSheet(); resign(BLACK); };
+    $('#ff-x').onclick = closeSheet;
+  });
 
   /** Classic and Secret Queen wins, against the computer or a friend, ranked by how few moves they took. */
   function recordWin(mover) {
@@ -1042,43 +1134,26 @@
     $('#st-opts').onclick = () => showOverSheet();
   }
 
-  function showOverSheet(savedNote) {
+  function showOverSheet() {
+    const tas = isTas();
     openSheet(`<h2>${esc(over.title)}<span class="sub">${esc(over.sub)}</span></h2>
       <div class="stack">
-        <button class="btn primary" id="ov-watch">Watch replay</button>
-        <button class="btn" id="ov-save" ${savedNote === true ? 'disabled' : ''}>${savedNote === true ? (isTas() ? 'TAS saved' : 'Replay saved') : (isTas() ? 'Save TAS' : 'Save replay')}</button>
+        ${tas ? '' : '<button class="btn primary" id="ov-analyze">Analyze game</button>'}
         <div class="row"><button class="btn" id="ov-new">New game</button><button class="btn" id="ov-close">Close</button></div>
       </div>
       ${over.elo ? `<p class="elo-line ${over.elo.delta >= 0 ? 'up' : 'down'}"><span>${MODE_LABEL[mode]} rating</span><b>${over.elo.after}</b><em>${over.elo.delta >= 0 ? '+' : '\u2212'}${Math.abs(over.elo.delta)}</em></p>` : ''}
-      <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${savedNote === true ? 'Find it on the main menu.' : ''}</p>`);
-    $('#ov-watch').onclick = () => { closeSheet(); startReplay(buildReplayData(), 'over'); };
-    $('#ov-save').onclick = showSaveSheet;
+      <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${tas ? 'TAS is a sandbox, so it is not saved or analysed.' : 'Analyzing saves the game. You can open it again any time from Analyze in the Train section.'}</p>`);
+    const an = $('#ov-analyze');
+    if (an) an.onclick = () => {
+      const data = buildReplayData();
+      const list = store.get();
+      list.unshift(data);
+      store.set(list.slice(0, 40));
+      closeSheet();
+      if (window.LP.analyze) window.LP.analyze.begin(data.id);
+    };
     $('#ov-new').onclick = () => { closeSheet(); startGame(mode, true); };
     $('#ov-close').onclick = closeSheet;
-  }
-
-  function showSaveSheet() {
-    openSheet(`<h2>${isTas() ? 'Save TAS' : 'Save replay'}</h2>
-      <label for="sv-w">White</label>
-      <input id="sv-w" type="text" maxlength="16" autocomplete="off">
-      <label for="sv-b">Black</label>
-      <input id="sv-b" type="text" maxlength="16" autocomplete="off">
-      <div class="row"><button class="btn" id="sv-cancel">Back</button><button class="btn primary" id="sv-ok">Save</button></div>`);
-    $('#sv-w').value = names[WHITE];
-    $('#sv-b').value = names[BLACK];
-    const save = () => {
-      names[WHITE] = $('#sv-w').value.trim() || 'White';
-      names[BLACK] = $('#sv-b').value.trim() || 'Black';
-      const list = store.get();
-      list.unshift(buildReplayData());
-      store.set(list.slice(0, 30));
-      renderBars();
-      if (over) showOverSheet(true);
-      else { closeSheet(); showToast('Saved as a TAS. Find it on the main menu.', false); }
-    };
-    $('#sv-ok').onclick = save;
-    $('#sv-cancel').onclick = () => { if (over) showOverSheet(); else closeSheet(); };
-    sheet.querySelectorAll('input').forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); }));
   }
 
   function buildReplayData() {
@@ -1095,6 +1170,11 @@
       ratings: ratingsOn() ? ratings.slice() : null,
       sans: sans.slice(),
       result: over ? over.title + ' · ' + over.sub : '',
+      mode2: mode,
+      human: ai ? (ai.human === WHITE ? 'w' : 'b') : null,
+      resigned: resigned == null ? null : (resigned === WHITE ? 'w' : 'b'),
+      winner: over && over.result === '1-0' ? 'w' : over && over.result === '0-1' ? 'b' : null,
+      clock: clock ? { base: clock.base, inc: clock.inc } : null,
     };
   }
 
@@ -1140,7 +1220,6 @@
 
   $('#undo-btn').addEventListener('click', () => navigate(-1));
   $('#redo-btn').addEventListener('click', () => navigate(1));
-  $('#save-btn').addEventListener('click', () => { if (sans.length) showSaveSheet(); });
 
   /* TAS hint: the 3 best moves for the side to move, numbered 1-3 on the board */
   $('#hint-btn').addEventListener('click', () => {
@@ -1385,37 +1464,12 @@
 
   function renderSavedList() {
     renderContinue();
-    const list = store.get();
-    const box = $('#saved');
-    const ul = $('#saved-list');
-    box.classList.toggle('hidden', !list.length);
-    ul.innerHTML = '';
-    list.forEach((r) => {
-      const li = document.createElement('li');
-      const when = new Date(r.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-      const label = r.kind === 'rush' ? 'Capture Rush · ' + (r.pts ? (r.score < 0 ? '\u2212' + Math.abs(r.score) : r.score) + ' points' : r.score + ' captured') : (r.tas ? 'TAS' : r.mode === 'secret' ? 'Secret Queen' : 'Classic') + ' · ' + Math.ceil(r.moves.length / 2) + ' moves';
-      li.innerHTML = `<div class="info"><div class="title">${esc(r.names.w)} vs ${esc(r.names.b)}</div>
-        <div class="meta">${when} · ${label}</div></div>
-        <button class="btn primary w">Watch</button><button class="btn d">Delete</button>`;
-      li.querySelector('.w').onclick = () => (r.kind === 'rush' ? window.Rush.watch(r) : startReplay(r, 'menu'));
-      const del = li.querySelector('.d');
-      let armed = null;
-      del.onclick = () => {
-        if (armed) {
-          store.set(store.get().filter((x) => x.id !== r.id));
-          renderSavedList();
-        } else {
-          del.textContent = 'Sure?';
-          armed = setTimeout(() => { armed = null; del.textContent = 'Delete'; }, 3000);
-        }
-      };
-      ul.appendChild(li);
-    });
+    if (window.LP && window.LP.analyze && window.LP.analyze.refreshMenu) window.LP.analyze.refreshMenu();
   }
 
   renderSavedList();
   buildBoard();
-  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session, applySettings };
+  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session, applySettings, sides: () => sidesCtx, setSides: (m) => { sidesCtx = m || { w: 'p1', b: 'p2' }; }, fmt };
   // Profile loads after app.js; pick up saved settings once it is ready
   setTimeout(loadOptsFromSettings, 0);
 })();

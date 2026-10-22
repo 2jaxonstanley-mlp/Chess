@@ -10,7 +10,7 @@
   const esc = LP.esc;
   const KEY = 'localPieces.stats';
   const LEVELS = ['dumb', 'easy', 'medium', 'hard', 'godly', 'insane'];
-  const MODES = { basic: 'Classic', secret: 'Secret Queen' };
+  const MODES = { basic: 'Classic', secret: 'Secret Queen', bullet: 'Bullet', rapid: 'Rapid', hockey: 'Air Hockey' };
   const MODE_COL = { basic: '#8fc15b', secret: '#b48cf2' };
   const PNAME = { q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight' };
   const PIC = { p: 0, b: 1, q: 2, k: 3, n: 4, r: 5 };

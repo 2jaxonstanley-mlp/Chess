@@ -884,8 +884,9 @@
    * Find the computer's move. Calls cb(move) (a move object valid in the real game `g`) when done.
    * `seen` is an optional Map of position-key -> times seen, used to avoid shuffling back and forth.
    */
-  window.searchMove = function (g, level, color, seen, cb) {
-    const cfg = LEVELS[level] || LEVELS.medium;
+  window.searchMove = function (g, level, color, seen, cb, maxMs) {
+    let cfg = LEVELS[level] || LEVELS.medium;
+    if (maxMs && cfg.time) cfg = Object.assign({}, cfg, { time: Math.min(cfg.time, maxMs), polish: false });   // under a clock: think for less
     const enemy = color === WHITE ? BLACK : WHITE;
     const c = cloneForSearch(g, enemy);
     const rootMoves = c.legalMoves();
