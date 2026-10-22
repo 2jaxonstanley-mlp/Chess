@@ -12,6 +12,11 @@
 
   /* ------------------------------------------------------------------ update log */
   const LOG = [
+    { id: 'u8', date: '2026-10-23', title: 'Puzzle goal and the King in Air Hockey', items: [
+      'New Endless goal for puzzles: solve 5, then 10, then 15 puzzles on Normal or Hard. It scales exactly like the pieces captured goal',
+      'Air Hockey has a new piece to pick: the King, which glides to any square in its own half',
+      'Capture and win goals (daily, weekly and Endless) already count in Bullet and Rapid games',
+    ] },
     { id: 'u7', date: '2026-10-22', title: 'Stickman pieces and the Bunny Hat', items: [
       'New Stickman piece set (Rare), hand drawn: black stickmen for Black and white stickmen with an outline for White',
       'New Bunny Hat accessory (Epic)',

@@ -1,5 +1,6 @@
 /**
- * Chess x Air Hockey: each side has one chess piece (a queen, or a knight) that glides to any square it could legally move to,
+ * Chess x Air Hockey: each side has one chess piece (a queen, a knight, or a king) that glides to any square it could legally move to
+ * (the king is special: it can glide to any square in its own half),
  * and a puck bounces around the board. Both sides can move at any time. The faster the piece is going when it meets the
  * puck, the harder the puck is hit, and pieces glide faster the further the square is. Neither piece can cross the middle.
  * First to 7 goals wins. Play a friend on the same screen (each taps in their own half) or the computer.
@@ -30,7 +31,7 @@
   const levelOf = () => LEVELS[cfg && cfg.level] || LEVELS.medium;
   // the first reaction after a serve: never quicker than before (0.8s match start, 0.6s after a goal), but slow bots wait their full reaction time
   const firstReact = (base) => Math.max(base, levelOf().every);
-  const GLYPH = { q: '♛︎', n: '♞︎' };
+  const GLYPH = { q: '♛︎', n: '♞︎', k: '♚︎' };
 
   let cfg = null;        // { players, level, piece, names }
   let S = null;          // physics state
@@ -51,7 +52,10 @@
   function destinations(side, f, r, piece) {
     const lo = side === 0 ? 0 : 4, hi = side === 0 ? 3 : 7;
     const out = [];
-    if (piece === 'n') {
+    if (piece === 'k') {
+      // the King is free: any square in its own half
+      for (let ff = 0; ff < 8; ff++) for (let rr = lo; rr <= hi; rr++) if (ff !== f || rr !== r) out.push([ff, rr]);
+    } else if (piece === 'n') {
       KNIGHT.forEach(([df, dr]) => { const ff = f + df, rr = r + dr; if (ff >= 0 && ff < 8 && rr >= lo && rr <= hi) out.push([ff, rr]); });
     } else {
       QUEEN.forEach(([df, dr]) => {
@@ -61,7 +65,7 @@
     }
     return out;
   }
-  const distOf = (piece, f, r, tf, tr) => (piece === 'n' ? 2.2 : Math.max(Math.abs(tf - f), Math.abs(tr - r)));
+  const distOf = (piece, f, r, tf, tr) => (piece === 'n' ? 2.2 : piece === 'k' ? Math.hypot(tf - f, tr - r) : Math.max(Math.abs(tf - f), Math.abs(tr - r)));
 
   function newState() {
     return {
@@ -391,8 +395,8 @@
     $('#hk-x').onclick = LP.closeSheet;
   }
   function pickPiece(players) {
-    LP.openSheet(`<h2>Pick the piece<span class="sub">Both sides use it. It moves like it does in chess.</span></h2>
-      <div class="stack"><button class="btn big tc" id="hp-q"><b>Queen</b><small>Glides in any straight line. Long moves are very fast.</small></button><button class="btn big tc" id="hp-n"><b>Knight</b><small>Jumps in an L shape. Quick short hops.</small></button><button class="btn" id="hp-x">Cancel</button></div>`, true);
+    LP.openSheet(`<h2>Pick the piece<span class="sub">Both sides use it. The Queen and Knight move like they do in chess.</span></h2>
+      <div class="stack"><button class="btn big tc" id="hp-q"><b>Queen</b><small>Glides in any straight line. Long moves are very fast.</small></button><button class="btn big tc" id="hp-n"><b>Knight</b><small>Jumps in an L shape. Quick short hops.</small></button><button class="btn big tc" id="hp-k"><b>King</b><small>Glides to any square in its own half. Far squares are fast.</small></button><button class="btn" id="hp-x">Cancel</button></div>`, true);
     const go = (piece) => {
       if (players === 2) { cfg = { players: 2, piece, names: ['Player 1', 'Player 2'] }; LP.closeSheet(); newMatch(); return; }
       LP.levelMenu('Computer', 'Pick how good the computer is.', (lv) => {
@@ -404,6 +408,7 @@
     };
     $('#hp-q').onclick = () => go('q');
     $('#hp-n').onclick = () => go('n');
+    $('#hp-k').onclick = () => go('k');
     $('#hp-x').onclick = LP.closeSheet;
   }
 

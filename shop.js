@@ -206,14 +206,16 @@
   /* Endless goals. Each one has levels that never run out. Level k needs base x k (progress starts again at 0 on every level)
      and pays 1 + floor(k / 4) tokens, so the reward rises by 1 token every 4 levels (4 x the first goal).
        capture: base 5 pieces  -> 5, 10, 15 (1 token each), 20 (2 tokens) ... (counts every capture, Rush included)
+       puzzles: base 5 puzzles -> same scaling as capture (counts puzzles solved on Normal or Hard)
        wins   : base 2 games   -> 2, 4, 6 (1 token each), 8 (2 tokens), 16 (3 tokens) ... (Classic or Secret Queen, beating Medium or tougher) */
   const EKEY = 'localPieces.endless';
   const ENDLESS = {
     capture: { base: 5, text: (n) => 'Capture ' + n + ' pieces', ic: '⚔️', col: '#ef6a4c', title: 'Pieces captured', rule: 'Counts every piece you capture, in Classic, Secret Queen, TAS and Capture Rush.' },
+    puzzles: { base: 5, text: (n) => 'Solve ' + n + ' puzzles', ic: '\u{1F9E9}', col: '#f58a2d', title: 'Puzzles solved', rule: 'Counts every puzzle you solve on Normal or Hard.' },
     wins:    { base: 2, text: (n) => 'Win ' + n + (n === 1 ? ' game' : ' games'), ic: '\u{1F3C6}', col: '#f2c45a', title: 'Games won', rule: 'Win in Classic or Secret Queen against a Medium or tougher computer.' },
   };
   let E = read(EKEY, {});
-  ['capture', 'wins'].forEach((k) => { E[k] = Object.assign({ lv: 1, p: 0, done: 0 }, E[k] || {}); });
+  ['capture', 'wins', 'puzzles'].forEach((k) => { E[k] = Object.assign({ lv: 1, p: 0, done: 0 }, E[k] || {}); });
   const eTarget = (k, lv) => ENDLESS[k].base * lv;
   const eReward = (k, lv) => 1 + Math.floor(lv / 4);
   const MEDIUM_UP = { medium: 1, hard: 1, insane: 1, godly: 1 };
@@ -257,7 +259,10 @@
       tick('play', 1);
       if (p && p.won) { tick('win', 1); if (HARD[p.level]) tick('hardwin', 1); if ((p.mode === 'basic' || p.mode === 'secret' || p.mode === 'bullet' || p.mode === 'rapid') && MEDIUM_UP[p.level]) { endlessTick('wins', 1); refresh(); } }
       if (p && p.mode === 'secret') tick('secret', 1);
-    } else tick(name, typeof p === 'number' ? p : 1);
+    } else {
+      tick(name, typeof p === 'number' ? p : 1);
+      if (name === 'puzzle' && p && (p.diff === 'normal' || p.diff === 'hard')) { endlessTick('puzzles', 1); refresh(); }   // Endless goal: puzzles solved on Normal or Hard
+    }
   }
 
   const leftDay = () => { const n = new Date(), m = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1); return Math.max(0, m - n); };
@@ -272,17 +277,17 @@
     const box = weekly ? W : D, defs = weekly ? WDEFS : DEFS;
     const dn = D.list.filter((t) => t.done).length, wn = W.list.filter((t) => t.done).length;
     const on = (k) => (tkTab === k ? 'on' : '');
-    $('#tk-tabs').innerHTML = `<button class="${on('daily')}" data-tk="daily">Daily <em>${dn}/${D.list.length}</em></button><button class="${on('weekly')}" data-tk="weekly">Weekly <em>${wn}/${W.list.length}</em></button><button class="${on('life')}" data-tk="life">Endless <em>${E.capture.done + E.wins.done}</em></button>`;
+    $('#tk-tabs').innerHTML = `<button class="${on('daily')}" data-tk="daily">Daily <em>${dn}/${D.list.length}</em></button><button class="${on('weekly')}" data-tk="weekly">Weekly <em>${wn}/${W.list.length}</em></button><button class="${on('life')}" data-tk="life">Endless <em>${E.capture.done + E.wins.done + E.puzzles.done}</em></button>`;
     document.querySelectorAll('[data-tk]').forEach((b) => { b.onclick = () => { tkTab = b.dataset.tk; renderTasks(); }; });
     if (life) {
-      const doneAll = E.capture.done + E.wins.done;
+      const doneAll = E.capture.done + E.wins.done + E.puzzles.done;
       $('#tk-reset').innerHTML = 'Never resets. Every goal you finish makes the next one bigger. <span class="tk-hard">' + doneAll + ' finished</span>';
       const cur = (k) => { const e = E[k], d = ENDLESS[k], n = eTarget(k, e.lv), pct = Math.round(100 * e.p / n);
         return `<div class="tk-card wk"><div class="tk-top"><span class="tk-ic" style="color:${d.col}" aria-hidden="true">${d.ic}</span><b>${esc(d.text(n))}</b><span class="tk-rw">${coin}+${eReward(k, e.lv)}</span></div>
           <div class="tk-bar"><i style="width:${e.p ? Math.max(pct, 8) : 0}%"></i><span>${e.p} / ${n}</span></div></div>`; };
       const nxt = (k) => { const e = E[k], d = ENDLESS[k], n = eTarget(k, e.lv + 1);
         return `<div class="tk-card soon"><div class="tk-top"><span class="tk-ic" style="color:${d.col}" aria-hidden="true">${d.ic}</span><b><small class="tk-next">Next</small> ${esc(d.text(n))}</b><span class="tk-rw">${coin}+${eReward(k, e.lv + 1)}</span></div></div>`; };
-      $('#tk-list').innerHTML = ['capture', 'wins'].map((k) => `<h3 class="sh-sub">${ENDLESS[k].title} <em class="tk-lv">Level ${E[k].lv}</em></h3>${cur(k)}${nxt(k)}<p class="note">${ENDLESS[k].rule}</p>`).join('');
+      $('#tk-list').innerHTML = ['capture', 'puzzles', 'wins'].map((k) => `<h3 class="sh-sub">${ENDLESS[k].title} <em class="tk-lv">Level ${E[k].lv}</em></h3>${cur(k)}${nxt(k)}<p class="note">${ENDLESS[k].rule}</p>`).join('');
       return;
     }
     $('#tk-reset').innerHTML = (weekly ? 'New weekly quests in <b>' : 'New tasks in <b>') + fmtMs(weekly ? leftWeek() : leftDay()) + '</b>' + (weekly ? ' <span class="tk-hard">Harder goals, 5 to 8 tokens each</span>' : '');

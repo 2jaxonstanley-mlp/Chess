@@ -361,7 +361,7 @@
     updateInfo();
     clearSave();
     if (!revealed) {
-      if (LP.rewards) { LP.rewards.event('puzzle'); if (!missed) LP.rewards.event('cleanpuzzle'); }
+      if (LP.rewards) { LP.rewards.event('puzzle', { diff: cfg.diff }); if (!missed) LP.rewards.event('cleanpuzzle'); }
       stats.win();
       const st = stats.get();
       if (!missed && st.streak >= 3 && LP.board) {
