@@ -901,6 +901,10 @@
     setStatus('', 'dim', 'Thinking<span class="dots"><i>.</i><i>.</i><i>.</i></span>');
   }
 
+  // Bullet and Rapid only: how long the computer takes in total to answer a move, in ms [fastest, slowest] (its thinking time counts towards this).
+  // The weaker the computer, the slower it answers. Insane is quick but never instant, Godly takes 2 seconds.
+  const TIMED_WAIT = { dumb: [2400, 3600], easy: [5000, 8000], medium: [4000, 7000], hard: [4000, 7000], insane: [500, 500], godly: [2000, 2000] };
+
   function maybeAI() {
     const level = bots ? bots[game.turn] : (ai && !playBoth && game.turn === ai.color ? ai.level : null);
     if (!level || phase !== 'play' || paused) return;
@@ -914,7 +918,8 @@
     updateControls();
     thinkingStatus();
     const t0 = Date.now();
-    const minWait = clock ? 60 + Math.random() * 90 : bots ? 450 + Math.random() * 250 : 600 + Math.random() * 300;   // never quite instant, so you can follow the move
+    const tw = clock && !bots ? TIMED_WAIT[level] : null;
+    const minWait = tw ? tw[0] + Math.random() * (tw[1] - tw[0]) : clock ? 60 + Math.random() * 90 : bots ? 450 + Math.random() * 250 : 600 + Math.random() * 300;   // never quite instant, so you can follow the move
     const maxMs = clock ? Math.max(60, Math.min(2000, clock[game.turn] / 35)) : 0;   // under a clock the computer thinks for a small slice of the time it has left
     const seen = new Map();
     posKeys.slice(0, viewPly + 1).forEach((k) => seen.set(k, (seen.get(k) || 0) + 1));

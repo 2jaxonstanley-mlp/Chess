@@ -12,6 +12,13 @@
 
   /* ------------------------------------------------------------------ update log */
   const LOG = [
+    { id: 'u6', date: '2026-10-22', title: 'Analyze fixes and slower bots', items: [
+      'Fixed Analyze: the screen no longer resizes or jumps while you scroll, and nothing goes off the side of the screen',
+      'Analyze moves now sit in one bar you scroll sideways, and the bar follows the move you are on, instead of a long list down the page',
+      'Analyze has a new look: a pinned timeline and move bar, a clearer coach bubble, and buttons that stay in reach. On a computer the board is on the left and the coach on the right',
+      'Air Hockey: computers now react slower the weaker they are (Dumb and Easy the slowest). Insane and Godly keep their speed',
+      'Bullet and Rapid: computers now take longer to answer. Easy takes 5 to 8 seconds, Medium and Hard 4 to 7 seconds, Insane at least half a second and Godly about 2 seconds',
+    ] },
     { id: 'u5', date: '2026-10-22', title: 'Timed games, Air Hockey and Analyze', items: [
       'The menu now has sections you can open and close: Classic, Custom, Train, Rewards, Progress and More',
       'New timed games: Bullet (1 or 3 minutes, no extra time) and Rapid (5 or 10 minutes plus 2 seconds every move)',
