@@ -1146,6 +1146,8 @@ body[data-bd="tile"] .square.light, body[data-bd="tile"] .square.dark { image-re
 .piece[data-hat="mini"]::after { background-image: var(--sheet); background-position: var(--px, 0%) 50%; }
 .piece[data-hat="mini"][data-px="1"]::after { image-rendering: pixelated; }
 .piece[data-hat="mini"][data-pk="neon"]::after { background: var(--nc, #3df2ff); background-size: auto; clip-path: var(--shape); -webkit-clip-path: var(--shape); filter: drop-shadow(0 0 3px var(--nc, #3df2ff)); }
+/* Bunny Hat: a drawn picture (bunny-hat.png), square */
+.piece[data-hat="bunny"]::after, .pvh em[data-hat="bunny"] { --hat-img: url(bunny-hat.png); aspect-ratio: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
 .pvh em.hs { aspect-ratio: 1; background-size: 1200% 100%; background-repeat: no-repeat; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
 
 /* ---------- Analyze: saved games, progress, lesson ---------- */

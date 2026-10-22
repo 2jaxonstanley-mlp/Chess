@@ -12,6 +12,11 @@
 
   /* ------------------------------------------------------------------ update log */
   const LOG = [
+    { id: 'u7', date: '2026-10-22', title: 'Stickman pieces and the Bunny Hat', items: [
+      'New Stickman piece set (Rare), hand drawn: black stickmen for Black and white stickmen with an outline for White',
+      'New Bunny Hat accessory (Epic)',
+      'Removed the Cap, Blossom and Clover accessories (owners were refunded 5 tokens each)',
+    ] },
     { id: 'u6', date: '2026-10-22', title: 'Analyze fixes and slower bots', items: [
       'Fixed Analyze: the screen no longer resizes or jumps while you scroll, and nothing goes off the side of the screen',
       'Analyze moves now sit in one bar you scroll sideways, and the bar follows the move you are on, instead of a long list down the page',

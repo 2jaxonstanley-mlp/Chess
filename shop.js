@@ -39,12 +39,13 @@
   PIECES.push({ id: 'wood', name: 'Wooden', pk: 'sheet', sheet: 'pk-wood-hd.png', r: 'epic' });
   PIECES.push({ id: 'sandy', name: 'Sandy', pk: 'sheet', sheet: 'pk-sandy-hd.png', r: 'legendary' });
   PIECES.push({ id: 'silvergold', name: 'Silver & Gold', pk: 'sheet', sheet: 'pk-silvergold-hd.png', r: 'epic' });
+  PIECES.push({ id: 'stickman', name: 'Stickman', pk: 'sheet', sheet: 'pk-stickman-hd.png', r: 'rare' });
   PIECES.push({ id: 'neon', name: 'Neon', pk: 'neon', r: 'legendary' });
   const HATS = [
-    ['cap', 'Cap', 'common'], ['grad', 'Graduate', 'common'], ['sun', 'Sun Hat', 'common'], ['hard', 'Hard Hat', 'common'], ['party', 'Party Hat', 'common'],
-    ['top', 'Top Hat', 'rare'], ['helm', 'Helmet', 'rare'], ['blossom', 'Blossom', 'rare'], ['clover', 'Clover', 'rare'], ['cowboy', 'Cowboy Hat', 'rare'], ['antlers', 'Antlers', 'rare'],
+    ['grad', 'Graduate', 'common'], ['sun', 'Sun Hat', 'common'], ['hard', 'Hard Hat', 'common'], ['party', 'Party Hat', 'common'],
+    ['top', 'Top Hat', 'rare'], ['helm', 'Helmet', 'rare'], ['cowboy', 'Cowboy Hat', 'rare'], ['antlers', 'Antlers', 'rare'],
     ['crown', 'Crown', 'rare'], ['halo', 'Halo', 'rare'],
-    ['wizard', 'Wizard Hat', 'epic'], ['pirate', 'Pirate Hat', 'epic'], ['horns', 'Horns', 'epic'], ['pawnhat', 'Pawn Hat', 'epic'],
+    ['wizard', 'Wizard Hat', 'epic'], ['bunny', 'Bunny Hat', 'epic'], ['pirate', 'Pirate Hat', 'epic'], ['horns', 'Horns', 'epic'], ['pawnhat', 'Pawn Hat', 'epic'],
     ['mini', 'Mini Me', 'legendary'],
   ].map(([id, name, r]) => ({ id, name, r }));
   const RETRO = { id: '', name: 'Retro', pk: 'sheet', sheet: 'pk-retro-hd.png' };   // the main skin everyone starts with
@@ -72,14 +73,15 @@
   if (S.tokens == null) S.tokens = 5;                  // a welcome gift, enough for the first crate
   const saveS = () => write(SKEY, S);
   // boards that were taken out of the shop: owners get the price of a crate back for each one
-  const REMOVED = { 'board:sage': 'Sage', 'board:dusk': 'Dusk' };
+  const REMOVED = { 'board:sage': 'Sage board', 'board:dusk': 'Dusk board', 'hat:cap': 'Cap', 'hat:blossom': 'Blossom', 'hat:clover': 'Clover' };
   const refunded = [];
   Object.keys(REMOVED).forEach((k) => { if (S.owned[k]) { delete S.owned[k]; S.tokens += COST; refunded.push(REMOVED[k]); } });
+  ['p1', 'p2'].forEach((w) => { if (S.slots[w].hat && !(HATS.some((h) => h.id === S.slots[w].hat))) { S.slots[w].hat = ''; S.slots[w].hatOn = 'k'; } });
   // anything equipped that no longer exists (removed items) falls back to the default look
   const stillThere = (slot, id) => !id || (CRATES[slot] && CRATES[slot].items.some((x) => x.id === id));
   ['board', 'piece', 'hat'].forEach((k) => { if (!stillThere(k, S.equipped[k])) S.equipped[k] = ''; });
   saveS();
-  if (refunded.length) setTimeout(() => popup('The ' + refunded.join(' and ') + ' board' + (refunded.length > 1 ? 's were' : ' was') + ' removed. Refunded <b>' + refunded.length * COST + '</b> tokens'), 1800);
+  if (refunded.length) setTimeout(() => popup('Removed: ' + refunded.join(', ') + '. Refunded <b>' + refunded.length * COST + '</b> tokens'), 1800);
 
   /* ------------------------------------------------------------------ cosmetics */
   const find = (slot, id) => CRATES[slot].items.find((x) => x.id === id);
@@ -103,13 +105,14 @@
   const KIND = { 0x265A: 'k', 0x265B: 'q', 0x265C: 'r', 0x265D: 'b', 0x265E: 'n', 0x265F: 'p' };
   const SHEET_AT = { p: 0, b: 1, q: 2, k: 3, n: 4, r: 5 };
   /* Where each piece set has its "head" (centre x and top y, as % of the picture), so accessories can sit on any piece of any set */
-  const ANCH = {"silvergold":{"p":[50.0,34.8],"b":[49.0,17.6],"q":[49.6,16.0],"k":[50.0,2.7],"n":[52.7,23.0],"r":[49.6,25.0]},"sandy":{"p":[49.8,28.1],"b":[50.8,14.8],"q":[50.2,14.8],"k":[49.8,2.7],"n":[50.6,21.9],"r":[49.8,20.7]},"":{"p":[50.8,15.6],"b":[51.0,10.2],"q":[49.2,8.6],"k":[49.4,8.6],"n":[44.7,12.5],"r":[49.8,7.8]},"realism":{"p":[50.2,26.6],"b":[49.4,17.2],"q":[48.8,17.2],"k":[49.2,6.2],"n":[48.8,15.6],"r":[50.0,22.7]},"pixel":{"p":[49.8,23.4],"b":[49.4,6.2],"q":[49.4,7.0],"k":[49.8,6.2],"n":[52.3,7.0],"r":[49.4,13.3]},"pixelduo":{"p":[50.2,29.7],"b":[49.0,12.5],"q":[49.4,9.4],"k":[49.8,6.2],"n":[54.3,14.1],"r":[49.8,19.5]},"wood":{"p":[50.2,26.6],"b":[49.4,17.2],"q":[48.8,17.2],"k":[49.2,6.2],"n":[48.8,15.6],"r":[50.0,22.7]},"neon":{"p":[50.0,14.0],"b":[50.0,8.0],"q":[50.0,8.0],"k":[50.0,4.0],"n":[41.0,12.0],"r":[50.0,12.0]}};
+  const ANCH = {"silvergold":{"p":[50.0,34.8],"b":[49.0,17.6],"q":[49.6,16.0],"k":[50.0,2.7],"n":[52.7,23.0],"r":[49.6,25.0]},"sandy":{"p":[49.8,28.1],"b":[50.8,14.8],"q":[50.2,14.8],"k":[49.8,2.7],"n":[50.6,21.9],"r":[49.8,20.7]},"":{"p":[50.8,15.6],"b":[51.0,10.2],"q":[49.2,8.6],"k":[49.4,8.6],"n":[44.7,12.5],"r":[49.8,7.8]},"realism":{"p":[50.2,26.6],"b":[49.4,17.2],"q":[48.8,17.2],"k":[49.2,6.2],"n":[48.8,15.6],"r":[50.0,22.7]},"pixel":{"p":[49.8,23.4],"b":[49.4,6.2],"q":[49.4,7.0],"k":[49.8,6.2],"n":[52.3,7.0],"r":[49.4,13.3]},"pixelduo":{"p":[50.2,29.7],"b":[49.0,12.5],"q":[49.4,9.4],"k":[49.8,6.2],"n":[54.3,14.1],"r":[49.8,19.5]},"wood":{"p":[50.2,26.6],"b":[49.4,17.2],"q":[48.8,17.2],"k":[49.2,6.2],"n":[48.8,15.6],"r":[50.0,22.7]},"stickman":{"p":[53.1,18.0],"b":[47.3,12.7],"q":[46.4,8.2],"k":[46.9,15.4],"n":[46.9,14.5],"r":[50.0,20.7]},"neon":{"p":[50.0,14.0],"b":[50.0,8.0],"q":[50.0,8.0],"k":[50.0,4.0],"n":[41.0,12.0],"r":[50.0,12.0]}};
   const HAT_W = { k: 52, q: 52, b: 44, n: 50, r: 54, p: 46 };       // accessory width as % of the piece
   const SPRITE_HATS = { pawnhat: 1, mini: 1 };       // drawn from piece pictures rather than a flat SVG
   function hatPos(skinId, kind, hatId) {
     const a = (ANCH[skinId] || ANCH[''])[kind] || [50, 10];
     if (hatId === 'mini') return { x: 77, y: 57, w: 40 };                  // Mini Me stands in the bottom right corner of the square
     if (hatId === 'pawnhat') { const w = HAT_W[kind] * 0.62; return { x: a[0], y: Math.round((a[1] + (kind === 'k' ? 12 : 3) - 0.9 * w) * 10) / 10, w: Math.round(w * 10) / 10 }; }
+    if (hatId === 'bunny') { const w = Math.round(HAT_W[kind] * 0.82 * 10) / 10; return { x: a[0], y: Math.round((a[1] + (kind === 'k' || kind === 'q' ? 7 : 2) - 0.6 * w) * 10) / 10, w }; }   // square picture: the face rests on top of the head, ears stick up, the flaps hang down the sides
     const w = HAT_W[kind];
     return { x: a[0], y: Math.round((a[1] + (kind === 'k' ? 12 : 3) - 0.5625 * w) * 10) / 10, w };
   }
