@@ -30,6 +30,7 @@
   BOARDS.push({ id: 'marble', name: 'Marble', l: '#efece6', d: '#25262c', li: 'url(board-marble-light.png)', di: 'url(board-marble-dark.png)', smooth: true, r: 'epic' });
   BOARDS.push({ id: 'realism', name: 'Realism', l: '#cfcbc4', d: '#5b3a1c', li: 'url(board-real-light.png)', di: 'url(board-real-dark.png)', tile: true, r: 'epic' });
   BOARDS.push({ id: 'cosmic', name: 'Cosmic', l: '#dedcea', d: '#3a1c7a', li: 'url(board-cosmic-light.png)', di: 'url(board-cosmic-dark.png)', smooth: true, r: 'legendary' });
+  BOARDS.push({ id: 'doodle', name: 'Doodle', l: '#f3f1da', d: '#7ea35a', doodle: true, r: 'rare' });   // Classic colours, drawn by hand
   BOARDS.push({ id: 'neonboard', name: 'Neon Grid', l: '#1b1550', d: '#09071f', neon: true, r: 'legendary' });
   const PIECES = [];
   /* picture packs: one sprite sheet each (white P B Q K N R, then black P B Q K N R), and the CSS-drawn neon pack */
@@ -85,9 +86,48 @@
 
   /* ------------------------------------------------------------------ cosmetics */
   const find = (slot, id) => CRATES[slot].items.find((x) => x.id === id);
+
+  /* Doodle board: every square is a little pencil and crayon drawing, made once as an SVG picture. Six different light and six dark
+     squares are handed out in turn, so no two neighbours look alike, and each one has crooked, overshooting outline strokes. */
+  function doodleTile(dark, seed) {
+    let a = (seed * 2654435761 + (dark ? 977 : 31)) >>> 0;
+    const rnd = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const j = (n) => (rnd() - 0.5) * 2 * n, f = (n) => n.toFixed(1);
+    const stroke = (x1, y1, x2, y2, w) => `<path d="M${f(x1)} ${f(y1)}Q${f((x1 + x2) / 2 + j(2.4))} ${f((y1 + y2) / 2 + j(2.4))} ${f(x2)} ${f(y2)}" stroke-width="${f(w)}"/>`;
+    let fill = '', fill2 = '';
+    if (dark) {
+      const slope = 22 + rnd() * 16;
+      for (let y = 2; y < 100 + slope; y += 5.6 + rnd() * 2) fill += stroke(-4 + j(3), y + j(2), 104 + j(3), y - slope + j(5), 3.4 + rnd() * 1.8);
+      for (let y = 10; y < 100 + slope; y += 13 + rnd() * 6) fill2 += stroke(104 + j(3), y + j(2), -4 + j(3), y - slope * 0.7 + j(5), 2 + rnd());
+    } else {
+      for (let k = 0; k < 4; k++) fill += stroke(6 + j(8), 14 + k * 24 + j(6), 94 + j(8), 6 + k * 24 + j(8), 1.2 + rnd());
+    }
+    const m = 3.4;
+    let edge = '';
+    for (let pass = 0; pass < 2; pass++) {
+      const w = pass ? 1.3 : 2;
+      edge += stroke(m - 3 + j(2), m + j(1.4), 100 - m + 3 + j(2), m + j(1.4), w) + stroke(100 - m + j(1.4), m - 3 + j(2), 100 - m + j(1.4), 100 - m + 3 + j(2), w)
+        + stroke(100 - m + 3 + j(2), 100 - m + j(1.4), m - 3 + j(2), 100 - m + j(1.4), w) + stroke(m + j(1.4), 100 - m + 3 + j(2), m + j(1.4), m - 3 + j(2), w);
+    }
+    const grain = (id, k, off) => `<filter id="${id}" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="${k}" numOctaves="2" seed="${seed * 7 + off}" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2.4 1.9" result="m"/><feComposite in="SourceGraphic" in2="m" operator="in"/></filter>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none"><defs>${grain('g', 0.9, 1)}${grain('h', 0.55, 2)}</defs>`
+      + `<rect width="100" height="100" fill="${dark ? '#eef0dc' : '#f6f4e0'}"/>`
+      + (dark ? `<g fill="none" stroke="#7ea35a" stroke-linecap="round" opacity=".92" filter="url(#g)">${fill}</g><g fill="none" stroke="#557d3a" stroke-linecap="round" opacity=".55" filter="url(#g)">${fill2}</g>`
+        : `<g fill="none" stroke="#9a9684" stroke-linecap="round" opacity=".28" filter="url(#g)">${fill}</g>`)
+      + `<g fill="none" stroke="#2f2f33" stroke-linecap="round" opacity=".88" filter="url(#h)">${edge}</g></svg>`;
+    return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+  }
+  let doodleDone = false;
+  function ensureDoodle() {
+    if (doodleDone) return;
+    doodleDone = true;
+    const root = document.documentElement.style;
+    for (let k = 0; k < 6; k++) { root.setProperty('--dd-l' + k, doodleTile(false, k + 1)); root.setProperty('--dd-d' + k, doodleTile(true, k + 1)); }
+  }
   function apply() {
     const root = document.documentElement.style;
     const b = find('board', S.equipped.board), p = find('piece', S.slots.p1.piece) || RETRO;
+    if (b && b.doodle) ensureDoodle();
     root.setProperty('--light-sq', b ? b.l : '#eeeed2');
     root.setProperty('--dark-sq', b ? b.d : '#769656');
     root.setProperty('--light-img', b && b.li ? b.li : 'none');
@@ -95,10 +135,11 @@
     root.setProperty('--pw', p && p.w ? p.w : '#ffffff');
     root.setProperty('--pb', p && p.b ? p.b : '#1a1a1a');
     root.setProperty('--sheet', p && p.sheet ? 'url(' + p.sheet + ')' : 'none');
-    document.body.dataset.bd = b && b.neon ? 'neon' : b && (b.wood || b.smooth) ? 'wood' : b && b.tile ? 'tile' : '';
+    document.body.dataset.bd = b && b.neon ? 'neon' : b && b.doodle ? 'doodle' : b && (b.wood || b.smooth) ? 'wood' : b && b.tile ? 'tile' : '';
     document.body.dataset.pack = '1';
     PK = p && p.pk ? p.pk : '';
     PX = p && p.px ? '1' : '';
+    if (LP.prefs && LP.prefs.look) LP.prefs.look();     // custom board colours from Settings win over the equipped board
     tagKings();
   }
   let PK = '', PX = '';
@@ -327,7 +368,8 @@
   function preview(slot, it) {
     if (slot === 'board') {
       const st = `--a:${it.l};--b:${it.d}` + (it.li ? `;--ai:${it.li};--bi:${it.di}` : '');
-      return `<span class="pv-board${it.li ? ' tex' : ''}${it.neon ? ' neon' : ''}${it.wood || it.smooth ? ' smooth' : ''}${it.tile ? ' tile' : ''}" style="${st}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
+      if (it.doodle) ensureDoodle();
+      return `<span class="pv-board${it.li ? ' tex' : ''}${it.doodle ? ' doodle' : ''}${it.neon ? ' neon' : ''}${it.wood || it.smooth ? ' smooth' : ''}${it.tile ? ' tile' : ''}" style="${st}"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
     }
     if (slot === 'piece') {
       if (it.pk === 'sheet') return `<span class="pv-king pv-sheet" style="--sheet:url(${it.sheet})"><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${3 / 11 * 100}%"></b><b data-pk="sheet" ${it.px ? 'data-px="1"' : ''} style="--px:${9 / 11 * 100}%"></b></span>`;
@@ -502,6 +544,7 @@
   $('#tk-shop').addEventListener('click', () => openPage('shop'));
 
   LP.rewards = { event, addTokens, tokens: () => S.tokens };
+  LP.applyLook = apply;
   LP.hatDebug = { hatPos, HATS, PIECES, skinOf };
   apply();
   refresh();

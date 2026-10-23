@@ -68,6 +68,15 @@
   const movesScroll = $('#moves-scroll');
   const moveListEl = $('#move-list');
 
+  /* sounds, animations and rules that come from Settings (prefs.js loads later, so every call checks it is there) */
+  const fx = (name) => { try { if (window.LP && window.LP.fx) window.LP.fx.play(name); } catch (e) { /* ignore */ } };
+  const animOn = () => !(window.LP && window.LP.prefs && !window.LP.prefs.get('anim'));
+  const guardSlots = (next) => (window.LP && window.LP.saves ? window.LP.saves.guard(next) : next());
+  let startFen = null;         // a custom starting position (FEN) from the position editor, or null for the normal start
+  let moveAt = [];             // when each move was played, in ms since the first move (timed replays)
+  let moveClk = [];            // both clocks after each move (timed games)
+  let playStart = 0;
+
   const FILLED = { 1: '♟', 2: '♞', 3: '♝', 4: '♜', 5: '♛', 6: '♚' };
   const glyph = (p) => FILLED[p & 7] + '︎';
   const isWhite = (p) => (p & 24) === WHITE;
@@ -92,15 +101,65 @@
     };
   })();
 
-  /* the game in progress, kept so the menu can offer "Continue playing" (one slot, whichever mode was played last) */
+  /* Games in progress, kept so the menu can offer "Continue playing". Up to MAX_SLOTS games are saved at once; each running game keeps
+     writing into its own slot (cur) and the slot is removed when the game ends. A slot is { id, name?, kind, date, ...the game }. */
+  const MAX_SLOTS = 5;
   const session = (() => {
-    const KEY = 'localPieces.session';
-    let mem = null;
-    return {
-      get() { try { return JSON.parse(localStorage.getItem(KEY)) || mem; } catch (e) { return mem; } },
-      set(v) { mem = v; try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) { /* private mode etc. */ } },
-      clear() { mem = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } },
+    const KEY = 'localPieces.slots', OLD = 'localPieces.session';
+    let mem = null, cur = null;
+    const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const write = (v) => { mem = v; try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) { /* private mode etc. */ } };
+    function all() {
+      let v = null;
+      try { v = JSON.parse(localStorage.getItem(KEY)); } catch (e) { v = null; }
+      if (!Array.isArray(v)) v = mem;
+      if (!Array.isArray(v)) {   // first run of the new version: bring over the single save the old version kept
+        v = [];
+        try { const o = JSON.parse(localStorage.getItem(OLD)); if (o && o.kind) { o.id = o.id || newId(); v.push(o); } } catch (e) { /* none */ }
+        write(v);
+        try { localStorage.removeItem(OLD); } catch (e) { /* ignore */ }
+      }
+      return v;
+    }
+    const api = {
+      MAX: MAX_SLOTS,
+      all() { return all().slice().sort((a, b) => (b.date || 0) - (a.date || 0)); },
+      count() { return all().length; },
+      full() { return all().length >= MAX_SLOTS; },
+      oldest() { return api.all().filter((x) => x.id !== cur).pop() || null; },
+      find(id) { return all().find((x) => x.id === id) || null; },
+      /** The slot the running game writes into (or the most recent one). */
+      get() { return (cur && api.find(cur)) || api.all()[0] || null; },
+      /** Save the running game. Starts a new slot the first time; when all slots are taken the oldest one is replaced. */
+      set(v) {
+        const list = all().slice();
+        if (!cur) cur = newId();
+        const i = list.findIndex((x) => x.id === cur);
+        const keep = i >= 0 ? list[i].name : undefined;
+        const slot = Object.assign({}, v, { id: cur });
+        if (keep) slot.name = keep;
+        if (i >= 0) list[i] = slot;
+        else {
+          list.push(slot);
+          while (list.length > MAX_SLOTS) {
+            let o = -1;
+            list.forEach((x, k) => { if (x.id !== cur && (o < 0 || (x.date || 0) < (list[o].date || 0))) o = k; });
+            if (o < 0) break;
+            list.splice(o, 1);
+          }
+        }
+        write(list);
+      },
+      /** The running game is over (or was thrown away): free its slot. */
+      clear() { if (cur) write(all().filter((x) => x.id !== cur)); cur = null; },
+      /** A new game is starting: it gets a slot of its own when it first saves. */
+      fresh() { cur = null; },
+      /** A saved game was opened: keep saving into the same slot. */
+      use(id) { cur = id; },
+      remove(id) { write(all().filter((x) => x.id !== id)); if (cur === id) cur = null; },
+      rename(id, name) { write(all().map((x) => (x.id === id ? Object.assign({}, x, { name: String(name || '').trim().slice(0, 24) || undefined }) : x))); },
     };
+    return api;
   })();
 
   function showPage(id) {
@@ -284,6 +343,7 @@
 
   /* slide the piece that now sits on dst as if it came from src */
   function slide(src, dst) {
+    if (!animOn()) return;
     const de = squareEls[dst], se = squareEls[src];
     const pe = de && de._piece;
     if (!pe || !se) return;
@@ -375,15 +435,28 @@
     const t = Math.ceil(ms / 1000), m = Math.floor(t / 60), sec = t % 60;
     return m + ':' + String(sec).padStart(2, '0');
   };
+  /** The two clocks while a timed game is being replayed: what was left after the last move, minus the time since then for the side to move. */
+  function replayClocks() {
+    if (phase !== 'replay' || !replay || !replay.timed) return null;
+    const d = replay.data, base = d.clock.base, i = replay.idx;
+    const c = i && d.clk && d.clk[i - 1] ? d.clk[i - 1] : [base, base];
+    const out = { [WHITE]: c[0], [BLACK]: c[1] };
+    if (i >= 1 && i < d.moves.length + 1) {
+      const side = G.turn;
+      if (!(i === d.moves.length && d.winner !== null && !/time/i.test(d.result || ''))) out[side] = Math.max(0, out[side] - Math.max(0, replay.t - d.at[i - 1]));
+    }
+    return out;
+  }
   function updateClocks() {
     const topColor = flipped ? WHITE : BLACK, botColor = flipped ? BLACK : WHITE;
+    const rc = replayClocks(), cl = rc || clock;
     [['top', topColor], ['bottom', botColor]].forEach(([p, c]) => {
       const el = $('#' + p + '-clock');
-      el.classList.toggle('hidden', !clock);
-      if (!clock) return;
-      el.textContent = fmtClock(clock[c]);
-      el.classList.toggle('low', clock[c] < 10000);
-      el.classList.toggle('run', phase === 'play' && sans.length > 0 && G.turn === c);
+      el.classList.toggle('hidden', !cl);
+      if (!cl) return;
+      el.textContent = fmtClock(cl[c]);
+      el.classList.toggle('low', cl[c] < 10000);
+      el.classList.toggle('run', rc ? replay.idx > 0 && G.turn === c : phase === 'play' && sans.length > 0 && G.turn === c);
     });
   }
   function clockTick() {
@@ -532,7 +605,8 @@
     b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
 
-  function chooseMode(m) {
+  function chooseMode(m) { startFen = null; guardSlots(() => chooseMode2(m)); }
+  function chooseMode2(m) {
     if (m === 'tas') { pendingTc = null; askDifficulty(m); return; }   // TAS is single player only
     if (m === 'bullet' || m === 'rapid') { askClock(m); return; }
     pendingTc = null;
@@ -544,8 +618,8 @@
     const opts2 = m === 'bullet' ? [[60, 0, '1 minute', 'Each side gets 1 minute. No extra time.'], [180, 0, '3 minutes', 'Each side gets 3 minutes. No extra time.']]
       : [[300, 2, '5 minutes + 2', 'Each side gets 5 minutes and 2 seconds back every move.'], [600, 2, '10 minutes + 2', 'Each side gets 10 minutes and 2 seconds back every move.']];
     openSheet(`<h2>${m === 'bullet' ? 'Bullet' : 'Rapid'}<span class="sub">Pick the time for each side.</span></h2>
-      <div class="stack">${opts2.map((o, i) => `<button class="btn big tc" data-i="${i}"><b>${o[2]}</b><small>${o[3]}</small></button>`).join('')}<button class="btn" id="tc-x">Cancel</button></div>`, true);
-    sheet.querySelectorAll('.tc').forEach((b) => { b.onclick = () => { const o = opts2[+b.dataset.i]; pendingTc = { base: o[0], inc: o[1] }; askPlayers(m, true); }; });
+      <div class="stack">${opts2.map((o, i) => `<button class="btn big tc" data-i="${i}"><b>${o[2]}</b>${lastOf('tc:' + m) === i ? LAST_TAG : ''}<small>${o[3]}</small></button>`).join('')}<button class="btn" id="tc-x">Cancel</button></div>`, true);
+    sheet.querySelectorAll('.tc').forEach((b) => { b.onclick = () => { remember('tc:' + m, +b.dataset.i); const o = opts2[+b.dataset.i]; pendingTc = { base: o[0], inc: o[1] }; askPlayers(m, true); }; });
     $('#tc-x').onclick = closeSheet;
   }
 
@@ -553,13 +627,13 @@
     openSheet(`<h2>How many players?</h2>
       <div class="stack">
         ${noBots ? '' : '<button class="btn big" id="pl-0">0 players</button>'}
-        <button class="btn big" id="pl-1">1 player</button>
-        <button class="btn big" id="pl-2">2 players</button>
+        <button class="btn big" id="pl-1">1 player${lastOf('players') === 1 ? LAST_TAG : ''}</button>
+        <button class="btn big" id="pl-2">2 players${lastOf('players') === 2 ? LAST_TAG : ''}</button>
         <button class="btn" id="pl-x">Cancel</button>
       </div>`, true);
     if (!noBots) $('#pl-0').onclick = () => askBot(m, WHITE, null);
-    $('#pl-1').onclick = () => askDifficulty(m);
-    $('#pl-2').onclick = () => { closeSheet(); startGame(m, false, null); };
+    $('#pl-1').onclick = () => { remember('players', 1); askDifficulty(m); };
+    $('#pl-2').onclick = () => { remember('players', 2); closeSheet(); startGame(m, false, null); };
     $('#pl-x').onclick = closeSheet;
   }
 
@@ -599,17 +673,21 @@
     { id: 'godly',  ic: '2', col: '#b48cf2', n: 5, tag: 'Expert',       sub: 'Looks far ahead and varies its strong moves.' },
     { id: 'insane', ic: '3', col: '#ff6b6b', n: 5, tag: 'Maximum',      sub: 'Plays book lines and hunts for brilliant moves.' },
   ];
+  const lastOf = (k) => (window.LP && window.LP.prefs ? window.LP.prefs.last(k) : undefined);
+  const remember = (k, v) => { try { if (window.LP && window.LP.prefs) window.LP.prefs.remember(k, v); } catch (e) { /* ignore */ } };
+  const LAST_TAG = ' <em class="last-tag">Last used</em>';
   function levelMenu(title, sub, cb) {
+    const lastLv = lastOf('level');
     openSheet(`<h2>${esc(title)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h2>
       <div class="lv-list">
         ${LEVEL_INFO.map((l) => `<button class="lv-card" data-lv="${l.id}" style="--lc:${l.col}">
           <span class="lv-ic" aria-hidden="true"><i class="ic-sp" style="--i:${l.ic}"></i></span>
-          <span class="lv-text"><span class="lv-top"><b>${LEVEL_LABEL[l.id]}</b><em>${l.tag}</em></span><span class="lv-sub">${l.sub}</span>
+          <span class="lv-text"><span class="lv-top"><b>${LEVEL_LABEL[l.id]}</b><em>${l.tag}</em>${l.id === lastLv ? LAST_TAG : ''}</span><span class="lv-sub">${l.sub}</span>
             <span class="lv-meter" aria-hidden="true">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= l.n ? 'on' : ''}"></i>`).join('')}</span></span>
         </button>`).join('')}
       </div>
       <button class="btn wide" id="df-x">Cancel</button>`, true);
-    sheet.querySelectorAll('[data-lv]').forEach((b) => { b.onclick = () => cb(b.dataset.lv); });
+    sheet.querySelectorAll('[data-lv]').forEach((b) => { b.onclick = () => { remember('level', b.dataset.lv); cb(b.dataset.lv); }; });
     $('#df-x').onclick = closeSheet;
   }
 
@@ -623,7 +701,10 @@
     mode = m;
     game.mode = engineMode(m);
     game.reset();
+    if (startFen) { if (game.loadFen(startFen)) startFen = null; else game.problems(); }
     G = game;
+    session.fresh();
+    moveAt = []; moveClk = []; playStart = 0;
     viewNames = names;
     sans = [];
     fullMoves = [];
@@ -654,7 +735,7 @@
     sidesCtx = { w: 'p1', b: 'p2' };
     coverEl.classList.add('hidden');
     document.documentElement.classList.toggle('is-tas', m === 'tas');
-    $('#mode-title').textContent = MODE_LABEL[m];
+    $('#mode-title').textContent = startFen ? 'Custom position' : MODE_LABEL[m];
   }
 
   function startGame(m, keepNames, level) {
@@ -684,13 +765,18 @@
       opts: { autoFlip: opts.autoFlip, hints: opts.hints, ratings: opts.ratings }, ratings: ratings.slice(), secrets: initialSecrets,
       moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
       clock: clock ? { w: clock[WHITE], b: clock[BLACK], inc: clock.inc, base: clock.base } : null,
+      fen: startFen, at: moveAt.slice(), clk: moveClk.slice(),
     });
   }
-  function clearSession() { const x = session.get(); if (x && x.kind === 'chess') session.clear(); }
+  function clearSession() { session.clear(); }
 
   function resumeChess(d) {
     closeSheet();
+    startFen = d.fen || null;
     freshGame(d.mode);
+    session.use(d.id);
+    moveAt = (d.at || []).slice(); moveClk = (d.clk || []).slice();
+    playStart = Date.now() - (moveAt.length ? moveAt[moveAt.length - 1] : 0);
     names = { [WHITE]: d.names[WHITE], [BLACK]: d.names[BLACK] };
     viewNames = names;
     ai = d.ai || null;
@@ -1006,6 +1092,7 @@
       // TAS: playing from an earlier point throws away the old future (redo is off until you undo again)
       sans.length = viewPly;
       fullMoves.length = viewPly;
+      moveAt.length = Math.min(moveAt.length, viewPly); moveClk.length = Math.min(moveClk.length, viewPly);
       ratings.length = viewPly;
       posKeys.length = viewPly + 1;
       over = null;
@@ -1027,6 +1114,7 @@
     viewPly = sans.length;
     ratings[fullMoves.length - 1] = bookMove ? 'book' : null;
     if (clock && !bots) clock[mover] += clock.inc;
+    { const nowT = Date.now(); if (!playStart) playStart = nowT; moveAt.push(nowT - playStart); moveClk.push(clock ? [Math.round(clock[WHITE]), Math.round(clock[BLACK])] : null); }
     lastTick = 0;
     posKeys.push(positionKey(game));
     selected = -1;
@@ -1037,6 +1125,7 @@
     const h = game.history[game.history.length - 1];
     if (h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, sans.length);
+    fx(!canMove && check ? 'win' : check ? 'check' : h.captured || h.epCaptured ? 'capture' : m.flags === 4 || m.flags === 8 ? 'castle' : 'move');
 
     let end = null;
     if (!canMove) end = check ? 'mate' : 'stalemate';
@@ -1083,11 +1172,11 @@
     over = winner != null
       ? { title: nameOf(winner) + ' wins', sub: type === 'mate' ? 'Checkmate' : type === 'resign' ? nameOf(loser) + ' forfeited' : nameOf(loser) + ' ran out of time', result: winner === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
-    const lb = type === 'mate' ? recordWin(mover) : null;
+    const lb = type === 'mate' && !startFen ? recordWin(mover) : null;
     const Pf = window.LP.profile;
-    if (Pf && ai && !bots && !playBoth && Pf.MODES[mode]) over.elo = Pf.record(mode, ai.level, winner != null ? (winner === ai.human ? 1 : 0) : 0.5);
+    if (Pf && ai && !bots && !playBoth && !startFen && Pf.MODES[mode]) over.elo = Pf.record(mode, ai.level, winner != null ? (winner === ai.human ? 1 : 0) : 0.5);
     if (lb && lb.rank) over.note = lb.isBest ? 'New best: checkmate in ' + lb.entry.value + ' moves!' : '#' + lb.rank + ' on the leaderboard';
-    if (!bots && !isTas() && window.LP.rewards) {
+    if (!bots && !isTas() && !startFen && window.LP.rewards) {
       const q = {};
       ratings.forEach((r, i) => { if (r && (!ai || (i % 2 === 0) === (ai.human === WHITE))) q[r] = (q[r] || 0) + 1; });
       window.LP.rewards.event('game', {
@@ -1097,6 +1186,8 @@
     }
     updateControls();
     overStatus();
+    fx(winner == null ? 'draw' : ai && !bots && winner !== ai.human ? 'lose' : 'win');
+    if (window.LP.history && fullMoves.length) { try { const d = buildReplayData(); window.LP.history.add({ kind: 'chess', id: d.id, mode: d.mode2 || mode, modeLabel: startFen ? 'Custom position' : MODE_LABEL[mode], names: d.names, level: d.level, bots: !!bots, human: d.human, result: d.result, winner: d.winner, dur: Math.round((Date.now() - (playStart || Date.now())) / 1000) || 0, moves: Math.ceil(fullMoves.length / 2), timed: !!clock, payload: d }); } catch (e) { /* history is best effort */ } }
     setTimeout(() => {
       if (phase !== 'over' || !sheetBg.classList.contains('hidden')) return;
       if (lb && lb.isBest && window.LP.board) window.LP.board.askName(lb.entry, () => { if (phase === 'over') showOverSheet(); }, 'Your fastest win so far. Choose the name for the leaderboard.');
@@ -1135,8 +1226,10 @@
   }
 
   function overStatus() {
-    setStatus('', '', `${esc(over.title)} · ${esc(over.sub)} <button id="st-opts">Options</button>`);
+    const quick = !window.LP.prefs || window.LP.prefs.get('quick');
+    setStatus('', '', `${esc(over.title)} · ${esc(over.sub)} <button id="st-opts">Options</button>${quick ? ' <button id="st-again">Rematch</button>' : ''}`);
     $('#st-opts').onclick = () => showOverSheet();
+    if (quick) $('#st-again').onclick = () => startGame(mode, true);
   }
 
   function showOverSheet() {
@@ -1144,7 +1237,7 @@
     openSheet(`<h2>${esc(over.title)}<span class="sub">${esc(over.sub)}</span></h2>
       <div class="stack">
         ${tas ? '' : '<button class="btn primary" id="ov-analyze">Analyze game</button>'}
-        <div class="row"><button class="btn" id="ov-new">New game</button><button class="btn" id="ov-close">Close</button></div>
+        <div class="row"><button class="btn" id="ov-new">Rematch</button><button class="btn" id="ov-close">Close</button></div>
       </div>
       ${over.elo ? `<p class="elo-line ${over.elo.delta >= 0 ? 'up' : 'down'}"><span>${MODE_LABEL[mode]} rating</span><b>${over.elo.after}</b><em>${over.elo.delta >= 0 ? '+' : '\u2212'}${Math.abs(over.elo.delta)}</em></p>` : ''}
       <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${tas ? 'TAS is a sandbox, so it is not saved or analysed.' : 'Analyzing saves the game. You can open it again any time from Analyze in the Train section.'}</p>`);
@@ -1180,6 +1273,9 @@
       resigned: resigned == null ? null : (resigned === WHITE ? 'w' : 'b'),
       winner: over && over.result === '1-0' ? 'w' : over && over.result === '0-1' ? 'b' : null,
       clock: clock ? { base: clock.base, inc: clock.inc } : null,
+      fen: startFen || null,
+      at: clock ? moveAt.slice() : null, clk: clock ? moveClk.slice() : null,
+      endAt: clock && playStart ? Date.now() - playStart : null,
     };
   }
 
@@ -1294,7 +1390,7 @@
 
   $('#reset-btn').addEventListener('click', () => {
     if (phase === 'play' && sans.length) {
-      confirmSheet('Start a new game?', 'New game', () => startGame(mode, true));
+      confirmSheet('Start a new game?', 'New game', () => { session.clear(); startGame(mode, true); });
     } else {
       startGame(mode, true);
     }
@@ -1308,13 +1404,16 @@
 
   /* ----------------------------------------------------------------- replay */
   const SPEEDS = [1, 2, 4, 0.5];
+  const TIMED_SPEEDS = [1, 2, 4, 8, 16, 0.5];   // a timed replay runs on the real clock, so it can go much faster
 
   function startReplay(data, from) {
     pauseReplay();
     closeSheet();
-    replay = { data, idx: 0, speed: 1, timer: null, from, prevFlipped: flipped };
+    const timed = !!(data.clock && data.at && data.at.length === data.moves.length && data.moves.length);
+    replay = { data, idx: 0, speed: 1, timer: null, from, prevFlipped: flipped, timed, t: 0, total: timed ? Math.max(1000, data.endAt || data.at[data.at.length - 1] + 1000) : 0 };
     rgame.mode = data.mode;
     rgame.reset();
+    if (data.fen) rgame.loadFen(data.fen);
     rgame.secretQueen = { [WHITE]: data.secrets.w, [BLACK]: data.secrets.b };
     G = rgame;
     viewNames = { [WHITE]: data.names.w, [BLACK]: data.names.b };
@@ -1325,7 +1424,8 @@
     flipped = false;
     coverEl.classList.add('hidden');
     $('#mode-title').textContent = data.tas ? 'TAS replay' : 'Replay';
-    $('#scrub').max = data.moves.length;
+    $('#scrub').max = timed ? replay.total : data.moves.length;
+    $('#scrub').step = timed ? 50 : 1;
     $('#scrub').value = 0;
     $('#rp-speed').textContent = '1x';
     showPage('game');
@@ -1341,21 +1441,37 @@
     if (idx === 0) { setStatus('Start position', 'dim'); return; }
     if (idx === data.moves.length && data.result) { setStatus(data.result); return; }
     const check = G.inCheck(G.turn);
-    setStatus(`Move ${Math.ceil(idx / 2)} · ${fmt(data.sans[idx - 1])}`, check ? 'check' : '');
+    setStatus(`Move ${Math.ceil(idx / 2)} · ${fmt(data.sans[idx - 1])}${replay.timed ? ' · ' + mmss(replay.t) : ''}`, check ? 'check' : '');
   }
+  const mmss = (ms) => { const t = Math.floor(ms / 1000); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 
   function syncReplayUI() {
     const { data, idx, timer } = replay;
-    $('#scrub').value = idx;
+    $('#scrub').value = replay.timed ? replay.t : idx;
     const play = $('#rp-play');
-    play.textContent = timer ? 'Pause' : idx >= data.moves.length ? 'Restart' : 'Play';
+    play.textContent = timer ? 'Pause' : (replay.timed ? replay.t >= replay.total : idx >= data.moves.length) ? 'Restart' : 'Play';
+    const tl = $('#rp-time');
+    if (tl) { tl.classList.toggle('hidden', !replay.timed); tl.textContent = replay.timed ? mmss(replay.t) + ' / ' + mmss(replay.total) : ''; }
   }
 
-  function goTo(n, anim) {
+  /** Timed replays: jump to a moment on the timeline, showing every move played up to then. */
+  function seekT(t, anim) {
+    const d = replay.data;
+    t = Math.max(0, Math.min(replay.total, t));
+    replay.t = t;
+    let n = 0;
+    while (n < d.at.length && d.at[n] <= t) n++;
+    if (n !== replay.idx) goTo(n, anim && Math.abs(n - replay.idx) === 1, true);
+    else { renderBars(); replayStatus(); }
+    syncReplayUI();
+  }
+
+  function goTo(n, anim, keepT) {
     const { data } = replay;
     n = Math.max(0, Math.min(data.moves.length, n));
     const cur = replay.idx;
-    if (n === cur) return;
+    if (replay.timed && !keepT) replay.t = n ? data.at[n - 1] : 0;
+    if (n === cur) { if (replay.timed) { renderBars(); syncReplayUI(); } return; }
     let animated = null, reverse = false;
     while (replay.idx < n) {
       const m = data.moves[replay.idx];
@@ -1382,6 +1498,13 @@
 
   function tick() {
     if (!replay || !replay.timer) return;
+    if (replay.timed) {
+      replay.t += 50 * replay.speed;
+      if (replay.t >= replay.total) { seekT(replay.total, false); pauseReplay(); return; }
+      seekT(replay.t, true);
+      replay.timer = setTimeout(tick, 50);
+      return;
+    }
     if (replay.idx >= replay.data.moves.length) { pauseReplay(); return; }
     goTo(replay.idx + 1, true);
     replay.timer = setTimeout(tick, 950 / replay.speed);
@@ -1390,8 +1513,8 @@
 
   function playReplay() {
     if (!replay) return;
-    if (replay.idx >= replay.data.moves.length) goTo(0, false);
-    replay.timer = setTimeout(tick, 400);
+    if (replay.timed ? replay.t >= replay.total : replay.idx >= replay.data.moves.length) { replay.t = 0; goTo(0, false); }
+    replay.timer = setTimeout(tick, replay.timed ? 50 : 400);
     syncReplayUI();
   }
 
@@ -1418,6 +1541,10 @@
       renderMoves(sans, sans.length);
       overStatus();
       showOverSheet();
+    } else if (from === 'history' && window.LP.history) {
+      phase = 'menu';
+      updateControls();
+      window.LP.history.show();
     } else {
       phase = 'menu';
       renderSavedList();
@@ -1433,10 +1560,11 @@
   $('#rp-end').addEventListener('click', () => { pauseReplay(); goTo(replay.data.moves.length, false); });
   $('#rp-exit').addEventListener('click', exitReplay);
   $('#rp-speed').addEventListener('click', () => {
-    replay.speed = SPEEDS[(SPEEDS.indexOf(replay.speed) + 1) % SPEEDS.length];
+    const list = replay.timed ? TIMED_SPEEDS : SPEEDS;
+    replay.speed = list[(list.indexOf(replay.speed) + 1) % list.length];
     $('#rp-speed').textContent = replay.speed + 'x';
   });
-  $('#scrub').addEventListener('input', (e) => { pauseReplay(); goTo(+e.target.value, false); });
+  $('#scrub').addEventListener('input', (e) => { pauseReplay(); if (replay.timed) seekT(+e.target.value, false); else goTo(+e.target.value, false); });
 
   document.addEventListener('keydown', (e) => {
     if (phase !== 'replay' || !sheetBg.classList.contains('hidden')) return;
@@ -1446,35 +1574,24 @@
   });
 
   /* ------------------------------------------------------------ saved list */
-  function renderContinue() {
-    const s = session.get();
-    const b = $('#continue-btn');
-    let desc = '';
-    try {
-      if (s && s.kind === 'chess') desc = MODE_LABEL[s.mode] + ' \u00b7 ' + Math.ceil(s.moves.length / 2) + ' moves played';
-      else if (s && s.kind === 'rush' && window.Rush && window.Rush.describe) desc = window.Rush.describe(s);
-      else if (s && s.kind === 'puzzle' && window.Puzzle) desc = window.Puzzle.describe(s);
-    } catch (e) { desc = ''; }
-    b.classList.toggle('hidden', !desc);
-    $('#continue-desc').textContent = desc;
-  }
-
-  $('#continue-btn').addEventListener('click', () => {
-    const s = session.get();
-    if (!s) return;
-    if (s.kind === 'chess') resumeChess(s);
-    else if (s.kind === 'rush' && window.Rush) window.Rush.resume(s);
-    else if (s.kind === 'puzzle' && window.Puzzle) window.Puzzle.resume(s);
-  });
-
   function renderSavedList() {
-    renderContinue();
+    if (window.LP && window.LP.saves) window.LP.saves.render();
     if (window.LP && window.LP.analyze && window.LP.analyze.refreshMenu) window.LP.analyze.refreshMenu();
+    if (window.LP && window.LP.history && window.LP.history.refreshMenu) window.LP.history.refreshMenu();
   }
 
   renderSavedList();
   buildBoard();
-  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session, applySettings, sides: () => sidesCtx, setSides: (m) => { sidesCtx = m || { w: 'p1', b: 'p2' }; }, fmt };
+  /** Start a game from a custom position (the editor): players = 1 (against the computer) or 2. */
+  function playPosition(fen, players) {
+    const probe = new Chess();
+    if (probe.loadFen(fen)) return;
+    startFen = fen;
+    pendingTc = null;
+    guardSlots(() => { if (players === 2) { startGame('basic', false, null); } else askDifficulty('basic'); });
+  }
+  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session, applySettings, sides: () => sidesCtx, setSides: (m) => { sidesCtx = m || { w: 'p1', b: 'p2' }; }, fmt,
+    resumeChess, startReplay, playPosition, MODE_LABEL, confirmSheet, MAX_SLOTS };
   // Profile loads after app.js; pick up saved settings once it is ready
   setTimeout(loadOptsFromSettings, 0);
 })();

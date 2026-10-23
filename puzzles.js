@@ -166,6 +166,91 @@
   }
   function clearSave() { const s = LP.session.get(); if (s && s.kind === 'puzzle') LP.session.clear(); }
 
+  /* ------------------------------------------------------------- favourites and explanations */
+  const FAVKEY = 'localPieces.puzzleFavs';
+  const MAXFAV = 40;
+  const NAMES = { 1: 'pawn', 2: 'knight', 3: 'bishop', 4: 'rook', 5: 'queen', 6: 'king' };
+  const sqName = (s) => 'abcdefgh'[s & 7] + ((s >> 4) + 1);
+  const favs = {
+    all() { try { const l = JSON.parse(localStorage.getItem(FAVKEY)); return Array.isArray(l) ? l : []; } catch (e) { return []; } },
+    put(l) { try { localStorage.setItem(FAVKEY, JSON.stringify(l.slice(0, MAXFAV))); return true; } catch (e) { return false; } },
+    idOf(p) { const t = p.type + JSON.stringify(p.pos); let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return p.type + ':' + (h >>> 0).toString(36); },
+    has(p) { const id = favs.idOf(p); return favs.all().some((f) => f.id === id); },
+    toggle(p, c) {
+      const id = favs.idOf(p), l = favs.all(), i = l.findIndex((f) => f.id === id);
+      if (i >= 0) { l.splice(i, 1); favs.put(l); return false; }
+      if (l.length >= MAXFAV) l.pop();
+      l.unshift({ id, type: p.type, diff: (c && c.diff) || p.diff, P: p, date: Date.now() });
+      return favs.put(l);
+    },
+  };
+  /** Plain-English reasons for the solution, built from the position and the solution line. */
+  function explainText(p) {
+    try {
+      const g0 = PG.fromPos(p.pos);
+      const mv = (e) => findMove(g0, e);
+      if (p.type === 'best' || p.type === 'sac') {
+        const m = mv(p.good[0]);
+        const pc = NAMES[g0.board[m.from] & 7] || 'piece', cap = g0.board[m.to] ? NAMES[g0.board[m.to] & 7] : '';
+        const chk = /[+#]$/.test(p.san);
+        let t = (cap ? 'The ' + pc + ' takes the ' + cap + ' on ' + sqName(m.to) : 'The ' + pc + ' moves to ' + sqName(m.to)) + (chk ? ' with check' : '') + '. ';
+        t += p.explain + ' ';
+        if (p.type === 'sac') t += 'It gives up about ' + (p.loss != null ? Math.round(p.loss) : 'some') + ' point(s) at first, so a quick glance at safe moves can mislead you. Always check forcing moves: checks, captures and threats.';
+        else t += 'Habit to build: look at every check, capture and threat for both sides, and ask what each one achieves.';
+        return { title: 'Best move: ' + p.san, text: t };
+      }
+      if (p.type === 'mate') {
+        const line = [];
+        const m1 = mv(p.sol[0]);
+        line.push(PG.sanOf(g0, m1));
+        let wm = 1;
+        g0.makeMove(m1);
+        for (let k = 1; k < p.n; k++) {
+          const r = PG.bestDefence(g0, p.n - wm);
+          if (r) { line.push(PG.sanOf(g0, r)); g0.makeMove(r); }
+          const m = PG.findMateMove(g0, p.n - wm);
+          if (!m) break;
+          line.push(PG.sanOf(g0, m)); wm++; g0.makeMove(m);
+        }
+        const t = p.n === 1
+          ? line[0] + ' gives check and Black has no answer: the king has no safe square, and the checking piece cannot be captured or blocked.'
+          : 'Play ' + line[0] + '. Every reply leaves Black with only losing choices (the toughest defence is ' + (line[1] || 'shown') + '), and then ' + (line[line.length - 1]) + ' finishes it. Full line: ' + line.join(' ') + '.';
+        return { title: 'Mate in ' + p.n, text: t + (p.n > 1 ? ' Tip: forcing checks that take away the king\'s squares come first.' : ' Tip: count the king\'s escape squares, then look for the check that covers them all.') };
+      }
+      const sans = PG.sanPath(p.pos, p.path);
+      return { title: 'Safe check in ' + p.path.length, text: 'One way: ' + sans.join(', then ') + '. A check is safe when Black cannot simply capture the piece that gives it. Count which of Black\'s pieces attack the square first.' };
+    } catch (e) { return { title: 'Solution', text: p.explain || 'Look for forcing moves first: checks, captures and threats.' }; }
+  }
+  function showWhy() {
+    const box = $('#pz-why');
+    if (!box) return;
+    if (!P || state !== 'solved') { box.classList.add('hidden'); return; }
+    const x = explainText(P);
+    box.innerHTML = '<b>' + esc(x.title) + '</b>' + esc(x.text);
+    box.classList.remove('hidden');
+  }
+  function syncFav() {
+    const b = $('#pz-fav');
+    if (!b) return;
+    const on = !!P && favs.has(P);
+    b.classList.toggle('on', on);
+    b.textContent = on ? '★' : '☆';
+    b.setAttribute('aria-label', on ? 'Remove from favourites' : 'Add to favourites');
+    b.disabled = !P;
+  }
+  function favSheet() {
+    const l = favs.all();
+    LP.openSheet('<h2>Favourite puzzles<span class="sub">' + l.length + ' saved. Replay them any time.</span></h2>' + (l.length ? '<div class="pz-favs">' + l.map((f) => `<div class="an-card" data-id="${esc(f.id)}"><div class="an-top"><b>${esc(TITLE[f.type] || f.type)}</b><span class="dim">${esc(DIFF[f.diff] || '')}</span></div><div class="an-btns"><button class="btn primary pf-play">Play</button><button class="btn pf-why">Explain</button><button class="btn an-del pf-del" aria-label="Remove">✕</button></div></div>`).join('') + '</div>' : '<p class="note">No favourites yet. Tap the star on a puzzle to keep it here.</p>') + '<button class="btn wide" id="pf-x">Close</button>', true);
+    $('#pf-x').onclick = startPuzzles;
+    document.querySelectorAll('.pz-favs .an-card').forEach((c) => {
+      const f = favs.all().find((x) => x.id === c.dataset.id);
+      if (!f) return;
+      c.querySelector('.pf-play').onclick = () => LP.saves.guard(() => { LP.session.fresh(); cfg = { type: f.type, diff: f.diff }; missed = false; LP.closeSheet(); LP.showPage('puzzle'); load(f.P); });
+      c.querySelector('.pf-why').onclick = () => { const x = explainText(f.P); LP.openSheet('<h2>' + esc(x.title) + '</h2><p class="note" style="font-size:1rem">' + esc(x.text) + '</p><button class="btn wide" id="pw-b">Back</button>', true); $('#pw-b').onclick = favSheet; };
+      c.querySelector('.pf-del').onclick = () => { favs.put(favs.all().filter((x) => x.id !== f.id)); favSheet(); };
+    });
+  }
+
   /* ----------------------------------------------------------------- loading */
   const plain = (m) => ({ f: m.from, t: m.to, p: m.promo || 0 });
   const findMove = (gg, e) => gg.legalMovesFrom(e.f).find((x) => x.to === e.t && (x.promo || 0) === (e.p || 0));
@@ -177,6 +262,7 @@
     g = PG.fromPos(p.pos);
     log = []; snaps = []; userMoves = 0; sel = -1; targets = []; last = null; hints = [];
     state = 'play'; busy = false; revealed = false;
+    showWhy(); syncFav();
     buildBoard();
     if (replayLog) {
       for (const e of replayLog) {
@@ -201,6 +287,7 @@
     const my = ++token;
     P = null; g = PG.blank(); log = []; snaps = []; userMoves = 0; sel = -1; targets = []; last = null; hints = [];
     state = 'gen'; busy = true;
+    showWhy(); syncFav();
     LP.showPage('puzzle');
     buildBoard();
     render();
@@ -376,6 +463,7 @@
     else if (P.type === 'mate') msg = 'Checkmate! Puzzle solved.';
     else msg = 'Check! Solved in ' + userMoves + (userMoves === 1 ? ' move.' : ' moves.');
     setStatus(msg, 'good');
+    showWhy();
   }
 
   /* ----------------------------------------------------------------- buttons */
@@ -437,7 +525,7 @@
         else if (P.type === 'mate') msg = P.n === 1 ? 'Checkmate solution.' : 'Forced mate in ' + P.n + ' (one way of defending shown).';
         else msg = 'Safe check solution.';
         setStatus(msg, 'good');
-        // Next puzzle button is already glowing via updateInfo
+        showWhy();
         return;
       }
       const step = steps[i++];
@@ -525,7 +613,7 @@
         ${LEVELS.map((l) => `<button class="pz-opt" data-d="${l.id}">${meter(l.n)}<span class="pz-text"><span class="pz-name">${l.name}</span><span class="pz-sub">${(SUBS[type] && SUBS[type][l.id]) || l.sub}</span></span></button>`).join('')}
       </div>
       <div class="row"><button class="btn" id="pz-dback">Back</button><button class="btn" id="pz-dx">Cancel</button></div>`, true);
-    document.querySelectorAll('[data-d]').forEach((b) => { b.onclick = () => { cfg = { type, diff: b.dataset.d }; LP.closeSheet(); newPuzzle(); }; });
+    document.querySelectorAll('[data-d]').forEach((b) => { b.onclick = () => { cfg = { type, diff: b.dataset.d }; LP.session.fresh(); LP.closeSheet(); newPuzzle(); }; });
     $('#pz-dback').onclick = startPuzzles;
     $('#pz-dx').onclick = LP.closeSheet;
   }
@@ -535,7 +623,9 @@
       <div class="pz-options">
         ${KINDS.map((k) => `<button class="pz-opt" data-k="${k.id}"><span class="pz-ic"><i class="ic-sp" style="--i:${k.icon}"></i></span><span class="pz-text"><span class="pz-name">${k.name}</span><span class="pz-sub">${k.sub}</span></span></button>`).join('')}
       </div>
+      <button class="btn wide" id="pz-fv">★ Favourites (${favs.all().length})</button>
       <button class="btn wide" id="pz-x">Cancel</button>`, true);
+    $('#pz-fv').onclick = favSheet;
     document.querySelectorAll('[data-k]').forEach((b) => {
       b.onclick = () => askDiff(b.dataset.k);
     });
@@ -563,10 +653,17 @@
       $('#c-yes').onclick = () => { LP.closeSheet(); newPuzzle(); };
     } else newPuzzle();
   });
-  document.querySelector('.mode[data-mode="puzzle"]').addEventListener('click', startPuzzles);
+  document.querySelector('.mode[data-mode="puzzle"]').addEventListener('click', () => LP.saves.guard(startPuzzles));
+  $('#pz-fav').addEventListener('click', () => {
+    if (!P) return;
+    const ok = favs.toggle(P, cfg);
+    syncFav();
+    toast(favs.has(P) ? 'Added to favourites' : ok ? 'Removed from favourites' : 'Could not save on this device');
+  });
 
   window.Puzzle = {
     resume(d) {
+      LP.session.use(d.id);
       cfg = d.cfg;
       missed = false;
       LP.closeSheet();

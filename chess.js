@@ -504,6 +504,93 @@ class Chess {
   }
 }
 
+
+/* ---- positions as text (FEN), used by the position editor and by games that start from a custom position ---- */
+const FEN_CH = { p: PAWN, n: KNIGHT, b: BISHOP, r: ROOK, q: QUEEN, k: KING };
+/** Load a position. Returns an error message, or '' when the position was loaded. Leaves the game untouched on error. */
+Chess.prototype.loadFen = function (fen) {
+  const parts = String(fen || '').trim().split(/\s+/);
+  if (parts.length < 2) return 'A position needs at least the pieces and whose turn it is.';
+  const rows = parts[0].split('/');
+  if (rows.length !== 8) return 'The piece placement needs 8 ranks separated by "/".';
+  const board = new Uint8Array(128);
+  for (let i = 0; i < 8; i++) {
+    let f = 0;
+    for (const c of rows[i]) {
+      if (/[1-8]/.test(c)) { f += +c; continue; }
+      const t = FEN_CH[c.toLowerCase()];
+      if (!t) return 'Unknown piece "' + c + '".';
+      if (f > 7) return 'Rank ' + (8 - i) + ' has too many squares.';
+      board[sq(f, 7 - i)] = (c === c.toLowerCase() ? BLACK : WHITE) | t;
+      f++;
+    }
+    if (f !== 8) return 'Rank ' + (8 - i) + ' does not add up to 8 squares.';
+  }
+  const turn = parts[1] === 'b' ? BLACK : parts[1] === 'w' ? WHITE : 0;
+  if (!turn) return 'The side to move must be w or b.';
+  let castling = 0;
+  const cs = parts[2] || '-';
+  if (cs.indexOf('K') >= 0) castling |= 1; if (cs.indexOf('Q') >= 0) castling |= 2;
+  if (cs.indexOf('k') >= 0) castling |= 4; if (cs.indexOf('q') >= 0) castling |= 8;
+  let ep = -1;
+  if (parts[3] && parts[3] !== '-') { if (!/^[a-h][36]$/.test(parts[3])) return 'The en passant square is not valid.'; ep = fromAlg(parts[3]); }
+  this.board.set(board); this.turn = turn; this.castling = castling; this.ep = ep;
+  this.halfmove = Math.max(0, parseInt(parts[4], 10) || 0); this.fullmove = Math.max(1, parseInt(parts[5], 10) || 1);
+  this.history = [];
+  this.secretQueen = { [WHITE]: -1, [BLACK]: -1 };
+  this.revealed = { [WHITE]: false, [BLACK]: false };
+  return '';
+};
+Chess.prototype.toFen = function () {
+  const ch = { [PAWN]: 'p', [KNIGHT]: 'n', [BISHOP]: 'b', [ROOK]: 'r', [QUEEN]: 'q', [KING]: 'k' };
+  let out = [];
+  for (let r = 7; r >= 0; r--) {
+    let row = '', e = 0;
+    for (let f = 0; f < 8; f++) {
+      const p = this.board[sq(f, r)];
+      if (!p) { e++; continue; }
+      if (e) { row += e; e = 0; }
+      const c = ch[p & 7];
+      row += (p & COLOR_MASK) === WHITE ? c.toUpperCase() : c;
+    }
+    if (e) row += e;
+    out.push(row);
+  }
+  const cs = (this.castling & 1 ? 'K' : '') + (this.castling & 2 ? 'Q' : '') + (this.castling & 4 ? 'k' : '') + (this.castling & 8 ? 'q' : '');
+  return out.join('/') + ' ' + (this.turn === WHITE ? 'w' : 'b') + ' ' + (cs || '-') + ' ' + (this.ep >= 0 ? alg(this.ep) : '-') + ' ' + this.halfmove + ' ' + this.fullmove;
+};
+/** Problems that would make a position unplayable (empty list = fine). Also drops castling rights that no longer make sense. */
+Chess.prototype.problems = function () {
+  const out = [];
+  let wk = 0, bk = 0, wp = 0, bp = 0;
+  for (let s = 0; s < 128; s++) {
+    if (s & 0x88) { s += 7; continue; }
+    const p = this.board[s];
+    if (!p) continue;
+    if (p === (WHITE | KING)) wk++; else if (p === (BLACK | KING)) bk++;
+    if ((p & 7) === PAWN) { if (rankOf(s) === 0 || rankOf(s) === 7) out.push('Pawns cannot stand on the first or last rank.'); (p & COLOR_MASK) === WHITE ? wp++ : bp++; }
+  }
+  if (wk !== 1) out.push('White needs exactly one king.');
+  if (bk !== 1) out.push('Black needs exactly one king.');
+  if (wp > 8 || bp > 8) out.push('A side cannot have more than 8 pawns.');
+  if (!out.length) {
+    const other = this.turn === WHITE ? BLACK : WHITE;
+    if (this.inCheck(other)) out.push((other === WHITE ? 'White' : 'Black') + ' is in check but it is not their move.');
+    const wks = this.kingSquare(WHITE), bks = this.kingSquare(BLACK);
+    if (Math.abs(fileOf(wks) - fileOf(bks)) <= 1 && Math.abs(rankOf(wks) - rankOf(bks)) <= 1) out.push('The kings cannot touch each other.');
+  }
+  // castling rights only where the king and rook are still on their home squares
+  let c = this.castling;
+  if (this.board[sq(4, 0)] !== (WHITE | KING)) c &= ~3;
+  if (this.board[sq(4, 7)] !== (BLACK | KING)) c &= ~12;
+  if (this.board[sq(7, 0)] !== (WHITE | ROOK)) c &= ~1;
+  if (this.board[sq(0, 0)] !== (WHITE | ROOK)) c &= ~2;
+  if (this.board[sq(7, 7)] !== (BLACK | ROOK)) c &= ~4;
+  if (this.board[sq(0, 7)] !== (BLACK | ROOK)) c &= ~8;
+  this.castling = c;
+  return out;
+};
+
 // Export for browser
 window.Chess = Chess;
 window.WHITE = WHITE;

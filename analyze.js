@@ -32,6 +32,8 @@
   const find = (id) => all().find((e) => e.id === id);
   function put(e) { const l = all(); const i = l.findIndex((x) => x.id === e.id); if (i >= 0) { l[i] = e; LP.store.set(l); } }
   const isRush = (e) => e.kind === 'rush';
+  /** Rush analyses made before points-based rating (version 3) are redone. */
+  const anDone = (e) => !!(e.an && e.an.done && (!isRush(e) || e.an.v === 3));
   const modeLabel = (e) => (isRush(e) ? 'Capture Rush' : ML[e.mode2 || e.mode] || 'Classic');
   /** The side a person played against the computer ('w' / 'b'), or null for two players or computer against computer. */
   function humanOf(e) {
@@ -215,11 +217,12 @@
   const accOf = (loss) => Math.max(0, Math.min(100, 103.17 * Math.exp(-0.04354 * loss * 100) - 3.17));
 
   function summarise(e, an) {
-    const sum = { w: { n: 0, acc: 0, c: {} }, b: { n: 0, acc: 0, c: {} } };
+    const sum = { w: { n: 0, acc: 0, c: {}, lost: 0, got: 0 }, b: { n: 0, acc: 0, c: {}, lost: 0, got: 0 } };
     Object.keys(an.plies).forEach((k) => {
       const i = +k, p = an.plies[k], col = isRush(e) ? p.c : (i % 2 === 0 ? 'w' : 'b');
       const s = sum[col];
       s.n++;
+      if (isRush(e) && p.pg) { s.lost += p.pg.l; s.got += p.pg.g; }
       s.acc += isRush(e) ? p.a : accOf(wpLoss(p.bs, p.ps));
       if (p.r) s.c[p.r] = (s.c[p.r] || 0) + 1;
     });
@@ -239,6 +242,7 @@
     const t0 = performance.now();
     const g = new Chess();
     g.mode = e.mode; g.reset();
+    if (e.fen) g.loadFen(e.fen);
     g.secretQueen = { [WHITE]: e.secrets.w, [BLACK]: e.secrets.b };
     let done = 0;
     for (let i = 0; i < e.moves.length; i++) {
@@ -331,11 +335,58 @@
     };
   }
 
+  /* Points are the currency here. White scores TWICE a piece's value for every capture; Black scores the value of the White piece it
+     takes, once (that is exactly what White loses). Every move is rated by the points it loses against the best move, so a missed White
+     capture costs double what the same miss costs Black. */
+  const fmtN = (n) => { const r = Math.round(n * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); };
+  /** Signed points: +6, −3, 0. */
+  const sgn = (n) => { const r = Math.round(n * 10) / 10; return r > 0 ? '+' + fmtN(r) : r < 0 ? '−' + fmtN(-r) : '0'; };
+  const ptsW = (n) => fmtN(n) + (Math.abs(Math.round(n * 10) / 10) === 1 ? ' point' : ' points');
+  /** Points the mover scores for capturing `cap` (null = nothing). */
+  function rushGain(e, side, cap) {
+    if (!cap) return 0;
+    return side === 'w' ? VALUE(cap.t) * 2 : (window.Rush.lab.COST[e.piece] || 0);
+  }
+  /** The most the other side could take at once (in points) if it were to move now. */
+  function rushExposure(cells, side, e) {
+    const lab = window.Rush.lab;
+    let worst = 0;
+    const foe = side === 'w' ? 'b' : 'w';
+    for (let i = 0; i < 64; i++) {
+      if (!cells[i] || cells[i].c !== foe) continue;
+      for (const t of lab.gen(cells, i)) {
+        const v = cells[t];
+        if (v && v.c === side) worst = Math.max(worst, rushGain(e, foe, v));
+      }
+    }
+    return worst;
+  }
+  function afterMove(cells, f, t) {
+    const w = cells.map((c) => (c ? { c: c.c, t: c.t } : null));
+    const m = w[f];
+    w[t] = m; w[f] = null;
+    if (m && m.c === 'b' && m.t === 'p' && (t >> 3) === 0) w[t] = { c: 'b', t: 'q' };
+    return w;
+  }
+  /** Rate a Rush move from the points it lost against the best move. */
+  function rushRating(loss, rk, cap, bestGain, only) {
+    if (only) return 'forced';
+    if (loss <= 0.1) {
+      const gap = rk.length > 1 ? rk[0].score - rk[1].score : 3;
+      if (cap && gap >= 2) return 'great';
+      return gap >= 0.5 ? 'best' : 'good';
+    }
+    if (loss <= 1) return 'good';
+    if (loss <= 2.5) return 'inaccuracy';
+    if (loss <= 5) return 'mistake';
+    return bestGain >= 8 && loss >= 8 ? 'missedwin' : 'blunder';
+  }
+
   async function analyseRush(e, both, my) {
     const lab = window.Rush && window.Rush.lab;
     if (!lab) return null;
     const h = humanOf(e);
-    const an = e.an && e.an.v === 2 ? e.an : { v: 2, both: false, done: false, plies: {} };
+    const an = e.an && e.an.v === 3 ? e.an : { v: 3, both: false, done: false, plies: {} };
     an.done = false;
     const frames = lab.framesOf(e);
     const want = (i) => {
@@ -363,19 +414,19 @@
       const loss = Math.max(0, best.score - pl.score);
       const cap = cells[ev.t] && cells[ev.t].c !== side ? cells[ev.t] : null;
       const bestCap = cells[best.to] && cells[best.to].c !== side ? cells[best.to] : null;
+      const gain = rushGain(e, side, cap), bestGain = rushGain(e, side, bestCap);
       const vc = voice(e, side);
-      let r = null;
-      if (loss <= 0.15) {
-        const gap = rk.length > 1 ? best.score - rk[1].score : 3;
-        r = cap && gap >= 2 ? 'great' : gap >= 0.5 ? 'best' : 'good';
-        if (!cap && gap < 0.5) r = 'good';
-      } else if (loss <= 0.9) r = null;
-      else if (loss <= 2.5) r = 'inaccuracy';
-      else if (loss <= 5) r = 'mistake';
-      else r = 'blunder';
-      if (bestCap && !cap && loss >= 5 && VALUE(bestCap.t) >= 5) r = 'missedwin';
-      const note = rushNote(e, lab, cells, ev, side, r, rk, cap, bestCap, vc, loss);
-      an.plies[i] = { c: side, r, b: { f: best.from, t: best.to }, bs: Math.round(best.score * 100) / 100, ps: Math.round(pl.score * 100) / 100, rk: rk.slice(0, 6).map((x) => [x.from, x.to, Math.round(x.score * 100) / 100]), a: accOf(Math.min(loss / 12, 1) * 0.4), n: note };
+      const r = rushRating(loss, rk, cap, bestGain, rk.length === 1);
+      // how much danger the move removed (a piece that could have been taken for N points no longer can)
+      const expB = rushExposure(cells, side, e), expA = rushExposure(afterMove(cells, ev.f, ev.t), side, e);
+      const info = { g: gain, bg: bestGain, l: Math.round(loss * 10) / 10, sv: Math.max(0, expB - expA), ex: expA };
+      const note = rushNote(e, lab, cells, ev, side, r, rk, cap, bestCap, vc, loss, info);
+      an.plies[i] = {
+        c: side, r, b: { f: best.from, t: best.to }, bs: Math.round(best.score * 100) / 100, ps: Math.round(pl.score * 100) / 100,
+        rk: rk.slice(0, 5).map((x) => [x.from, x.to, Math.round(x.score * 100) / 100]),
+        a: Math.round(100 * Math.exp(-loss / 4)),              // accuracy of this move: 100 when it is the best, falling as points are lost
+        pg: info, n: note,
+      };
       done++;
     }
     while (performance.now() - t0 < 5000) {
@@ -390,45 +441,55 @@
   }
   function VALUE(t) { return { p: 1, n: 3, b: 3, r: 5, q: 9 }[t] || 0; }
 
-  function rushNote(e, lab, cells, ev, side, r, rk, cap, bestCap, vc, loss) {
-    const PNAME = lab.PNAME;
+  function rushNote(e, lab, cells, ev, side, r, rk, cap, bestCap, vc, loss, info) {
     const nameT = (t) => ({ p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen' }[t]);
     const best = rk[0];
-    const out = { k: 'info', t: '', sq: [best.from, best.to], bs: sqName(best.from) + ' to ' + sqName(best.to) };
+    const mine = cells[ev.f] ? nameT(cells[ev.f].t) : 'piece';
+    const bestMover = cells[best.from] ? nameT(cells[best.from].t) : 'piece';
+    const out = { k: 'info', t: '', sq: [best.from, best.to], bs: bestMover + ' ' + sqName(best.from) + ' to ' + sqName(best.to), pts: info };
     const teach = r === 'inaccuracy' || r === 'mistake' || r === 'blunder' || r === 'missedwin';
     const lead = { inaccuracy: 'Inaccuracy.', mistake: 'Mistake.', blunder: 'Blunder!', missedwin: 'Missed capture!' }[r];
+    const cost = ` That lost about ${ptsW(loss)} compared with the best move.`;
     if (teach) {
-      if (bestCap && (!cap || VALUE(bestCap.t) > VALUE(cap.t))) {
-        const pts = side === 'w' ? VALUE(bestCap.t) * 2 : null;
+      if (bestCap && info.bg > info.g) {
         out.k = 'miss';
-        out.t = `${lead} ${vc.S} missed a chance to capture the ${nameT(bestCap.t)} on ${sqName(best.to)}${pts ? ' (worth ' + pts + ' points)' : ''}. ${cap ? 'Taking the ' + nameT(cap.t) + ' was worth less. ' : ''}Try again: find the best capture.`;
+        out.t = `${lead} ${vc.S} could have taken the ${nameT(bestCap.t)} on ${sqName(best.to)} for ${ptsW(info.bg)}${side === 'w' ? ' (' + VALUE(bestCap.t) + ' × 2, since White scores double)' : ''}. ${cap ? `Taking the ${nameT(cap.t)} scored only ${ptsW(info.g)}.` : `The ${mine} move scored nothing.`}${cost} Try again: find the best capture.`;
         return out;
       }
       // did the move leave one of its own pieces to be taken?
-      const work = cells.map((c) => (c ? { c: c.c, t: c.t } : null));
-      work[ev.t] = work[ev.f]; work[ev.f] = null;
+      const work = afterMove(cells, ev.f, ev.t);
       const foe = side === 'w' ? 'b' : 'w';
-      let hang = -1, atk = -1;
-      for (let i = 0; i < 64 && hang < 0; i++) {
+      let hang = -1, atk = -1, hv = 0;
+      for (let i = 0; i < 64; i++) {
         if (!work[i] || work[i].c !== side) continue;
-        for (let j = 0; j < 64; j++) { if (work[j] && work[j].c === foe && lab.gen(work, j).indexOf(i) >= 0) { hang = i; atk = j; break; } }
+        for (let j = 0; j < 64; j++) {
+          if (work[j] && work[j].c === foe && lab.gen(work, j).indexOf(i) >= 0) {
+            const v = rushGain(e, foe, work[i]);
+            if (v > hv) { hv = v; hang = i; atk = j; }
+          }
+        }
       }
       if (hang >= 0) {
         out.k = 'hang';
         out.t = side === 'w'
-          ? `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can take it. That costs ${lab.COST[work[hang].t] || 0} points. Try again: find a safer move.`
-          : `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can capture it, and White scores double for captures. Try again.`;
+          ? `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can take it. That costs ${ptsW(hv)}, and it costs White its turn too.${cost} Try again: find a safer move.`
+          : `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can capture it for ${ptsW(hv)} (${VALUE(work[hang].t)} × 2, because White scores double).${cost} Try again.`;
         out.sq = [hang, best.to];
         out.thr = { a: atk, b: hang };
         return out;
       }
       out.k = 'generic';
-      out.t = `${lead} A stronger move was ${nameT(cells[best.from].t)} ${sqName(best.from)} to ${sqName(best.to)}${bestCap ? ', capturing the ' + nameT(bestCap.t) : ''}. Try again.`;
+      out.t = `${lead} A stronger move was ${bestMover} ${sqName(best.from)} to ${sqName(best.to)}${bestCap ? ', capturing the ' + nameT(bestCap.t) + ' for ' + ptsW(info.bg) : ''}.${cost} Try again.`;
       return out;
     }
-    if (r === 'great' && cap) { out.k = 'praise'; out.t = `Great capture! ${vc.S} took the ${nameT(cap.t)} on ${sqName(ev.t)}${side === 'w' ? ' for ' + VALUE(cap.t) * 2 + ' points' : ''}, the best available.`; }
-    else if (r === 'best') { out.k = 'praise'; out.t = `${nameT(cells[ev.f].t)[0].toUpperCase() + nameT(cells[ev.f].t).slice(1)} to ${sqName(ev.t)} was the best move here.`; }
-    else if (r === 'good') { out.k = 'praise'; out.t = `A good move${cap ? ': a capture that scores' : ' that keeps the pressure on'}.`; }
+    if (r === 'forced') { out.k = 'praise'; out.t = `This was the only move available.`; }
+    else if (r === 'great' && cap) { out.k = 'praise'; out.t = `Great capture! ${vc.S} took the ${nameT(cap.t)} on ${sqName(ev.t)} for ${ptsW(info.g)}${side === 'w' ? ' (' + VALUE(cap.t) + ' × 2)' : ''}, the best available.`; }
+    else if (r === 'best') { out.k = 'praise'; out.t = `${mine[0].toUpperCase() + mine.slice(1)} to ${sqName(ev.t)} was the best move here${cap ? ', scoring ' + ptsW(info.g) : info.sv > 0 ? ', saving ' + ptsW(info.sv) + ' of material from being taken' : ''}.`; }
+    else if (r === 'good') {
+      out.k = 'praise';
+      out.t = cap ? `A good move: the capture scores ${ptsW(info.g)}${loss > 0.1 ? ', though the best move was worth about ' + ptsW(loss) + ' more' : ''}.`
+        : info.sv > 0 ? `A good move that keeps ${ptsW(info.sv)} of material safe.` : `A good move that keeps the pressure on.`;
+    }
     out.sq = [ev.t];
     return out;
   }
@@ -461,7 +522,7 @@
       return;
     }
     box.innerHTML = list.map((e) => {
-      const done = e.an && e.an.done, sum = e.an && e.an.sum;
+      const done = anDone(e), sum = e.an && e.an.sum;
       const h = humanOf(e);
       let chips = '';
       if (done && sum) {
@@ -491,7 +552,7 @@
     const d = $('#analyze-desc');
     if (!d) return;
     const list = entries();
-    const n = list.length, a = list.filter((e) => e.an && e.an.done).length;
+    const n = list.length, a = list.filter(anDone).length;
     d.textContent = n ? plural(n, 'saved game') + ' · ' + a + ' analysed' : 'Review your games and learn from every mistake.';
   }
 
@@ -501,7 +562,7 @@
   function begin(id) {
     const e = find(id);
     if (!e) { showLibrary(); return; }
-    if (e.an && e.an.done) { enter(e); return; }
+    if (anDone(e)) { enter(e); return; }
     const h = humanOf(e);
     if (h) {
       const me = nameOf(e, h);
@@ -705,6 +766,7 @@
     markMoves();
     updateEval();
     markTimeline();
+    markGraph();
   }
 
   /* ---- evaluation label above the board */
@@ -744,7 +806,8 @@
     let t, c, ic;
     if (R.kind === 'rush') {
       const f = R.frames[R.ply];
-      t = f.score + (Math.abs(f.score) === 1 ? ' point' : ' points'); c = '#8fd3e8'; ic = 'flag';
+      const d = R.ply ? f.score - R.frames[R.ply - 1].score : 0;
+      t = f.score + (Math.abs(f.score) === 1 ? ' point' : ' points') + (d ? ' (' + sgn(d) + ')' : ''); c = d < 0 ? '#f08a24' : d > 0 ? '#6fd08c' : '#8fd3e8'; ic = 'flag';
     } else if (R.ply >= R.total && R.total && e.result) {
       t = e.result; ic = 'flag';
       const h = humanOf(e);
@@ -763,6 +826,44 @@
     }
     box.style.color = c;
     box.innerHTML = `<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${EVI[ic]}</svg><span>${esc(t)}</span>`;
+  }
+
+  /* ---- Rush: the score over the round, with the notable moves marked (tap one to jump there) */
+  function buildGraph() {
+    const box = $('#rv-graph');
+    if (!box) return;
+    if (!R || R.kind !== 'rush') { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    const sc = R.frames.map((f) => f.score), n = sc.length - 1;
+    let mn = Math.min(0, ...sc), mx = Math.max(0, ...sc);
+    if (mx - mn < 6) { mx += 3; mn -= 1; }
+    const X = (k) => (n ? k / n * 100 : 0), Y = (v) => 8 + (mx - v) / (mx - mn) * 84;
+    const line = sc.map((v, k) => X(k).toFixed(2) + ',' + Y(v).toFixed(2)).join(' ');
+    let dots = '';
+    Object.keys(R.an.plies).forEach((k) => {
+      const i = +k, pl = R.an.plies[k];
+      if (!pl.r || !({ inaccuracy: 1, mistake: 1, blunder: 1, missedwin: 1, great: 1 })[pl.r]) return;
+      const rt = MR.get(pl.r);
+      dots += `<button class="rv-gd" data-i="${i}" style="left:${X(i + 1)}%;top:${Y(sc[i + 1])}%;background:${rt.color}" aria-label="${esc(rt.label)} on move ${i + 1}"></button>`;
+    });
+    box.innerHTML = `<div class="rv-g-h"><span>Score</span><small>${sc[n]} points at the end \u00b7 high ${Math.max(...sc)}</small></div>
+      <div class="rv-g-plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="100" y1="${Y(0)}" y2="${Y(0)}" class="rv-g-zero"/><polyline points="${line}" class="rv-g-line"/></svg><i class="rv-g-cur"></i>${dots}</div>`;
+    box.querySelectorAll('.rv-gd').forEach((b) => {
+      b.onclick = () => { const i = +b.dataset.i; cancelRetry(true); setPly(i + 1, true); coachForPly(i); };
+    });
+    box.querySelector('.rv-g-plot').addEventListener('click', (ev) => {
+      if (ev.target.closest('.rv-gd')) return;
+      const r = ev.currentTarget.getBoundingClientRect();
+      const k = Math.round(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * n);
+      cancelRetry(true);
+      setPly(k, true);
+      if (R.ply > 0) coachForPly(R.ply - 1); else showIntroKeep();
+    });
+    markGraph();
+  }
+  function markGraph() {
+    const c = $('#rv-graph .rv-g-cur');
+    if (c && R) c.style.left = (R.total ? R.ply / R.total * 100 : 0) + '%';
   }
 
   /* ---- timeline of highlights along the top */
@@ -807,7 +908,9 @@
       b.className = 'rvm ' + col;
       b.dataset.i = i;
       const r = ratingAt(i);
-      b.innerHTML = (R.kind === 'chess' && i % 2 === 0 ? '<i class="rvn">' + (i / 2 + 1) + '.</i>' : '') + esc(sanOf(i)) + (r ? `<span class="rvr">${MR.iconHtml(r)}</span>` : '');
+      let pc = '';
+      if (R.kind === 'rush') { const d = Math.abs(R.frames[i + 1].score - R.frames[i].score); if (d) pc = `<i class="rvp">+${d}</i>`; }
+      b.innerHTML = (R.kind === 'chess' && i % 2 === 0 ? '<i class="rvn">' + (i / 2 + 1) + '.</i>' : '') + esc(sanOf(i)) + pc + (r ? `<span class="rvr">${MR.iconHtml(r)}</span>` : '');
       b.onclick = () => { cancelRetry(true); setPly(i + 1, true); coachForPly(i); };
       box.appendChild(b);
     }
@@ -871,8 +974,43 @@
     const n = p.n || { t: '', k: 'info' };
     const teach = n.k === 'win' || n.k === 'mated' || n.k === 'hang' || n.k === 'miss' || n.k === 'generic' || n.k === 'fork';
     if (n.thr) R.arrows = [{ a: n.thr.a, b: n.thr.b, c: 'r' }];
-    say({ cap: capFor(i), text: n.t || (r ? r.label + '.' : 'A playable move.'), pills: teach ? [{ label: 'Try again', primary: true, fn: () => startRetry({ ply: i }) }, { label: 'Show best', fn: () => showBest(i) }].concat(bothPill()) : bothPill(), rate: r });
+    const pills = teach ? [{ label: 'Try again', primary: true, fn: () => startRetry({ ply: i }) }, { label: 'Show best', fn: () => showBest(i) }].concat(bothPill()) : bothPill();
+    const text = n.t || (r ? r.label + '.' : 'A playable move.');
+    if (R.kind === 'rush' && p.pg) say({ cap: capFor(i), html: `<p class="rv-text">${esc(text)}</p>${rushExtras(i, p)}`, pills, rate: r });
+    else say({ cap: capFor(i), text, pills, rate: r });
+    if (R.kind === 'rush' && p.pg) bindAlts(i);
     render();
+  }
+
+  /** Rush: the points of this move, and the best few moves with what each is worth. */
+  function rushExtras(i, p) {
+    const pg = p.pg, frame = R.frames[i].cells, ev = R.entry.events[i];
+    const nameAt = (sq) => { const c = frame[sq]; return c ? c.t.toUpperCase() : ''; };
+    const chip = (label, val, col) => `<span class="rv-pt" style="--c:${col}"><small>${label}</small><b>${val}</b></span>`;
+    const lossCol = pg.l <= 0.1 ? '#6fd08c' : pg.l <= 1 ? '#9ad65a' : pg.l <= 2.5 ? '#f7c631' : pg.l <= 5 ? '#e58f2a' : '#ca3431';
+    let h = '<div class="rv-pts">' + chip('This move', sgn(pg.g), pg.g ? '#6fd08c' : '#8a979d') + chip('Best move', sgn(pg.bg), '#6fd08c') + chip('Lost', pg.l ? '\u2212' + fmtN(pg.l) : '0', lossCol) + (pg.sv ? chip('Kept safe', '+' + fmtN(pg.sv), '#5fd8f0') : '') + '</div>';
+    const rows = (p.rk || []).slice(0, 3);
+    if (rows.length > 1 || (rows[0] && !(rows[0][0] === ev.f && rows[0][1] === ev.t))) {
+      h += '<div class="rv-alts" aria-label="Best moves"><div class="rv-alts-h">Top moves <small>expected points after best play</small></div>';
+      const list = rows.slice();
+      if (!list.some((x) => x[0] === ev.f && x[1] === ev.t)) list.push([ev.f, ev.t, p.ps]);
+      list.forEach((x, k) => {
+        const played = x[0] === ev.f && x[1] === ev.t;
+        h += `<button class="rv-alt${played ? ' played' : ''}" data-f="${x[0]}" data-t="${x[1]}"><span class="rv-alt-m">${nameAt(x[0])}${sqName(x[0])}\u2192${sqName(x[1])}</span><span class="rv-alt-s">${sgn(x[2])}</span><span class="rv-alt-t">${played ? 'played' : k === 0 ? 'best' : ''}</span></button>`;
+      });
+      h += '</div>';
+    }
+    return h;
+  }
+  function bindAlts(i) {
+    $('#rv-bubble').querySelectorAll('.rv-alt').forEach((b) => {
+      b.onclick = () => {
+        const f = +b.dataset.f, t = +b.dataset.t, ev = R.entry.events[i];
+        const played = f === ev.f && t === ev.t;
+        R.arrows = (R.arrows || []).filter((a) => a.c === 'r').concat(played ? [] : [{ a: f, b: t, c: 'g' }]);
+        render();
+      };
+    });
   }
 
   async function addBoth() {
@@ -898,7 +1036,8 @@
     R.arrows = [{ a, b: b2, c: 'g' }];
     render();
     const n = p.n || {};
-    say({ cap: capFor(i), text: 'The best move was ' + (n.bs || sanOf(i)) + ', shown with the green arrow.', pills: [{ label: 'Try again', primary: true, fn: () => startRetry({ ply: i }) }, { label: 'Back to the game', fn: () => { setPly(i + 1, true); coachForPly(i); } }] });
+    const pg = p.pg;
+    say({ cap: capFor(i), text: 'The best move was ' + (n.bs || sanOf(i)) + ', shown with the green arrow.' + (pg ? ' It scores ' + sgn(pg.bg) + ' straight away' + (pg.l ? ', and the move played lost about ' + ptsW(pg.l) + ' next to it.' : '.') : ''), pills: [{ label: 'Try again', primary: true, fn: () => startRetry({ ply: i }) }, { label: 'Back to the game', fn: () => { setPly(i + 1, true); coachForPly(i); } }] });
   }
 
   /* ---- moments of the lesson */
@@ -977,7 +1116,8 @@
       const s = sum[c];
       const who = h === c ? 'You' : nameOf(e, c);
       const chips = order.filter((k) => s.c[k]).map((k) => { const r = MR.get(k); return `<span class="cc-chip" style="--c:${r.color}">${s.c[k]} ${esc(r.label.toLowerCase())}</span>`; }).join('');
-      return `<div class="cc-row"><b>${esc(who)}</b><span class="cc-acc">${s.acc}%<small>accuracy</small></span></div><div class="cc-chips">${chips || '<span class="cc-chip">no standout moves</span>'}</div>`;
+      const pts = isRush(e) ? `<div class="cc-chips"><span class="cc-chip" style="--c:#6fd08c">${sgn(s.got)} scored</span><span class="cc-chip" style="--c:${s.lost > 0.05 ? '#e58f2a' : '#6fd08c'}">${fmtN(s.lost)} lost to better moves</span></div>` : '';
+      return `<div class="cc-row"><b>${esc(who)}</b><span class="cc-acc">${s.acc}%<small>accuracy</small></span></div>${pts}<div class="cc-chips">${chips || '<span class="cc-chip">no standout moves</span>'}</div>`;
     }).join('') + '</div>';
   }
 
@@ -1210,6 +1350,7 @@
     if (R.kind === 'chess') {
       R.G = new Chess();
       R.G.mode = e.mode; R.G.reset();
+      if (e.fen) R.G.loadFen(e.fen);
       R.G.secretQueen = { [WHITE]: e.secrets.w, [BLACK]: e.secrets.b };
       R.view = chessView(R.G);
     } else {
@@ -1222,6 +1363,7 @@
     buildBoard();
     buildMoves();
     buildTimeline();
+    buildGraph();
     showIntro();
   }
 
@@ -1255,6 +1397,7 @@
           <div class="rv-movebar"><div id="rv-moves" class="rv-moves" aria-label="Moves"></div></div>
         </div>
         <div id="rv-eval" class="rv-eval"></div>
+        <div id="rv-graph" class="rv-graph hidden"></div>
         <h2 id="rv-title" class="rv-title">Analyse your game</h2>
         <div id="rv-bubble" class="rv-bubble"></div>
         <div class="board-wrap rv-board-wrap">

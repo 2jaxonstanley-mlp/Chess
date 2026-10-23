@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=31">
+  <link rel="stylesheet" href="styles.css?v=33">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -40,8 +40,17 @@
         <button id="continue-btn" class="mode continue hidden">
           <span class="mode-ic" aria-hidden="true"><i class="ic-play"></i></span>
           <span class="mode-text">
-            <span class="mode-name">Continue playing</span>
+            <span id="continue-name" class="mode-name">Continue playing</span>
             <span id="continue-desc" class="mode-desc"></span>
+            <span id="continue-prog" class="mode-desc continue-prog"></span>
+          </span>
+          <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+        </button>
+        <button id="saves-btn" class="mode saves hidden" style="--accent:#8fc15b">
+          <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>
+          <span class="mode-text">
+            <span class="mode-name">Saved games</span>
+            <span id="saves-desc" class="mode-desc"></span>
           </span>
           <span class="mode-go" aria-hidden="true">&rsaquo;</span>
         </button>
@@ -128,6 +137,22 @@
             <span class="mode-text">
               <span class="mode-name">Analyze</span>
               <span class="mode-desc" id="analyze-desc">Review your games and learn from every mistake.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="history" style="--accent:#c9a0ff">
+            <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></span>
+            <span class="mode-text">
+              <span class="mode-name">Match history</span>
+              <span class="mode-desc" id="history-desc">Watch your last 50 games again, move by move.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="editor" style="--accent:#ff9ad5">
+            <span class="mode-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span>
+            <span class="mode-text">
+              <span class="mode-name">Position editor</span>
+              <span class="mode-desc">Set up any position, then play it or save it.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
@@ -267,6 +292,7 @@
               <button id="rp-next" class="btn icon" aria-label="Next move">&#9654;&#xFE0E;</button>
               <button id="rp-end" class="btn icon" aria-label="End">&#9197;&#xFE0E;</button>
               <button id="rp-speed" class="btn speed" aria-label="Speed">1x</button>
+              <span id="rp-time" class="rp-time dim hidden"></span>
             </div>
             <button id="rp-exit" class="btn wide">Close replay</button>
           </div>
@@ -344,6 +370,7 @@
           <div class="board-wrap hk-wrap">
             <div id="hk-board" class="board"></div>
             <div id="hk-layer" class="hk-layer"></div>
+            <div id="hk-count" class="hk-count" aria-live="polite"></div>
             <div id="hk-toast" class="toast" role="status"></div>
           </div>
           <div class="player-bar" id="hk-bottom-bar">
@@ -351,8 +378,13 @@
             <span class="pname" id="hk-bottom-name"></span>
             <span class="hk-score" id="hk-bottom-score">0</span>
           </div>
+          <div id="hk-spd" class="hk-spd" aria-live="off"></div>
           <div id="hk-status" class="status dim">&nbsp;</div>
-          <div class="controls"><button id="hk-pause" class="btn">Pause</button><button id="hk-reset" class="btn">New match</button></div>
+          <div class="controls hk-live"><button id="hk-pause" class="btn">Pause</button><button id="hk-reset" class="btn">New match</button></div>
+          <div class="hk-rp">
+            <div class="hk-rp-bar"><input id="hk-rp-scrub" type="range" min="0" max="100" value="0" aria-label="Replay position"><div id="hk-rp-marks" class="hk-rp-marks"></div></div>
+            <div class="hk-rp-row"><span id="hk-rp-time" class="dim">0:00 / 0:00</span><button id="hk-rp-play" class="btn">Pause</button><button id="hk-rp-speed" class="btn">1×</button><button id="hk-rp-exit" class="btn">Exit</button></div>
+          </div>
         </div>
       </div>
     </section>
@@ -373,7 +405,8 @@
           <div id="pz-status" class="status">&nbsp;</div>
 
           <div class="pz-panel">
-            <div class="pz-panel-head"><span class="pz-badge sm" aria-hidden="true">&#129513;&#xFE0E;</span><span id="pz-kind">Puzzles</span></div>
+            <div class="pz-panel-head"><span class="pz-badge sm" aria-hidden="true">&#129513;&#xFE0E;</span><span id="pz-kind">Puzzles</span><button id="pz-fav" class="pz-fav" style="margin-left:auto" aria-label="Add to favourites">&#9734;</button></div>
+            <div id="pz-why" class="pz-why hidden"></div>
             <div id="pz-turn" class="pz-card pz-turn">
               <span class="pz-sq" aria-hidden="true"></span>
               <span class="pz-turn-text"><b id="pz-turn-t">White to Move</b><span id="pz-goal">&nbsp;</span></span>
@@ -453,22 +486,26 @@
     </div>
   </div>
 
-  <script src="chess.js?v=23"></script>
+  <script src="chess.js?v=24"></script>
   <script src="ai.js?v=30"></script>
-  <script src="app.js?v=27"></script>
+  <script src="app.js?v=28"></script>
+  <script src="prefs.js?v=1"></script>
+  <script src="history.js?v=1"></script>
+  <script src="saves.js?v=1"></script>
   <script src="leaderboard.js?v=30"></script>
-  <script src="profile.js?v=23"></script>
+  <script src="profile.js?v=24"></script>
   <script src="hats.js?v=2"></script>
-  <script src="shop.js?v=34"></script>
+  <script src="shop.js?v=35"></script>
     <script src="stats.js?v=29"></script>
-  <script src="rush.js?v=24"></script>
+  <script src="rush.js?v=25"></script>
   <script src="puzzlegen.js?v=30"></script>
   <script src="ratings.js?v=29"></script>
-  <script src="puzzles.js?v=31"></script>
-  <script src="analyze.js?v=2"></script>
-  <script src="hockey.js?v=3"></script>
+  <script src="puzzles.js?v=32"></script>
+  <script src="analyze.js?v=3"></script>
+  <script src="editor.js?v=1"></script>
+  <script src="hockey.js?v=4"></script>
   <script src="tutorial.js?v=4"></script>
-  <script src="extras.js?v=9"></script>
+  <script src="extras.js?v=11"></script>
   <script src="menu.js?v=1"></script>
 </body>
 </html>

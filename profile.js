@@ -148,6 +148,7 @@
         row('set-hints', 'Legal move hints', 'Show dots where the selected piece can move.', settings.hints) +
         row('set-ratings', 'Opening book labels', 'Mark book moves and show the opening name while you play. Full move ratings are in Analyze game.', settings.ratings) +
         row('set-flip', 'Auto-flip board', 'In two-player games, turn the board toward the player to move.', settings.autoFlip) +
+        (LP.prefs ? LP.prefs.rows() : '') +
       '</div>' +
       '<p class="note">These apply automatically when you start a game — no more prompts each time.</p>' +
       '<div class="row"><button class="btn primary" id="set-ok" style="flex:1">Done</button></div>', true);
@@ -159,6 +160,7 @@
       if (LP.applySettings) LP.applySettings(settings);
     };
     ['set-hints', 'set-ratings', 'set-flip'].forEach((id) => { $('#' + id).onchange = sync; });
+    if (LP.prefs) LP.prefs.bind();
     $('#set-ok').onclick = () => { sync(); LP.closeSheet(); };
   }
 

@@ -12,6 +12,17 @@
 
   /* ------------------------------------------------------------------ update log */
   const LOG = [
+    { id: 'u9', date: '2026-10-24', title: 'Saves, history, editor and big Rush and Hockey updates', items: [
+      'Continue now has 5 save slots and shows who is playing whom. Saved games lets you resume, view, rename or delete each one',
+      'New Match history: your last 50 finished games (not puzzles) with the finish date and time. Chess replays move by move; timed games, Capture Rush and Air Hockey replay on a timeline with speeds from 0.5x to 16x',
+      'New Position editor: set up any position, play it against the computer or a friend, save it, or copy and paste FEN code. Analyze works on these games too',
+      'Capture Rush analysis now rates every move by points lost against the best move, shows each move\'s point gain, the top 3 alternatives and a score graph. White earns 2x points per piece, and the computers now understand it (stronger levels understand it better)',
+      'New Doodle board in the shop: a pencil sketch look with wobbly borders',
+      'Puzzles: tap the star to keep a favourite, and solved puzzles now explain why the solution works',
+      'Air Hockey: pieces start at half speed and speed up the longer the puck is in play. If the puck stays on one side for 5 seconds a 3 second countdown starts, then it is moved to the other side. Replays of every match are in History',
+      'Air Hockey computers now look every 0.5 to 1.5 seconds and only move when it helps. Insane and Godly hit the puck back to themselves to build speed, use wall pinches and bounce shots off your piece while it is moving',
+      'Settings: sound effects and volume, animations on/off, your own board colours, warning before replacing a save, quick rematch, keyboard shortcuts (press ? in a game), and the options you picked last time are remembered',
+    ] },
     { id: 'u8', date: '2026-10-23', title: 'Puzzle goal and the King in Air Hockey', items: [
       'New Endless goal for puzzles: solve 5, then 10, then 15 puzzles on Normal or Hard. It scales exactly like the pieces captured goal',
       'Air Hockey has a new piece to pick: the King, which glides to any square in its own half',
@@ -83,12 +94,19 @@
     const b = $('#news-btn');
     if (b) b.classList.toggle('unread', !!LOG.length && seen() !== LOG[0].id);
   }
+  /** How many entries at the top of the log have not been opened yet. */
+  function unreadCount() {
+    const i = LOG.findIndex((u) => u.id === seen());
+    return i < 0 ? Math.min(1, LOG.length) : i;
+  }
   function openLog() {
+    const n = unreadCount();
     try { localStorage.setItem(SEEN, LOG[0].id); } catch (e) { /* ignore */ }
     paintDot();
+    const entry = (u, i) => `<section class="log-entry${i < n ? ' new' : ''}"><div class="log-head"><b>${esc(u.title)}</b><time datetime="${u.date}">${fmtDate(u.date)}</time></div>
+        <ul>${u.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></section>`;
     LP.openSheet(`<h2>Update log<span class="sub">What changed, newest first.</span></h2>
-      <div class="log-list">${LOG.map((u) => `<section class="log-entry"><div class="log-head"><b>${esc(u.title)}</b><time datetime="${u.date}">${fmtDate(u.date)}</time></div>
-        <ul>${u.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></section>`).join('')}</div>
+      <div class="log-list">${n ? '<div class="log-new-h">WHATS NEW!</div>' : ''}${LOG.map((u, i) => (i === n && n ? '<div class="log-old-h">Earlier updates</div>' : '') + entry(u, i)).join('')}</div>
       <button class="btn wide" id="log-x">Close</button>`, true);
     $('#log-x').onclick = LP.closeSheet;
   }

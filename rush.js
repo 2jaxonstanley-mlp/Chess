@@ -86,16 +86,25 @@
 
   /* ------------------------------------------------------------------ computer player */
   const LEVELS = {
-    dumb:   { depth: 1, worst: true, delay: 1100 },
-    easy:   { depth: 1, blunder: 0.35, delay: 900 },
-    medium: { depth: 2, blunder: 0.12, delay: 750 },
-    hard:   { depth: 3, time: 300, delay: 650 },
-    insane: { depth: 5, time: 450, delay: 600 },
-    godly:  { depth: 7, time: 650, delay: 550 },
+    // aware: how well the bot understands that White's captures score double (1 = treats them like Black's, 2 = fully understands)
+    dumb:   { depth: 1, worst: true, delay: 1100, aware: 1 },
+    easy:   { depth: 1, blunder: 0.35, delay: 900, aware: 1.4 },
+    medium: { depth: 2, blunder: 0.12, delay: 750, aware: 1.7 },
+    hard:   { depth: 3, time: 300, delay: 650, aware: 2 },
+    insane: { depth: 5, time: 450, delay: 600, aware: 2 },
+    godly:  { depth: 7, time: 650, delay: 550, aware: 2 },
   };
   const INF = 1e9;
   const UNIT = 250;                                // evaluation units per point
   let abort = false, nodes = 0, until = 0;
+  // AW = how many times a piece's value White scores for a capture (2 in the real rules; weaker bots use less than 2).
+  // TEMPO = small bonus for capturing now rather than later (bots only; Analyze turns it off so scores are real points).
+  let AW = 2, TEMPO = 150;
+  const HIT = 150;
+  /** Evaluation units White gains by capturing a piece of type t. */
+  const capUnits = (t) => TEMPO + UNIT * AW * VALUE[t];
+  /** Units for an attacked Black piece of value v (before it is actually taken). */
+  const hitUnits = (v) => HIT + UNIT * AW * v;
 
   /** From White's point of view. `toMove` matters: Black can only save one attacked piece per turn. */
   function evalState(cells, toMove) {
@@ -113,9 +122,9 @@
     }
     vals.sort((a, c) => c - a);
     // a capture is available right now / two attacked pieces: Black saves the best one, White takes the other
-    // (values already reflect double scoring)
-    if (toMove === W) e += hit ? 150 + 500 * vals[0] : 0;
-    else e += hit >= 2 ? 150 + 500 * vals[1] : hit === 1 ? (150 + 500 * vals[0]) * 0.15 : 0;
+    // (hitUnits already applies the 2x White scoring)
+    if (toMove === W) e += hit ? hitUnits(vals[0]) : 0;
+    else e += hit >= 2 ? hitUnits(vals[1]) : hit === 1 ? hitUnits(vals[0]) * 0.15 : 0;
     // White pieces Black could take
     const threats = new Set();
     for (const b of bl) for (const x of gen(cells, b, true)) if (wss.includes(x)) threats.add(x);
@@ -136,7 +145,7 @@
       const mover = cells[m.from], cap = cells[m.to];
       cells[m.to] = mover; cells[m.from] = null;
       let add = 0, terminal = false;
-      if (side === W && cap) add = 150 + 500 * VALUE[cap.t];   // double points
+      if (side === W && cap) add = capUnits(cap.t);   // double points
       if (side === B && cap) { add = -UNIT * COST[cap.t]; terminal = true; }
       if (side === B && mover.t === 'p' && (m.to >> 3) === 0) cells[m.to] = { c: B, t: 'q' };
       const v = terminal ? acc + add : ab(cells, side === W ? B : W, depth - 1, alpha, beta, acc + add);
@@ -160,6 +169,7 @@
     let scores = null;
     const t0 = performance.now();
     until = t0 + (cfg.time || 5000);
+    AW = cfg.aware || 2; TEMPO = 150;   // how well this bot knows White's captures score double
     for (let d = 1; d <= cfg.depth; d++) {
       abort = false; nodes = 0;
       const cur = [];
@@ -167,7 +177,7 @@
         const mover = work[m.from], cap = work[m.to];
         work[m.to] = mover; work[m.from] = null;
         let add = 0, terminal = false;
-        if (side === W && cap) add = 150 + 250 * VALUE[cap.t];
+        if (side === W && cap) add = capUnits(cap.t);
         if (side === B && cap) { add = -UNIT * COST[cap.t]; terminal = true; }
         if (side === B && mover.t === 'p' && (m.to >> 3) === 0) work[m.to] = { c: B, t: 'q' };
         const v = terminal ? add : ab(work, side === W ? B : W, d - 1, -INF, INF, add);
@@ -196,6 +206,7 @@
     const sign = side === W ? 1 : -1;
     let scores = null;
     until = performance.now() + (ms || 600);
+    AW = 2; TEMPO = 0;   // Analyze uses the real rules: White's captures score double, no bot bonuses
     for (let d = 1; d <= depth; d++) {
       abort = false; nodes = 0;
       const cur = [];
@@ -203,7 +214,7 @@
         const mover = work[m.from], cap = work[m.to];
         work[m.to] = mover; work[m.from] = null;
         let add = 0, terminal = false;
-        if (side === W && cap) add = 150 + 250 * VALUE[cap.t];
+        if (side === W && cap) add = capUnits(cap.t);
         if (side === B && cap) { add = -UNIT * COST[cap.t]; terminal = true; }
         if (side === B && mover.t === 'p' && (m.to >> 3) === 0) work[m.to] = { c: B, t: 'q' };
         const v = terminal ? add : ab(work, side === W ? B : W, d - 1, -INF, INF, add);
@@ -214,6 +225,7 @@
       if (abort || cur.length < moves.length) break;
       scores = cur;
     }
+    TEMPO = 150;
     if (!scores) scores = moves.map((m) => (cells[m.to] ? 1 : 0));
     return moves.map((m, i) => ({ from: m.from, to: m.to, score: scores[i] / UNIT })).sort((a, b) => b.score - a.score);
   }
@@ -275,6 +287,7 @@
 
   function newRound() {
     token++;
+    LP.session.fresh();
     clearInterval(timerId); clearTimeout(aiTimer);
     const cells = new Array(64).fill(null);
     g = { cells, piece: cfg.piece, turn: W, score: 0, taken: 0, caps: [], t0: 0, ended: false, selected: -1, targets: [], last: null, ai: false, bTurns: 0, nextGrowth: 2 + rnd(2) };
@@ -583,6 +596,10 @@
     clearRush();
     updateHud(); render(); setStatus('Time is up');
     g.lb = recordScore();
+    try {
+      g.hist = buildReplay();
+      if (LP.history && g.log.length) LP.history.add({ kind: 'rush', id: g.hist.id, mode: 'rush', modeLabel: 'Capture Rush', names: g.hist.names, level: g.hist.level, bots: cfg.players === 0, human: g.hist.human, result: g.score + (Math.abs(g.score) === 1 ? ' point' : ' points'), winner: null, dur: Math.round(TOTAL / 1000), moves: g.log.length, timed: true, score: g.score, payload: g.hist });
+    } catch (e) { /* history is best effort */ }
     if (cfg.players !== 0 && LP.rewards) LP.rewards.event('rush', { score: g.score, piece: g.piece, level: cfg.players === 1 ? cfg.level : 'pvp', players: cfg.players, caps: g.caps.length, taken: g.taken });
     const my = token;
     setTimeout(() => {
@@ -628,7 +645,7 @@
     if (cfg.players !== 0) $('#rs-swap').onclick = swapSides;
     $('#rs-menu').onclick = toMenu;
     $('#rs-analyze').onclick = () => {
-      const d = buildReplay();
+      const d = g.hist || buildReplay();
       const list = LP.store.get();
       list.unshift(d);
       LP.store.set(list.slice(0, 40));
@@ -656,10 +673,11 @@
       g: { cells: g.cells, piece: g.piece, turn: g.turn, score: g.score, taken: g.taken, caps: g.caps, used: Math.round(elapsed()), last: g.last, bTurns: g.bTurns, nextGrowth: g.nextGrowth, init: g.init, log: g.log },
     });
   }
-  function clearRush() { const x = LP.session.get(); if (x && x.kind === 'rush') LP.session.clear(); }
+  function clearRush() { LP.session.clear(); }
 
   function resume(d) {
     token++;
+    LP.session.use(d.id);
     clearInterval(timerId); clearTimeout(aiTimer);
     rp = null;
     exitReplayUI();
@@ -725,7 +743,7 @@
     const keep = rp ? rp.keep : { g, cfg };
     cfg = { players: 2, names: d.names, hints: false, piece: d.piece };
     g = { cells: [], piece: d.piece, ended: true, selected: -1, targets: [], turn: W, caps: [], score: 0, taken: 0, t0: 0, fixedRem: TOTAL };
-    rp = { data: d, frames: framesOf(d), idx: 0, playing: false, speed: 1, timer: null, from, keep };
+    rp = { data: d, frames: framesOf(d), idx: 0, playing: false, speed: 1, timer: null, from, keep, t: 0, total: d.total || TOTAL };
     flipped = false;
     buildBoard();
     for (const side of [W, B]) {
@@ -735,20 +753,23 @@
     }
     document.querySelector('#rush .controls').classList.add('hidden');
     $('#rush-replay').classList.remove('hidden');
-    $('#rush-scrub').max = rp.frames.length - 1;
+    $('#rush-scrub').max = rp.total;      // the timeline runs in real time: the scrubber is the round clock
+    $('#rush-scrub').step = 50;
+    $('#rr-speed').textContent = '1x';
     LP.showPage('rush');
     showFrame(0, false);
   }
 
-  function showFrame(i, animate) {
+  function showFrame(i, animate, keepT) {
     const prev = rp.idx;
     rp.idx = Math.max(0, Math.min(rp.frames.length - 1, i));
     const f = rp.frames[rp.idx];
+    if (!keepT) rp.t = f.at;
     g.cells = f.cells; g.score = f.score; g.taken = f.taken; g.caps = f.caps; g.last = f.last;
-    g.fixedRem = Math.max(0, rp.data.total - f.at);
+    g.fixedRem = Math.max(0, rp.total - rp.t);
     render();
     updateHud();
-    $('#rush-scrub').value = rp.idx;
+    $('#rush-scrub').value = rp.t;
     setStatus(rp.idx ? 'Move ' + rp.idx + ' of ' + (rp.frames.length - 1) : 'Start position', 'dim');
     $('#rr-play').textContent = rp.playing ? 'Pause' : 'Play';
     if (animate && f.last && rp.idx === prev + 1) {
@@ -760,15 +781,23 @@
   }
 
   function rpStop() { rp.playing = false; clearInterval(rp.timer); rp.timer = null; $('#rr-play').textContent = 'Play'; }
+  /** Jump to a moment of the round: shows the board as it was then and runs the clock to that time. */
+  function rpSeek(t, animate) {
+    t = Math.max(0, Math.min(rp.total, t));
+    let k = 0;
+    while (k + 1 < rp.frames.length && rp.frames[k + 1].at <= t) k++;
+    rp.t = t;
+    showFrame(k, animate && k === rp.idx + 1, true);
+  }
   function rpPlay() {
-    if (rp.idx >= rp.frames.length - 1) showFrame(0, false);
+    if (rp.t >= rp.total - 1) rpSeek(0, false);
     rp.playing = true;
     $('#rr-play').textContent = 'Pause';
     clearInterval(rp.timer);
     rp.timer = setInterval(() => {
-      if (rp.idx >= rp.frames.length - 1) { rpStop(); return; }
-      showFrame(rp.idx + 1, true);
-    }, 850 / rp.speed);
+      if (rp.t >= rp.total) { rpStop(); return; }
+      rpSeek(rp.t + 50 * rp.speed, true);
+    }, 50);
   }
 
   function exitReplayUI() {
@@ -792,6 +821,11 @@
       }
       render(); updateHud(); setStatus('Time is up');
       showOver();
+    } else if (r2.from === 'history' && LP.history) {
+      token++; clearInterval(timerId); clearTimeout(aiTimer);
+      if (g) g.ended = true;
+      LP.closeSheet();
+      LP.history.show();
     } else toMenu();
   }
 
@@ -909,7 +943,7 @@
     if (g && !g.ended && g.t0) {
       LP.openSheet(`<h2>Start a new round?</h2><div class="row"><button class="btn" id="c-no">Cancel</button><button class="btn primary" id="c-yes">New round</button></div>`);
       $('#c-no').onclick = LP.closeSheet;
-      $('#c-yes').onclick = () => newRound();
+      $('#c-yes').onclick = () => { LP.session.clear(); newRound(); };
     } else newRound();
   });
   $('#rush-back').addEventListener('click', () => {
@@ -924,16 +958,17 @@
   $('#rr-prev').addEventListener('click', rpGo(() => { rpStop(); showFrame(rp.idx - 1, false); }));
   $('#rr-next').addEventListener('click', rpGo(() => { rpStop(); showFrame(rp.idx + 1, true); }));
   $('#rr-start').addEventListener('click', rpGo(() => { rpStop(); showFrame(0, false); }));
-  $('#rr-end').addEventListener('click', rpGo(() => { rpStop(); showFrame(rp.frames.length - 1, false); }));
+  $('#rr-end').addEventListener('click', rpGo(() => { rpStop(); showFrame(rp.frames.length - 1, false); rp.t = rp.total; $('#rush-scrub').value = rp.t; g.fixedRem = 0; updateHud(); }));
+  const RP_SPEEDS = [1, 2, 4, 8, 16, 0.5];
   $('#rr-speed').addEventListener('click', rpGo(() => {
-    rp.speed = rp.speed === 1 ? 2 : rp.speed === 2 ? 4 : 1;
+    rp.speed = RP_SPEEDS[(RP_SPEEDS.indexOf(rp.speed) + 1) % RP_SPEEDS.length];
     $('#rr-speed').textContent = rp.speed + 'x';
     if (rp.playing) rpPlay();
   }));
-  $('#rush-scrub').addEventListener('input', rpGo(() => { rpStop(); showFrame(+$('#rush-scrub').value, false); }));
+  $('#rush-scrub').addEventListener('input', rpGo(() => { rpStop(); rpSeek(+$('#rush-scrub').value, false); }));
   $('#rr-exit').addEventListener('click', rpGo(closeReplay));
-  window.Rush = { lab: { rank, gen, allMoves, attackedByBlack, whiteSquares, blackSquares, framesOf: (d) => framesOf(d), VALUE, COST, PNAME }, watch: (d) => watch(d, 'menu'), resume, describe: (d) => 'Capture Rush \u00b7 ' + fmtTime(TOTAL - d.g.used) + ' left' };
-  document.querySelector('.mode[data-mode="rush"]').addEventListener('click', start);
+  window.Rush = { lab: { rank, gen, allMoves, attackedByBlack, whiteSquares, blackSquares, framesOf: (d) => framesOf(d), VALUE, COST, PNAME }, watch: (d, from) => watch(d, from || 'menu'), resume, describe: (d) => 'Capture Rush \u00b7 ' + fmtTime(TOTAL - d.g.used) + ' left' };
+  document.querySelector('.mode[data-mode="rush"]').addEventListener('click', () => { if (LP.saves) LP.saves.guard(start); else start(); });
 
   /** Headless round for testing the computer players: returns { score, taken, blacks }. */
   function sim(lw, lb, piece, turns) {
