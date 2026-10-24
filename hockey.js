@@ -33,15 +33,15 @@
     easy:   { every: 1.3,  noise: 140, margin: 3 },
     medium: { every: 1.0,  noise: 55,  margin: 4 },
     hard:   { every: 0.75, noise: 20,  margin: 5 },
-    // insane also looks again right after a hit, a landing or the other piece hitting the puck (react = how soon, in seconds), and plays harder (pro)
-    insane: { every: 0.3,  noise: 7,   margin: 6, smart: 5, horizon: 1.8, pro: 1, min: 0.2, react: 0.1, vary: 9 },
+    // insane also checks the goal every single frame (fast), and looks again right after a hit, a landing or the other piece hitting the puck (react = how soon, in seconds), and plays harder (pro)
+    insane: { every: 0.15, noise: 7,   margin: 6, smart: 5, horizon: 1.8, pro: 1, min: 0.1, react: 0.03, vary: 9, fast: 1 },
     godly:  { every: 0.5,  noise: 0,   margin: 6, smart: 8, horizon: 2.0 },
   };
   // with 0 players each computer has its own level (cfg.levels[side]); otherwise the one computer (the top side) uses cfg.level
   const levelOf = (b) => LEVELS[cfg && (cfg.levels ? cfg.levels[b === undefined ? 1 : b] : cfg.level)] || LEVELS.medium;
   const nextLook = (b) => Math.max(levelOf(b).min || 0.5, Math.min(1.5, levelOf(b).every * (0.85 + Math.random() * 0.3)));
   // the first reaction after a serve: never quicker than before (0.8s match start, 0.6s after a goal), but slow bots wait their full reaction time
-  const firstReact = (base, b) => (levelOf(b).pro ? 0.3 : Math.max(Math.min(base, 1.0), levelOf(b).every));
+  const firstReact = (base, b) => (levelOf(b).pro ? 0.15 : Math.max(Math.min(base, 1.0), levelOf(b).every));
   const GLYPH = { q: '♛︎', n: '♞︎', k: '♚︎' };
 
   let cfg = null;        // { players, level, piece, names }
@@ -345,6 +345,23 @@
     return mine || toMe || out;
   }
 
+  /** The quickest computer checks its goal on every frame, not just when it looks. If the puck is on its way in and the piece is free,
+      it tries every glide for a short while ahead and takes the best one at once. Cheap, so it can run 60 times a second. */
+  function fastDefend(b) {
+    if (!levelOf(b).fast) return false;
+    const q = S.q[b], p = S.p;
+    if (q.mv || Math.hypot(p.vx, p.vy) < 1.5) return false;
+    const T = 0.9;
+    const stay = simulate(S, b, null, T, null);
+    if (stay > -500) return false;                          // the puck is not going in: nothing to do
+    let best = null;
+    for (const c of destinations(b, q.f, q.r, cfg.piece)) {
+      const v = simulate(S, b, c, T, null);
+      if (!best || v > best.v) best = { c, v };
+    }
+    if (best && best.v > stay + 30) { realGlide(q, b, best.c[0], best.c[1]); return true; }
+    return false;
+  }
   let gJit = 0;           // a small random shift of the guard spot, changed at every look so the guarding is not always from the same square
   function botThink(b) {
     const lv = levelOf(b);
@@ -506,6 +523,7 @@
         const lv = levelOf(b);
         // the quickest computers look again at once when something happens: the other piece hit the puck, or their own piece landed
         if (lv.react && (ev.hit[1 - b] || ev.land[b])) botClock[b] = Math.min(botClock[b], ev.land[b] ? lv.react * 0.5 : lv.react);
+        if (fastDefend(b)) botClock[b] = Math.max(botClock[b], 0.1);
         botClock[b] -= dt;
         if (botClock[b] <= 0) { botThink(b); botClock[b] = nextLook(b); }
       }
