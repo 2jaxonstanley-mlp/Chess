@@ -941,21 +941,32 @@
     advance();
   }
 
-  /** Replay what really happened around move m.ply, one real move at a time, like a puzzle solution. Resolves false if it was interrupted. */
-  async function replayMoment(k) {
-    const run = ++R.run;
+  /** Play the real game on, quickly, from where it was left (R.cursor) up to move number `to`. Resolves false if it was interrupted. */
+  async function playUp(to, run, step) {
+    const gap = to - R.cursor;
+    if (gap <= 0) return true;
+    const hold = Math.max(140, Math.min(420, 4500 / gap));      // a long stretch plays faster, so it never drags
+    say({ cap: step + ' · Playing on', text: 'Playing the game on to the next highlight…' });
+    while (R && R.run === run && R.cursor < to) {
+      setPly(R.cursor + 1, true);
+      R.cursor = R.ply;
+      await wait(hold);
+    }
+    return !!R && R.run === run;
+  }
+
+  /** Replay what really happened around move m.ply, one real move at a time like a puzzle solution, carrying on from where the game was left. */
+  async function replayMoment(k, run) {
     const m = R.moments[k], i = m.ply, teach = isTeach(i), step = momentCap(k);
-    const start = Math.max(0, i - 1);                                     // the move before gives the context
-    const end = Math.min(R.total, i + 1 + (teach ? 3 : 1));              // and a few real moves after show what came of it
-    R.phase = 'replay';
-    R.cap = step;
-    setPly(start, false);
+    const nextPly = k + 1 < R.moments.length ? R.moments[k + 1].ply : R.total;
+    const end = Math.max(i + 1, Math.min(R.total, i + 1 + (teach ? 3 : 1), nextPly));     // a few real moves after it show what came of it, never past the next highlight
     say({ cap: step + ' · Replay', text: 'Watch what really happened in the game.' });
-    await wait(800);
-    for (let n = start; n < end; n++) {
-      if (!R || R.run !== run) return false;
+    await wait(600);
+    while (R && R.run === run && R.cursor < end) {
+      const n = R.cursor;
       const text = moveWords(n);                                          // (R.G is at move n now)
       setPly(n + 1, true);
+      R.cursor = n + 1;
       say({ cap: step + ' · ' + capFor(n), text, rate: n === i ? ratingAt(i) : null });
       let hold = 1250;
       if (n === i && teach) {
@@ -970,28 +981,30 @@
 
   async function gotoMoment(k) {
     cancelRetry(true);
+    const run = ++R.run;
     R.mi = k;
     markTimeline();
     R.showResign = false;
     const m = R.moments[k], step = momentCap(k);
     R.cap = step;
+    R.phase = 'replay';                       // locked while the game plays on
+    setPly(R.cursor, false);                  // the real game, exactly where it was left (a try may have changed the board)
+    say({ cap: step, text: 'Playing the game on to the next highlight…' });
     if (m.type === 'book') {
-      R.run++;
-      setPly(m.ply + 1, false);
+      if (!(await playUp(m.ply + 1, run, step))) return;
       const nm = MR.openingName(R.entry.moves, m.ply + 1);
       R.phase = 'info';
       say({ cap: step, text: (nm ? nm + '. ' : '') + 'The first ' + plural(m.count, 'analysed move') + ' followed known opening theory. Book moves are safe, tested ideas.', rate: MR.get('book') });
       return;
     }
-    if (m.type === 'resign') {
-      const run = ++R.run;
-      setPly(R.total, false);
+    if (m.type === 'resign' || m.type === 'time') {
+      if (!(await playUp(R.total, run, step))) return;
+      if (m.type === 'time') { R.phase = 'info'; say({ cap: step, text: R.an.time.t }); return; }
       R.showResign = true;
       render();
       const rs = R.an.resign;
       const r = MR.get(rs.loser === 'w' ? 'resignwhite' : 'resignblack');
       if (rs.b) {
-        R.phase = 'replay';
         say({ cap: step, text: rs.t, rate: r });
         await wait(1800);
         if (!R || R.run !== run) return;
@@ -999,18 +1012,10 @@
       } else { R.phase = 'info'; say({ cap: step, text: rs.t, rate: r }); }
       return;
     }
-    if (m.type === 'time') {
-      R.run++;
-      setPly(R.total, false);
-      R.phase = 'info';
-      say({ cap: step, text: R.an.time.t });
-      return;
-    }
     const i = m.ply;
-    if (!(await replayMoment(k))) return;
-    const run = R.run;
+    if (!(await playUp(i, run, step))) return;
+    if (!(await replayMoment(k, run))) return;
     if (isTeach(i)) {
-      R.phase = 'replay';
       say({ cap: step + ' · ' + capFor(i), text: noteText(i), rate: ratingAt(i) });
       await wait(1500);
       if (!R || R.run !== run) return;
@@ -1057,6 +1062,7 @@
     R.run++;
     cancelRetry(true);
     R.phase = 'intro';
+    R.cursor = 0;
     setPly(0, false);
     const e = R.entry;
     let open = '';
@@ -1287,7 +1293,7 @@
   /* ------------------------------------------------------------------ open / close the review */
   function enter(e) {
     ++token;
-    R = { entry: e, an: e.an, kind: isRush(e) ? 'rush' : 'chess', ply: 0, mi: -1, moments: [], retry: null, arrows: [], last: null, showResign: false, phase: 'intro', run: 0, fails: {}, cap: '' };
+    R = { entry: e, an: e.an, kind: isRush(e) ? 'rush' : 'chess', ply: 0, mi: -1, moments: [], retry: null, arrows: [], last: null, showResign: false, phase: 'intro', run: 0, fails: {}, cap: '', cursor: 0 };
     R.total = nMoves(e);
     const h = humanOf(e);
     flipped = h === 'b';
