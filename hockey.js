@@ -6,7 +6,8 @@
  * First to 7 goals wins. Play a friend on the same screen (each taps in their own half) or the computer.
  * Pieces start each round at half speed and speed up the longer the puck stays in play. If the puck sits on one side for 5 seconds a
  * 3 second countdown starts, then the puck is moved (still, in the middle) to the other side.
- * Every match is recorded (10 samples a second) so it can be watched again from History.
+ * Every match is recorded as the moves made (which square, at which tick of the 120 a second simulation) plus the few random events,
+ * so History replays it by running the same simulation again, exactly as it happened.
  */
 (() => {
   'use strict';
@@ -58,8 +59,11 @@
   let qEls = [], puckEl = null;
   let roundT = 0;        // seconds the puck has been in play this round (pieces speed up with it)
   let sideNow = -1, sideT = 0;   // which half the puck is in and for how long
-  let rec = null;        // the recording of this match
-  let recAcc = 0;
+  let rec = null;        // the recording of this match: { ev: [[tick, type, ...]], goals: [{ k, side, s }] }
+  const TICK = 1 / 120;  // the simulation always advances in steps of exactly this long, so a replay can reproduce it
+  let tk = 0, acc = 0;   // ticks played so far in this match, and the time not yet turned into ticks
+  const REC_MAX = 30000; // most events kept per match
+  const note = (a) => { if (rec && rec.ev.length < REC_MAX) rec.ev.push(a); };
   let rp = null;         // a replay being watched
   const newEv = () => ({ wall: 0, hit: [0, 0], land: [false, false] });
   let ev = newEv();      // what happened during this frame: hardest wall bounce, hardest hit by each piece, which pieces landed
@@ -221,6 +225,7 @@
   /** Start a glide that is really happening (not one the computer is only trying out), with its sound. */
   function realGlide(q, side, f, r) {
     startGlide(q, side, f, r);
+    note([tk, 0, side, f, r]);
     sfxGlide(q.mv.sp * (S.m || 1), side);
   }
 
@@ -463,28 +468,40 @@
   }
 
   /* ------------------------------------------------------------------ loop */
+  /** One step of the simulation. Returns the goal result of step(). */
+  function tick() {
+    sideCheck(TICK);                                      // may move the puck (recorded), before this tick's step
+    tk++; roundT += TICK; S.m = speedMul(roundT);
+    const goal = step(S, TICK, ev);
+    if (goal) return goal;
+    const pk = S.p;
+    if (Math.hypot(pk.vx, pk.vy) < 0.3) {
+      stallT += TICK;
+      const mid = Math.abs(pk.y - 4) < 0.7;
+      if (mid && stallT > 2.5) {
+        pk.vy = (mid ? (Math.random() < 0.5 ? 1 : -1) : (pk.y > 4 ? -1 : 1)) * 2.8; pk.vx = (Math.random() - 0.5) * 1.5; stallT = 0;
+        note([tk, 2, pk.vx, pk.vy]);
+      }
+    } else stallT = 0;
+    for (let i = 0; i < 2; i++) {
+      const q = S.q[i];
+      if (!q.mv && queued[i]) { const t = queued[i]; queued[i] = null; go(i, t[0], t[1]); }
+    }
+    return 0;
+  }
+
   function frame(now) {
     raf = requestAnimationFrame(frame);
     let dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (phase === 'play' || phase === 'goal') recordFrame(dt);
     if (phase === 'play') {
-      roundT += dt; S.m = speedMul(roundT);
-      sideCheck(dt);
-      let n = Math.ceil(dt / (1 / 120)), h = dt / n, goal = 0;
+      updateSpeedLabel();
       ev = newEv();
-      for (let i = 0; i < n && !goal; i++) goal = step(S, h, ev);
+      acc += dt;
+      let goal = 0;
+      while (acc >= TICK && !goal) { acc -= TICK; goal = tick(); }
+      if (goal) acc = 0;
       playEvents();
-      const pk = S.p;
-      if (Math.hypot(pk.vx, pk.vy) < 0.3) {
-        stallT += dt;
-        const mid = Math.abs(pk.y - 4) < 0.7;
-        if (mid && stallT > 2.5) { pk.vy = (mid ? (Math.random() < 0.5 ? 1 : -1) : (pk.y > 4 ? -1 : 1)) * 2.8; pk.vx = (Math.random() - 0.5) * 1.5; stallT = 0; }
-      } else stallT = 0;
-      for (let i = 0; i < 2; i++) {
-        const q = S.q[i];
-        if (!q.mv && queued[i]) { const t = queued[i]; queued[i] = null; go(i, t[0], t[1]); }
-      }
       for (let b = cfg.players === 0 ? 0 : 1; b < 2 && cfg.players < 2; b++) {   // 0 players: both sides are computers; 1 player: the top one
         const lv = levelOf(b);
         // the quickest computers look again at once when something happens: the other piece hit the puck, or their own piece landed
@@ -493,9 +510,10 @@
         if (botClock[b] <= 0) { botThink(b); botClock[b] = nextLook(b); }
       }
       if (goal) scored(goal === 1 ? 0 : 1);
-    } else if (phase === 'goal' && now >= freezeUntil) {
-      resetRound();
-      phase = 'play';
+    } else if (phase === 'goal') {
+      acc += dt;
+      while (acc >= TICK) { acc -= TICK; tk++; }         // time keeps counting while the goal is celebrated, so the replay waits the same
+      if (now >= freezeUntil) { resetRound(); phase = 'play'; }
     }
     draw();
   }
@@ -525,31 +543,21 @@
     sideNow = to; sideT = 0; stallT = 0;
     showCount(0);
     toast('Puck moved to ' + cfg.names[to] + "'s side", 1200);
-    if (rec) { rec.cut.push(rec.f.length / 6); rec.tele.push({ i: rec.f.length / 6, to }); }
+    note([tk, 3, to]);
   }
   function updateSpeedLabel() {
     const t = Math.round(speedMul(roundT) * 100) + '%';
     if (t !== lastSpd) { lastSpd = t; const e = $('#hk-spd'); if (e) e.textContent = 'Piece speed ' + t; }
   }
 
-  /* ---- recording (10 samples a second, in hundredths of a square) */
-  function recordFrame(dt) {
-    if (!rec || rec.f.length > 6 * 10 * 60 * 25) return;
-    recAcc += dt;
-    while (recAcc >= 0.1) {
-      recAcc -= 0.1;
-      const p = S.p, a = S.q[0], b = S.q[1];
-      rec.f.push(Math.round(p.x * 100), Math.round(p.y * 100), Math.round(a.x * 100), Math.round(a.y * 100), Math.round(b.x * 100), Math.round(b.y * 100));
-    }
-    updateSpeedLabel();
-  }
+  /* ---- recording: every move (tick, side, square), restart and random push is noted as it happens (see note()) */
 
   let serveTo = 0;       // the side that was just scored on gets the puck in its half
   function resetRound() {
     roundT = 0; sideNow = -1; sideT = 0; showCount(0);
-    if (rec) rec.cut.push(rec.f.length / 6);
     S = newState();
     S.p.y = serveTo === 0 ? 2.2 : 5.8;
+    note([tk, 1, S.p.y]);
     queued = [null, null];
     botClock = [firstReact(0.6, 0), firstReact(0.6, 1)];
     setScore();
@@ -559,7 +567,7 @@
     score[side]++;
     serveTo = side === 0 ? 1 : 0;
     showCount(0);
-    if (rec) rec.goals.push({ i: Math.max(0, rec.f.length / 6 - 1), side, s: score.slice() });
+    if (rec) rec.goals.push({ k: tk, side, s: score.slice() });
     setScore();
     S.p.vx = S.p.vy = 0;
     const name = cfg.names[side];
@@ -577,10 +585,9 @@
       const human = cfg.players === 1;
       LP.rewards.event('game', { mode: 'hockey', won: human ? winner === 0 : true, draw: false, level: human ? cfg.level : 'pvp', moves: score[0] + score[1], secs, elo: null, q: {} });
     }
-    if (rec) { try { recordFrame(0.1); } catch (e) { /* ignore */ } }
     let payload = null;
-    if (rec && rec.f.length >= 12) {
-      payload = { v: 1, kind: 'hockey', id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), piece: cfg.piece, names: cfg.names.slice(), players: cfg.players, level: cfg.players === 1 ? cfg.level : null, levels: cfg.players === 0 ? cfg.levels.slice() : null, score: score.slice(), hz: 10, f: rec.f, cut: rec.cut, goals: rec.goals, tele: rec.tele, dur: secs };
+    if (rec && rec.ev.length) {
+      payload = { v: 2, kind: 'hockey', id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), piece: cfg.piece, names: cfg.names.slice(), players: cfg.players, level: cfg.players === 1 ? cfg.level : null, levels: cfg.players === 0 ? cfg.levels.slice() : null, score: score.slice(), tps: 120, ev: rec.ev, goals: rec.goals, end: tk, dur: secs };
       if (LP.history) { try { LP.history.add({ kind: 'hockey', id: payload.id, mode: 'hockey', modeLabel: 'Chess x Air Hockey', names: { w: cfg.names[0], b: cfg.names[1] }, level: payload.level, bots: cfg.players === 0, result: cfg.names[winner] + ' wins \u00b7 ' + score[0] + ' \u2013 ' + score[1], winner: winner === 0 ? 'w' : 'b', dur: secs, moves: score[0] + score[1], timed: true, payload }); } catch (e) { /* best effort */ } }
     }
     if (LP.fx) LP.fx.play(cfg.players === 1 && winner === 1 ? 'lose' : 'win');
@@ -604,7 +611,8 @@
     S.p.y = serveTo === 0 ? 2.2 : 5.8;
     queued = [null, null];
     started = Date.now();
-    rec = { f: [], cut: [], goals: [], tele: [] }; recAcc = 0; roundT = 0; sideNow = -1; sideT = 0; lastSpd = ''; showCount(0);
+    rec = { ev: [], goals: [] }; tk = 0; acc = 0; stallT = 0; roundT = 0; sideNow = -1; sideT = 0; lastSpd = ''; showCount(0);
+    note([0, 1, S.p.y]);
     buildBoard();
     $('#hk-top-name').textContent = cfg.names[1];
     $('#hk-bottom-name').textContent = cfg.names[0];
@@ -632,14 +640,41 @@
     const j = Math.min(n - 1, i + 1);
     if (rp.cuts.has(j)) k = 0;                       // never glide across a restart or a puck teleport
     const g = (a, c) => (d.f[a * 6 + c] + (d.f[j * 6 + c] - d.f[a * 6 + c]) * k) / 100;
-    const f = d.f;
     S.p.x = g(i, 0); S.p.y = g(i, 1); S.q[0].x = g(i, 2); S.q[0].y = g(i, 3); S.q[1].x = g(i, 4); S.q[1].y = g(i, 5);
     let sc = [0, 0];
     for (const gl of d.goals) if (gl.i <= i) sc = gl.s;
     return { i, sc };
   }
-  function rpShow() {
-    const { sc } = rpPose(rp.t);
+  /* New recordings (v2) are replayed by running the simulation again with the noted moves, so it plays out exactly as it did. */
+  function rpReset() { S = newState(); rp.tk = 0; rp.ei = 0; rp.roundT = 0; rp.frozen = false; }
+  function rpApply(e) {
+    if (e[1] === 0) startGlide(S.q[e[2]], e[2], e[3], e[4]);
+    else if (e[1] === 1) { S = newState(); S.p.y = e[2]; rp.roundT = 0; rp.frozen = false; }
+    else if (e[1] === 2) { S.p.vx = e[2]; S.p.vy = e[3]; }
+    else if (e[1] === 3) { S.p.x = 4; S.p.y = e[2] === 1 ? 6 : 2; S.p.vx = S.p.vy = 0; }
+  }
+  function rpAdvance(target, sound) {
+    const evs = rp.d.ev;
+    while (rp.tk < target) {
+      while (rp.ei < evs.length && evs[rp.ei][0] <= rp.tk) rpApply(evs[rp.ei++]);
+      if (!rp.frozen) {
+        rp.roundT += TICK; S.m = speedMul(rp.roundT);
+        const e = sound ? newEv() : null;
+        if (step(S, TICK, e)) { S.p.vx = S.p.vy = 0; rp.frozen = true; }
+        if (e && (e.wall || e.hit[0] || e.hit[1])) { ev = e; playEvents(); }
+      }
+      rp.tk++;
+    }
+    while (rp.ei < evs.length && evs[rp.ei][0] <= rp.tk) rpApply(evs[rp.ei++]);   // restarts and moves due right now, so a paused replay shows them
+  }
+  function rpShow(sound) {
+    let sc = [0, 0];
+    if (rp.v2) {
+      const target = Math.max(0, Math.min(rp.d.end, Math.round(rp.t * 120)));
+      if (target < rp.tk) rpReset();                  // going back: start again and run forward
+      rpAdvance(target, sound);
+      for (const gl of rp.d.goals) if (gl.k <= rp.tk) sc = gl.s;
+    } else sc = rpPose(rp.t).sc;
     score = sc.slice(); setScore();
     $('#hk-rp-time').textContent = fmtT(rp.t) + ' / ' + fmtT(rp.total);
     $('#hk-rp-scrub').value = String(Math.round(rp.t * 100));
@@ -653,17 +688,19 @@
     if (rp.playing) {
       rp.t += dt * RSPEEDS[rp.sp];
       if (rp.t >= rp.total) { rp.t = rp.total; rp.playing = false; $('#hk-rp-play').textContent = 'Replay'; }
-      rpShow();
+      rpShow(RSPEEDS[rp.sp] <= 2);
     }
   }
   function watch(d, from) {
-    if (!d || !d.f || d.f.length < 12) return;
+    const v2 = d && d.v === 2;
+    if (!d || !(v2 ? d.ev && d.ev.length && d.end : d.f && d.f.length >= 12)) return;
     cancelAnimationFrame(raf);
     if (rp) cancelAnimationFrame(rp.raf);
     LP.closeSheet();
     cfg = { players: d.players || 2, level: d.level, piece: d.piece || 'q', names: (d.names || ['Player 1', 'Player 2']).slice() };
-    const n = d.f.length / 6;
-    rp = { d, from: from || 'history', t: 0, total: (n - 1) / (d.hz || 10), playing: true, sp: 0, last: performance.now(), cuts: new Set(d.cut || []) };
+    const n = v2 ? 0 : d.f.length / 6;
+    const total = v2 ? d.end / 120 : (n - 1) / (d.hz || 10);
+    rp = { d, v2, from: from || 'history', t: 0, total, playing: true, sp: 0, last: performance.now(), cuts: new Set(d.cut || []), tk: 0, ei: 0, roundT: 0, frozen: false };
     S = newState();
     phase = 'replay';
     buildBoard();
@@ -674,7 +711,7 @@
     showCount(0);
     const sc = $('#hk-rp-scrub');
     sc.max = String(Math.round(rp.total * 100)); sc.step = '1';
-    $('#hk-rp-marks').innerHTML = d.goals.map((g) => `<i style="left:${(g.i / Math.max(1, n - 1) * 100).toFixed(2)}%" class="${g.side === 0 ? 'w' : 'b'}"></i>`).join('');
+    $('#hk-rp-marks').innerHTML = d.goals.map((g) => `<i style="left:${((v2 ? g.k / Math.max(1, d.end) : g.i / Math.max(1, n - 1)) * 100).toFixed(2)}%" class="${g.side === 0 ? 'w' : 'b'}"></i>`).join('');
     $('#hk-rp-play').textContent = 'Pause';
     $('#hk-rp-speed').textContent = '1×';
     $('#hockey').classList.add('replaying');
