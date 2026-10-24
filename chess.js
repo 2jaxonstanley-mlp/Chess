@@ -489,7 +489,27 @@ class Chess {
       san += isSecretReveal ? 'Q' : (sym[type] || '');
     }
 
-    // Disambiguation simplified (skip full for brevity)
+    // two pieces of the same kind can reach the square: say which one moved (Nbd2, R1e2, Qh4e1)
+    if (type !== PAWN && type !== KING && !isSecretReveal && !this.isSecretDisguised(m.from)) {
+      const col = this.colorOf(p);
+      let amb = false, sameFile = false, sameRank = false;
+      for (let s = 0; s < 128; s++) {
+        if (s & 0x88) { s += 7; continue; }
+        if (s === m.from || this.board[s] !== p || this.isSecretDisguised(s)) continue;
+        for (const o of this.genPieceMoves(s)) {
+          if (o.to !== m.to) continue;
+          this.makeMove(o);
+          const ok = !this.inCheck(col);
+          this.unmakeMove();
+          if (ok) { amb = true; if (fileOf(s) === fileOf(m.from)) sameFile = true; if (rankOf(s) === rankOf(m.from)) sameRank = true; break; }
+        }
+      }
+      if (amb) {
+        if (!sameFile) san += FILES[fileOf(m.from)];
+        else if (!sameRank) san += String(rankOf(m.from) + 1);
+        else san += alg(m.from);
+      }
+    }
     const capture = this.board[m.to] || m.flags === 2;
     if (capture) {
       if (type === PAWN && !isSecretReveal) san += FILES[fileOf(m.from)];

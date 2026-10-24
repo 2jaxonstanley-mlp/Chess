@@ -257,7 +257,7 @@
    * Full analysis of one move for the Analyze feature. Returns { rating, best, bestScore, playedScore, top, depth, book, forced, isMate }.
    * ms / depth control how thorough the search is.
    */
-  function analyse(g0, m, ms, depth) {
+  function analyse(g0, m, ms, depth, q) {
     const g = clone(g0);
     const legal = g.legalMoves();
     const mv = legal.find((x) => same(x, m));
@@ -269,7 +269,7 @@
     out.facts = f;
     if (bk.set && bk.set.has(mv.from + '-' + mv.to)) { out.rating = RATINGS.book; out.book = true; }
     if (f.isMate) { out.rating = g.turn === WHITE ? RATINGS.matewhite : RATINGS.mateblack; out.isMate = true; out.best = mv; return out; }
-    const A = window.AIAnalyse.run(g0, mv, ms || 900, depth || 11);
+    const A = window.AIAnalyse.run(g0, mv, ms || 900, depth || 11, q);
     if (!A.top.length) return out;
     out.top = A.top.map((t) => ({ move: legal.find((x) => same(x, t.move)) || t.move, score: t.score }));
     out.best = out.top[0].move; out.bestScore = out.top[0].score; out.depth = A.depth;
@@ -328,9 +328,11 @@
   /* Optional artwork: drop icon-<id>.png into the game folder and they replace the text symbols automatically. */
   for (const x of Object.values(RATINGS)) {
     x.img = 'icon-' + x.id + '.png';
-    const im = new Image();
-    im.onload = () => { x.hasImg = true; };
-    im.src = x.img;
+    if (typeof Image !== 'undefined') {          // (not in the analysis worker)
+      const im = new Image();
+      im.onload = () => { x.hasImg = true; };
+      im.src = x.img;
+    }
   }
   const iconHtml = (x) => (x.hasImg ? `<img class="ri" src="${x.img}" alt="${x.label}">` : x.sym.replace(/&/g, '&amp;').replace(/</g, '&lt;'));
 

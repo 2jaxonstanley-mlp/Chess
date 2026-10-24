@@ -1011,12 +1011,12 @@
   window.AIAnalyse = {
     clone: (g) => cloneForSearch(g, 0),
     MATE,
-    run(g, played, ms, maxDepth) {
+    run(g, played, ms, maxDepth, q) {
       const c = cloneForSearch(g, 0);
       const root = c.legalMoves();
       if (!root.length) return { depth: 0, legal: 0, top: [], played: null };
       if (g.mode === 'secret') ttDepth.fill(-1);
-      const cfg = { q: 4 };
+      const cfg = { q: q || 4 };
       prepare(g, c, cfg);
       const t0 = now();
       deadline = t0 + (ms || 450); nodes = 0; aborted = false;

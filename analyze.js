@@ -23,6 +23,7 @@
   const sameKey = (m, k) => m.from === k.f && m.to === k.t && (m.promo || 0) === (k.p || 0) && (m.q || 0) === (k.q || 0);
   const same = (a, b) => a.from === b.from && a.to === b.to && (a.promo || 0) === (b.promo || 0) && (a.q || 0) === (b.q || 0);
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  const cap1 = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const ML = { basic: 'Classic', secret: 'Secret Queen', bullet: 'Bullet', rapid: 'Rapid' };
 
@@ -32,8 +33,8 @@
   const find = (id) => all().find((e) => e.id === id);
   function put(e) { const l = all(); const i = l.findIndex((x) => x.id === e.id); if (i >= 0) { l[i] = e; LP.store.set(l); } }
   const isRush = (e) => e.kind === 'rush';
-  /** Rush analyses made before points-based rating (version 3) are redone. */
-  const anDone = (e) => !!(e.an && e.an.done && (!isRush(e) || e.an.v === 3));
+  /** Analyses made by an older version (before the deeper engine and the new lesson) are redone. */
+  const anDone = (e) => !!(e.an && e.an.done && e.an.v === 4);
   const modeLabel = (e) => (isRush(e) ? 'Capture Rush' : ML[e.mode2 || e.mode] || 'Classic');
   /** The side a person played against the computer ('w' / 'b'), or null for two players or computer against computer. */
   function humanOf(e) {
@@ -45,24 +46,9 @@
   const nMoves = (e) => (isRush(e) ? e.events.length : e.moves.length);
 
   /* ------------------------------------------------------------------ chess helpers */
-  /** Captures that win material for the side to move: [{ m, victim, net, undefended }] biggest first. */
-  function winningCaptures(g) {
-    const out = [];
-    for (const m of g.legalMoves()) {
-      const vp = g.board[m.to];
-      if (!vp && m.flags !== 2) continue;
-      const vt = vp ? g.effectiveType(m.to) : 1;
-      if (vt === 6) continue;
-      const vv = PV[vt], av = PV[g.effectiveType(m.from)] || 0;
-      g.makeMove(m);
-      const rec = g.legalMoves().some((r) => r.to === m.to);
-      g.unmakeMove();
-      const net = rec ? vv - av : vv;
-      if (net >= 2 || (!rec && vv >= 1)) out.push({ m, to: m.to, vt, vv, net, undefended: !rec, at: g.effectiveType(m.from) });
-    }
-    return out.sort((a, b) => b.net - a.net);
-  }
-  const pieceName = (g, s) => (g.isSecretDisguised(s) ? 'secret queen' : PN[g.effectiveType(s)] || 'piece');
+  const EX = window.Explain, AC = window.AnalyzeCore;
+  const TEACH = { inaccuracy: 1, mistake: 1, blunder: 1, missedwin: 1 };      // the ratings that get a "try to find the fix" step
+  const WV = '1';                                                              // version of the background analysis files (bump it to make browsers fetch them again)
 
   /** Who is talking about whom: "You left your pawn..." or "Alice left their pawn...". */
   function voice(e, color) {
@@ -72,136 +58,17 @@
     return { S: nameOf(e, color), poss: 'their', opp: nameOf(e, opp), they: "they'd", me: false };
   }
 
-  /** A move for the side to move that attacks two or more of the other side's valuable pieces at once, and cannot just be captured. */
-  function findFork(g, victimColor) {
-    let best = null;
-    for (const m of g.legalMoves()) {
-      const mp = g.board[m.from];
-      if ((mp & 7) === 6) continue;
-      g.makeMove(m);
-      const at = m.to, fv = PV[g.effectiveType(at)] || 0;
-      const victims = [];
-      let val = 0;
-      for (const mm of g.genPieceMoves(at)) {
-        const vp = g.board[mm.to];
-        if (!vp || (vp & 24) !== victimColor) continue;
-        const t = g.effectiveType(mm.to);
-        if (t === 6 || PV[t] >= 3) { if (!victims.some((v) => v.sq === mm.to)) victims.push({ sq: mm.to, name: pieceName(g, mm.to), val: t === 6 ? 10 : PV[t] }); }
-      }
-      let safe = true;
-      const capt = g.legalMoves().find((r) => r.to === at);
-      if (capt) {
-        const av = PV[g.effectiveType(capt.from)] || 0;
-        g.makeMove(capt);
-        const recap = g.legalMoves().some((r) => r.to === at);
-        g.unmakeMove();
-        if (!recap || av <= fv) safe = false;       // it can be taken for free, or traded off
-      }
-      if (victims.length >= 2 && safe) {
-        val = victims.reduce((a, v) => a + v.val, 0);
-        if (!best || val > best.val) best = { from: toIdx(m.from), to: toIdx(at), name: PN[g.effectiveType(at)], victims: victims.map((v) => v.name), val };
-      }
-      g.unmakeMove();
-    }
-    return best;
-  }
-
-  /** The lesson text for one analysed chess move. g = position before the move. */
-  function chessNote(e, g, mv, res, color) {
+  /** The lesson text for one analysed chess move: g = position before the move, p = what the engine found (analyzecore.js). */
+  function chessNote(e, g, mv, p, color) {
     const vc = voice(e, color);
-    const r = res.rating ? res.rating.id : null;
-    const cl = MR.clone(g);
-    const lm = cl.legalMoves();
-    const mvc = lm.find((x) => same(x, mv)) || mv;
-    const san = LP.fmt(cl.moveToSan(mvc));
-    const best = res.best ? (lm.find((x) => same(x, res.best)) || res.best) : null;
-    const bestSan = best ? LP.fmt(cl.moveToSan(best)) : '';
-    const B = res.bestScore, P = res.playedScore;
-    const sq1 = (s) => sqName(toIdx(s));
-    const teach = r === 'inaccuracy' || r === 'mistake' || r === 'blunder' || r === 'missedwin';
-    const out = { k: 'info', t: '', sq: [], bs: bestSan };
-    if (teach) {
-      const lead = { inaccuracy: 'Inaccuracy.', mistake: 'Mistake.', blunder: 'Blunder!', missedwin: 'Missed win!' }[r];
-      const mateBest = B > MATE - 100;
-      const tail = best && !(best.from === mvc.from && best.to === mvc.to) ? ' A better move was ' + bestSan + '.' : '';
-      if (mateBest && !(P > MATE - 100)) {
-        const n = Math.max(1, Math.ceil((MATE - B) / 2));
-        out.k = 'win'; out.n = n; out.sq = [toIdx(best.from), toIdx(best.to)];
-        out.t = `Missed win! ${vc.S} could have won in ${plural(n, 'move')}! ${bestSan} starts a forced checkmate. ${vc.S} played ${san} instead. Try again: can you find the win?`;
-        return out;
-      }
-      if (P < -MATE + 100 && B > -MATE + 100) {
-        const n = Math.max(1, Math.ceil((MATE + P) / 2));
-        out.k = 'mated';
-        if (n === 1) {
-          try {
-            const c2 = MR.clone(g), m2 = c2.legalMoves().find((x) => same(x, mv));
-            c2.makeMove(m2);
-            const rep = c2.legalMoves().find((x) => { c2.makeMove(x); const ok = c2.isCheckmate(); c2.unmakeMove(); return ok; });
-            if (rep) out.thr = { a: toIdx(rep.from), b: toIdx(rep.to) };
-          } catch (x) { /* no arrow */ }
-        }
-        out.t = `${lead} ${san} allows checkmate in ${plural(n, 'move')}.${tail} Try again: find a move that stays safe.`;
-        if (best) out.sq = [toIdx(best.from), toIdx(best.to)];
-        return out;
-      }
-      // what can the opponent do after this move? a free piece, a fork, a mate
-      let hang = null, fork = null, hangName = '', hangSan = '';
-      cl.makeMove(mvc);
-      try {
-        hang = winningCaptures(cl)[0] || null;
-        if (hang) { hangName = pieceName(cl, hang.to); hangSan = LP.fmt(cl.moveToSan(hang.m)); }
-        fork = findFork(cl, me);
-      } catch (x) { /* keep what was found */ }
-      cl.unmakeMove();
-      let missed = null;
-      try { missed = winningCaptures(cl)[0] || null; } catch (x) { missed = null; }
-      const tookIt = missed && mvc.to === missed.to;
-      const bigHang = hang && (hang.net >= 3 || hang.undefended && hang.vv >= 3);
-      if (fork && !bigHang) {
-        out.k = 'fork';
-        out.sq = [fork.to];
-        out.thr = { a: fork.from, b: fork.to };
-        out.t = `${lead} This move opened a fork. ${vc.opp}'s ${fork.name} can go to ${sqName(fork.to)} and attack ${vc.poss} ${fork.victims.join(' and ')} at the same time.${tail} Try again.`;
-        return out;
-      }
-      if (hang && (hang.net >= 2 || hang.undefended)) {
-        out.k = 'hang';
-        out.sq = [toIdx(hang.to)];
-        out.thr = { a: toIdx(hang.m.from), b: toIdx(hang.to) };
-        if (hang.to === mvc.to) out.t = `${lead} ${vc.S} moved ${vc.poss} ${pieceName(g, mvc.from)} to ${sq1(hang.to)}, where it can be taken${hang.undefended ? ' for free' : ' in a bad trade'}.${tail} Try again.`;
-        else if (hang.undefended) out.t = `${lead} ${vc.S} left ${vc.poss} ${hangName} on ${sq1(hang.to)} undefended. ${vc.opp} can simply take it with ${hangSan}.${tail} Try again.`;
-        else out.t = `${lead} ${vc.poss[0].toUpperCase() + vc.poss.slice(1)} ${hangName} on ${sq1(hang.to)} can be taken by a ${PN[hang.at]} in a trade that costs ${vc.they.replace("'d", '')} ${hang.net} points.${tail} Try again.`;
-        return out;
-      }
-      if (missed && !tookIt && missed.net >= 2) {
-        out.k = 'miss';
-        const vn = pieceName(cl, missed.to);
-        out.sq = [toIdx(missed.m.from), toIdx(missed.to)];
-        out.t = `${lead} ${vc.S} missed a chance to win a ${vn}${missed.undefended ? ' for free' : ''}: ${LP.fmt(cl.moveToSan(missed.m))} takes the ${vn} on ${sq1(missed.to)}. Try again.`;
-        return out;
-      }
-      const a = Math.round(MR.wp(B) * 100), b = Math.round(MR.wp(P) * 100);
-      out.k = 'generic';
-      if (best) out.sq = [toIdx(best.from), toIdx(best.to)];
-      out.t = `${lead} ${san} dropped ${vc.poss} winning chances from ${a}% to ${b}%.${tail} Try again: find the stronger move.`;
-      return out;
+    const c0 = MR.clone(g);
+    const m = c0.legalMoves().find((x) => same(x, mv)) || mv;
+    if (TEACH[p.r]) {
+      const lead = { inaccuracy: 'Inaccuracy.', mistake: 'Mistake.', blunder: 'Blunder!', missedwin: 'Missed win!' }[p.r];
+      return EX.mistake({ g: c0, mv: m, p, vc, lead });
     }
-    // things done well
-    const f = res.facts || {};
-    const sac = f.afterQs !== undefined && f.afterQs <= f.before - 150;
-    if (r === 'brilliant') {
-      out.k = 'praise';
-      out.t = sac ? `Brilliant! ${san} gives up material on purpose, and it is still the best move. That is very hard to spot.` : `Brilliant! ${san} is a standout move that most players would miss.`;
-    } else if (r === 'great') { out.k = 'praise'; out.t = `Great move! ${san} was the one move that kept the advantage.`; }
-    else if (r === 'best') { out.k = 'praise'; out.t = `${san} was the best move in this position.`; }
-    else if (r === 'good') { out.k = 'praise'; out.t = `A good move. ${san} keeps things safe and solid${bestSan && !(best.from === mvc.from && best.to === mvc.to) ? ' (the engine slightly preferred ' + bestSan + ')' : ''}.`; }
-    else if (r === 'interesting') { out.k = 'praise'; out.t = `Interesting! ${san} takes a risk and it holds up.`; }
-    else if (r === 'novelty') { out.k = 'praise'; out.t = `A novelty: ${san} leaves known opening theory, and it is still a sound move.`; }
-    else if (r === 'matewhite' || r === 'mateblack') { out.k = 'praise'; out.t = `Checkmate! ${san} finishes the game.`; }
-    else if (r === 'book') { out.k = 'book'; out.t = `${san} is a book move.`; }
-    out.sq = [toIdx(mvc.to)];
-    return out;
+    if (p.r) return EX.praise({ g: c0, mv: m, p, vc }, p.r);
+    return { k: 'info', t: '', sq: [toIdx(m.to)] };
   }
 
   /* ------------------------------------------------------------------ analysis (chess) */
@@ -230,47 +97,59 @@
     an.sum = sum;
   }
 
+  /** Run the engine job in a Web Worker (the page stays smooth); where workers are not allowed (a page opened from a folder) it runs here instead. */
+  function runCore(job, my) {
+    return new Promise((resolve) => {
+      let worker = null, over = false, poll = 0;
+      const end = (v) => { if (over) return; over = true; clearInterval(poll); if (worker) { try { worker.terminate(); } catch (x) { /* already gone */ } } resolve(v); };
+      const inline = () => {
+        if (over) return;
+        if (worker) { try { worker.terminate(); } catch (x) { /* already gone */ } worker = null; }
+        AC.analyseGame(job, { progress, cancelled: () => my !== token }).then((r) => end(r), () => end(null));
+      };
+      poll = setInterval(() => { if (my !== token) end(null); }, 250);
+      try {
+        worker = new Worker('analyzeworker.js?v=' + WV);
+        worker.onmessage = (ev) => {
+          const d = ev.data || {};
+          if (d.type === 'progress') progress(d.p, d.sub);
+          else if (d.type === 'done') end(d.plies);
+          else if (d.type === 'error') inline();
+        };
+        worker.onerror = () => inline();
+        worker.postMessage({ type: 'analyse', job });
+      } catch (x) { inline(); }
+    });
+  }
+
   async function analyseChess(e, both, my) {
     const h = humanOf(e);
     const want = (i) => both || !h || (i % 2 === 0) === (h === 'w');
-    const an = e.an && e.an.v === 2 ? e.an : { v: 2, both: false, done: false, plies: {} };
+    const an = e.an && e.an.v === 4 ? e.an : { v: 4, both: false, done: false, plies: {} };
     an.done = false;
     const idxs = [];
     e.moves.forEach((m, i) => { if (want(i) && !an.plies[i]) idxs.push(i); });
-    const N = Math.max(1, idxs.length);
-    const ms = Math.round(Math.max(5000 / N, Math.min(1400, Math.max(350, 30000 / N))));
-    const t0 = performance.now();
-    const g = new Chess();
-    g.mode = e.mode; g.reset();
-    if (e.fen) g.loadFen(e.fen);
-    g.secretQueen = { [WHITE]: e.secrets.w, [BLACK]: e.secrets.b };
-    let done = 0;
+    const job = { mode: e.mode, fen: e.fen || null, secrets: { w: e.secrets.w, b: e.secrets.b }, moves: e.moves, idxs, budget: 30000 };
+    progress(1, 'Starting the engine');
+    const res = idxs.length ? await runCore(job, my) : {};
+    if (!res || my !== token) return null;
+    progress(97, 'Writing the lesson');
+    await wait(30);
+    const g = AC.startPosition(job);
+    const todo = new Set(idxs);
     for (let i = 0; i < e.moves.length; i++) {
-      const m = e.moves[i];
-      if (idxs.indexOf(i) >= 0) {
-        if (my !== token) return null;
-        progress(done / N * 92, 'Move ' + (Math.floor(i / 2) + 1) + ' of ' + Math.ceil(e.moves.length / 2));
-        await wait(20);
-        const col = i % 2 === 0 ? 'w' : 'b';
-        let res = null;
-        try { res = MR.analyse(g, m, ms, 12); } catch (x) { res = null; }
-        if (res) {
-          let note;
-          try { note = chessNote(e, g, m, res, col); } catch (x) { note = { k: 'info', t: '', sq: [] }; }
-          an.plies[i] = {
-            r: res.rating ? res.rating.id : null, b: res.best ? mvKey(res.best) : null,
-            bs: Math.round(res.bestScore || 0), ps: Math.round(res.playedScore || 0), d: res.depth || 0,
-            top: (res.top || []).map((t) => [mvKey(t.move), Math.round(t.score)]), n: note,
-          };
-        }
-        done++;
+      const m = e.moves[i], p = res[i];
+      if (p && todo.has(i)) {
+        let note;
+        try { note = chessNote(e, g, m, p, i % 2 === 0 ? 'w' : 'b'); } catch (x) { note = { k: 'info', t: '', sq: [] }; }
+        an.plies[i] = { r: p.r, b: p.b, bs: p.bs, ps: p.ps, d: p.d, n: note };
       }
       g.makeMove(m);
     }
     // how the game ended: a forfeit or the clock
     an.resign = null; an.time = null;
     if (e.resigned && (both || !h || h === e.resigned)) {
-      progress(94, 'Checking the forfeit');
+      progress(98, 'Checking the forfeit');
       await wait(20);
       try { an.resign = resignNote(e, g); } catch (x) { an.resign = null; }
     } else if (/ran out of time/i.test(e.result || '')) {
@@ -279,12 +158,6 @@
         const vt = voice(e, loserC);
         an.time = { t: `${vt.S} ran out of time. In a clock game, play quick moves in simple positions and save your time for the hard ones.` };
       }
-    }
-    // at least five seconds, so the bar never flashes past
-    while (performance.now() - t0 < 5000) {
-      if (my !== token) return null;
-      progress(Math.max(94, Math.min(99, 94 + (performance.now() - t0) / 5000 * 5)), 'Almost done');
-      await wait(120);
     }
     summarise(e, an);
     an.both = an.both || !!both || !h;
@@ -296,7 +169,7 @@
   function resignNote(e, g) {
     const loser = e.resigned;
     const lc = loser === 'w' ? WHITE : BLACK;
-    const A = AI.run(g, null, 1500, 12);
+    const A = AI.run(MR.clone(g), null, 2500, 14, 5);
     const vc = voice(e, loser);
     if (!A.top.length) return { t: `${vc.S} forfeited.`, k: 'ok', loser };
     const s = A.top[0].score;
@@ -307,8 +180,8 @@
     for (let sq0 = 0; sq0 < 128; sq0++) { if (sq0 & 0x88) { sq0 += 7; continue; } const p = g.board[sq0]; if (p) mat += ((p & 24) === lc ? 1 : -1) * (PV[p & 7] || 0); }
     const cl = MR.clone(g);
     const bm = A.top[0].move;
-    const bsan = myTurn ? LP.fmt(cl.moveToSan(bm)) : '';
-    const out = { loser, wp: Math.round(wpF * 100), mat, myTurn, b: myTurn ? mvKey(bm) : null, bs: bsan, t: '', k: 'ok' };
+    const bph = myTurn ? EX.phrase(cl, cl.legalMoves().find((x) => same(x, bm)) || bm) : null;
+    const out = { loser, wp: Math.round(wpF * 100), mat, myTurn, b: myTurn ? mvKey(bm) : null, bs: bph ? bph.inf : '', t: '', k: 'ok' };
     if (fs < -MATE + 100) {
       const n = Math.max(1, Math.ceil((MATE + fs) / 2));
       out.k = 'lost';
@@ -319,10 +192,10 @@
       out.t = `Sometimes forfeiting is the best choice. ${down} only about ${Math.round(wpF * 100)}% winning chances left, so there was very little to fight for.`;
     } else if (wpF >= 0.35 && myTurn) {
       out.k = 'chance';
-      out.t = `You had a chance here! ${vc.me ? 'Your' : 'Their'} position was still playable (about ${Math.round(wpF * 100)}% winning chances). ${bsan} was a good try. Try again: find a move that keeps ${vc.me ? 'you' : 'them'} in the game.`;
+      out.t = `You had a chance here! ${vc.me ? 'Your' : 'Their'} position was still playable (about ${Math.round(wpF * 100)}% winning chances), so forfeiting was too early. Look for a move that keeps ${vc.me ? 'you' : 'them'} in the game.`;
     } else {
       out.k = 'tough';
-      out.t = `A tough position, but not lost yet (about ${Math.round(wpF * 100)}% winning chances). Forfeiting is fair when you are clearly behind, but playing on gives your opponent a chance to slip.${myTurn ? ' ' + bsan + ' was the best try. Try again?' : ''}`;
+      out.t = `A tough position, but not lost yet (about ${Math.round(wpF * 100)}% winning chances). Forfeiting is fair when you are clearly behind, but playing on gives your opponent a chance to slip.${myTurn ? ' There was still a move worth trying.' : ''}`;
     }
     if (out.k === 'lost') out.b = null;
     return out;
@@ -386,7 +259,7 @@
     const lab = window.Rush && window.Rush.lab;
     if (!lab) return null;
     const h = humanOf(e);
-    const an = e.an && e.an.v === 3 ? e.an : { v: 3, both: false, done: false, plies: {} };
+    const an = e.an && e.an.v === 4 ? e.an : { v: 4, both: false, done: false, plies: {} };
     an.done = false;
     const frames = lab.framesOf(e);
     const want = (i) => {
@@ -453,7 +326,8 @@
     if (teach) {
       if (bestCap && info.bg > info.g) {
         out.k = 'miss';
-        out.t = `${lead} ${vc.S} could have taken the ${nameT(bestCap.t)} on ${sqName(best.to)} for ${ptsW(info.bg)}${side === 'w' ? ' (' + VALUE(bestCap.t) + ' × 2, since White scores double)' : ''}. ${cap ? `Taking the ${nameT(cap.t)} scored only ${ptsW(info.g)}.` : `The ${mine} move scored nothing.`}${cost} Try again: find the best capture.`;
+        out.q = `${lead} ${vc.S} missed a capture worth ${ptsW(info.bg)}. ${cap ? `Taking the ${nameT(cap.t)} scored only ${ptsW(info.g)}.` : `The ${mine} move scored nothing.`}${cost}`;
+        out.t = `${lead} ${vc.S} could have taken the ${nameT(bestCap.t)} on ${sqName(best.to)} for ${ptsW(info.bg)}${side === 'w' ? ' (' + VALUE(bestCap.t) + ' × 2, since White scores double)' : ''}. ${cap ? `Taking the ${nameT(cap.t)} scored only ${ptsW(info.g)}.` : `The ${mine} move scored nothing.`}${cost}`;
         return out;
       }
       // did the move leave one of its own pieces to be taken?
@@ -472,14 +346,15 @@
       if (hang >= 0) {
         out.k = 'hang';
         out.t = side === 'w'
-          ? `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can take it. That costs ${ptsW(hv)}, and it costs White its turn too.${cost} Try again: find a safer move.`
-          : `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can capture it for ${ptsW(hv)} (${VALUE(work[hang].t)} × 2, because White scores double).${cost} Try again.`;
+          ? `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can take it. That costs ${ptsW(hv)}, and it costs White its turn too.${cost}`
+          : `${lead} ${vc.S} left ${vc.poss} ${nameT(work[hang].t)} on ${sqName(hang)} where ${vc.opp} can capture it for ${ptsW(hv)} (${VALUE(work[hang].t)} × 2, because White scores double).${cost}`;
         out.sq = [hang, best.to];
         out.thr = { a: atk, b: hang };
         return out;
       }
       out.k = 'generic';
-      out.t = `${lead} A stronger move was ${bestMover} ${sqName(best.from)} to ${sqName(best.to)}${bestCap ? ', capturing the ' + nameT(bestCap.t) + ' for ' + ptsW(info.bg) : ''}.${cost} Try again.`;
+      out.q = `${lead} There was a stronger move here.${cost}`;
+      out.t = `${lead} A stronger move was ${bestMover} ${sqName(best.from)} to ${sqName(best.to)}${bestCap ? ', capturing the ' + nameT(bestCap.t) + ' for ' + ptsW(info.bg) : ''}.${cost}`;
       return out;
     }
     if (r === 'forced') { out.k = 'praise'; out.t = `This was the only move available.`; }
@@ -828,7 +703,7 @@
     box.innerHTML = `<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${EVI[ic]}</svg><span>${esc(t)}</span>`;
   }
 
-  /* ---- Rush: the score over the round, with the notable moves marked (tap one to jump there) */
+  /* ---- Rush: the score over the round, with the notable moves marked (display only: Next highlight is the only way through the lesson) */
   function buildGraph() {
     const box = $('#rv-graph');
     if (!box) return;
@@ -844,21 +719,10 @@
       const i = +k, pl = R.an.plies[k];
       if (!pl.r || !({ inaccuracy: 1, mistake: 1, blunder: 1, missedwin: 1, great: 1 })[pl.r]) return;
       const rt = MR.get(pl.r);
-      dots += `<button class="rv-gd" data-i="${i}" style="left:${X(i + 1)}%;top:${Y(sc[i + 1])}%;background:${rt.color}" aria-label="${esc(rt.label)} on move ${i + 1}"></button>`;
+      dots += `<i class="rv-gd" style="left:${X(i + 1)}%;top:${Y(sc[i + 1])}%;background:${rt.color}" aria-hidden="true"></i>`;
     });
-    box.innerHTML = `<div class="rv-g-h"><span>Score</span><small>${sc[n]} points at the end \u00b7 high ${Math.max(...sc)}</small></div>
+    box.innerHTML = `<div class="rv-g-h"><span>Score</span><small>${sc[n]} points at the end · high ${Math.max(...sc)}</small></div>
       <div class="rv-g-plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="100" y1="${Y(0)}" y2="${Y(0)}" class="rv-g-zero"/><polyline points="${line}" class="rv-g-line"/></svg><i class="rv-g-cur"></i>${dots}</div>`;
-    box.querySelectorAll('.rv-gd').forEach((b) => {
-      b.onclick = () => { const i = +b.dataset.i; cancelRetry(true); setPly(i + 1, true); coachForPly(i); };
-    });
-    box.querySelector('.rv-g-plot').addEventListener('click', (ev) => {
-      if (ev.target.closest('.rv-gd')) return;
-      const r = ev.currentTarget.getBoundingClientRect();
-      const k = Math.round(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * n);
-      cancelRetry(true);
-      setPly(k, true);
-      if (R.ply > 0) coachForPly(R.ply - 1); else showIntroKeep();
-    });
     markGraph();
   }
   function markGraph() {
@@ -866,7 +730,7 @@
     if (c && R) c.style.left = (R.total ? R.ply / R.total * 100 : 0) + '%';
   }
 
-  /* ---- timeline of highlights along the top */
+  /* ---- timeline of highlights along the top (display only) */
   function buildTimeline() {
     const box = $('#rv-tl');
     box.innerHTML = '<i class="rv-tl-fill"></i>';
@@ -877,11 +741,10 @@
     for (let k = 1; k < n; k++) if (pos[k] < pos[k - 1] + gap) pos[k] = pos[k - 1] + gap;
     for (let k = n - 1; k >= 0; k--) { const lim = 96 - (n - 1 - k) * gap; if (pos[k] > lim) pos[k] = lim; if (k < n - 1 && pos[k] > pos[k + 1] - gap) pos[k] = pos[k + 1] - gap; }
     R.moments.forEach((m, k) => {
-      const b = document.createElement('button');
+      const b = document.createElement('i');
       b.className = 'rv-dot ' + m.type;
       b.style.left = Math.max(3, pos[k]) + '%';
-      b.setAttribute('aria-label', 'Highlight ' + (k + 1));
-      b.onclick = () => gotoMoment(k);
+      b.setAttribute('aria-hidden', 'true');
       box.appendChild(b);
     });
     markTimeline();
@@ -893,7 +756,7 @@
     box.querySelectorAll('.rv-dot').forEach((d, k) => d.classList.toggle('cur', k === R.mi));
   }
 
-  /* ---- move list */
+  /* ---- move list (display only, in standard notation: e4, Nf3, exd5) */
   function sanOf(i) {
     if (R.kind === 'chess') return LP.fmt(R.entry.sans[i] || '');
     const ev = R.entry.events[i], c = R.frames[i].cells[ev.f];
@@ -903,7 +766,7 @@
     const box = $('#rv-moves');
     box.innerHTML = '';
     for (let i = 0; i < R.total; i++) {
-      const b = document.createElement('button');
+      const b = document.createElement('span');
       const col = R.kind === 'chess' ? (i % 2 === 0 ? 'w' : 'b') : (R.frames[i].cells[R.entry.events[i].f] || { c: 'w' }).c;
       b.className = 'rvm ' + col;
       b.dataset.i = i;
@@ -911,7 +774,6 @@
       let pc = '';
       if (R.kind === 'rush') { const d = Math.abs(R.frames[i + 1].score - R.frames[i].score); if (d) pc = `<i class="rvp">+${d}</i>`; }
       b.innerHTML = (R.kind === 'chess' && i % 2 === 0 ? '<i class="rvn">' + (i / 2 + 1) + '.</i>' : '') + esc(sanOf(i)) + pc + (r ? `<span class="rvr">${MR.iconHtml(r)}</span>` : '');
-      b.onclick = () => { cancelRetry(true); setPly(i + 1, true); coachForPly(i); };
       box.appendChild(b);
     }
   }
@@ -924,7 +786,7 @@
     if (box.scrollTo) box.scrollTo({ left: Math.max(0, left), behavior: 'smooth' }); else box.scrollLeft = Math.max(0, left);
   }
 
-  /* ---- the speech bubble, the rating under the board and the main button */
+  /* ---- the speech bubble, the rating under the board and the controls */
   function ratingColor(r) { return r.id === 'mateblack' ? '#d4d4d9' : r.id === 'forced' ? '#a9a9ae' : r.color; }
   /** o = { cap, text | html, pills: [{ label, fn, primary }], rate } */
   function say(o) {
@@ -944,51 +806,65 @@
     updateMain();
   }
 
+  /**
+   * The controls. Next highlight is the ONLY way through the lesson, and it only works once the highlight is done:
+   *   replay / try  - watching the real moves, or looking for the fix: Next highlight is greyed out
+   *   wrong         - a wrong try: Next highlight turns into the Try Again button, with Skip beside it
+   *   passed / info - the fix was found (or it was a good move): Next highlight is ready
+   */
   function updateMain() {
-    const b = $('#rv-main');
+    const b = $('#rv-main'), sk = $('#rv-skip');
     if (!b || !R) return;
-    let label = 'Next highlight', fn = nextMoment, off = false;
-    if (!R.moments.length) { label = 'Back to Analyze'; fn = () => leave(); }
-    else if (R.mi < 0) label = 'Begin';
-    else if (R.mi >= R.moments.length - 1) label = R.mi >= R.moments.length ? 'Back to Analyze' : 'Finish';
-    if (R.mi >= R.moments.length && R.moments.length) fn = () => leave();
+    const last = R.moments.length > 0 && R.mi >= R.moments.length - 1;
+    let label = last ? 'Finish' : 'Next highlight', fn = nextMoment, off = false, again = false, skip = false;
+    switch (R.phase) {
+      case 'intro': if (R.moments.length) label = 'Begin'; else { label = 'Back to Analyze'; fn = () => leave(); } break;
+      case 'replay': case 'try': off = true; break;
+      case 'wrong': label = 'Try Again'; fn = tryAgain; again = true; skip = true; break;
+      case 'end': label = 'Back to Analyze'; fn = () => leave(); break;
+      default: break;
+    }
     b.textContent = label;
     b.onclick = fn;
     b.disabled = off;
+    b.classList.toggle('again', again);
+    sk.classList.toggle('hidden', !skip);
   }
 
-  const capFor = (i) => (R.kind === 'chess' ? 'Move ' + (Math.floor(i / 2) + 1) + (i % 2 ? ' (Black)' : ' (White)') : 'Move ' + (i + 1)) + ' · ' + sanOf(i);
+  const capFor = (i) => (R.kind === 'chess' ? 'Move ' + (Math.floor(i / 2) + 1) + (i % 2 ? ' (Black)' : ' (White)') : 'Move ' + (i + 1));
+  const momentCap = (k) => 'Highlight ' + (k + 1) + ' of ' + R.moments.length;
   const canAddBoth = () => !R.an.both && humanOf(R.entry);
   const bothPill = () => (canAddBoth() ? [{ label: 'Analyze both players', fn: () => addBoth() }] : []);
-
-  /** Coach text for the move at index i. */
-  function coachForPly(i) {
-    const p = R.an.plies[i];
-    const r = ratingAt(i);
-    R.arrows = [];
-    if (!p) {
-      say({ cap: capFor(i), text: 'This move was not analysed.' + (canAddBoth() ? ' Tap Analyze both players to include it.' : ''), pills: bothPill() });
-      render();
-      return;
-    }
-    const n = p.n || { t: '', k: 'info' };
-    const teach = n.k === 'win' || n.k === 'mated' || n.k === 'hang' || n.k === 'miss' || n.k === 'generic' || n.k === 'fork';
-    if (n.thr) R.arrows = [{ a: n.thr.a, b: n.thr.b, c: 'r' }];
-    const pills = teach ? [{ label: 'Try again', primary: true, fn: () => startRetry({ ply: i }) }, { label: 'Show best', fn: () => showBest(i) }].concat(bothPill()) : bothPill();
-    const text = n.t || (r ? r.label + '.' : 'A playable move.');
-    if (R.kind === 'rush' && p.pg) say({ cap: capFor(i), html: `<p class="rv-text">${esc(text)}</p>${rushExtras(i, p)}`, pills, rate: r });
-    else say({ cap: capFor(i), text, pills, rate: r });
-    if (R.kind === 'rush' && p.pg) bindAlts(i);
-    render();
+  const isTeach = (i) => { const p = R.an.plies[i]; return !!(p && TEACH[p.r]); };
+  /** What went wrong, without giving the fix away (the fix is what the player is about to look for). */
+  function noteText(i, full) {
+    const p = R.an.plies[i], r = ratingAt(i);
+    const n = p && p.n;
+    return (n && (full ? n.t : (n.q || n.t))) || (r ? r.label + '.' : 'A playable move.');
   }
 
-  /** Rush: the points of this move, and the best few moves with what each is worth. */
+  /** The real move number n as a sentence ("You moved the knight from f3 to g5."). Chess needs R.G to be at move n. */
+  function moveWords(n) {
+    const e = R.entry;
+    if (R.kind === 'chess') {
+      const mv = e.moves[n];
+      const lm = R.G.legalMoves().find((x) => same(x, mv)) || mv;
+      const ph = EX.phrase(R.G, lm);
+      return voice(e, R.G.turn === WHITE ? 'w' : 'b').S + ' ' + ph.past + '.' + (ph.mate ? ' Checkmate!' : ph.check ? ' Check!' : '');
+    }
+    const ev = e.events[n], cells = R.frames[n].cells, mover = cells[ev.f], target = cells[ev.t];
+    if (!mover) return '';
+    const pn = PN[RT[mover.t]];
+    return voice(e, mover.c).S + (target && target.c !== mover.c ? ` took the ${PN[RT[target.t]]} on ${sqName(ev.t)} with the ${pn}.` : ` moved the ${pn} from ${sqName(ev.f)} to ${sqName(ev.t)}.`);
+  }
+
+  /** Rush: the points of this move, and the best few moves with what each is worth (shown once the highlight is done). */
   function rushExtras(i, p) {
     const pg = p.pg, frame = R.frames[i].cells, ev = R.entry.events[i];
     const nameAt = (sq) => { const c = frame[sq]; return c ? c.t.toUpperCase() : ''; };
     const chip = (label, val, col) => `<span class="rv-pt" style="--c:${col}"><small>${label}</small><b>${val}</b></span>`;
     const lossCol = pg.l <= 0.1 ? '#6fd08c' : pg.l <= 1 ? '#9ad65a' : pg.l <= 2.5 ? '#f7c631' : pg.l <= 5 ? '#e58f2a' : '#ca3431';
-    let h = '<div class="rv-pts">' + chip('This move', sgn(pg.g), pg.g ? '#6fd08c' : '#8a979d') + chip('Best move', sgn(pg.bg), '#6fd08c') + chip('Lost', pg.l ? '\u2212' + fmtN(pg.l) : '0', lossCol) + (pg.sv ? chip('Kept safe', '+' + fmtN(pg.sv), '#5fd8f0') : '') + '</div>';
+    let h = '<div class="rv-pts">' + chip('This move', sgn(pg.g), pg.g ? '#6fd08c' : '#8a979d') + chip('Best move', sgn(pg.bg), '#6fd08c') + chip('Lost', pg.l ? '−' + fmtN(pg.l) : '0', lossCol) + (pg.sv ? chip('Kept safe', '+' + fmtN(pg.sv), '#5fd8f0') : '') + '</div>';
     const rows = (p.rk || []).slice(0, 3);
     if (rows.length > 1 || (rows[0] && !(rows[0][0] === ev.f && rows[0][1] === ev.t))) {
       h += '<div class="rv-alts" aria-label="Best moves"><div class="rv-alts-h">Top moves <small>expected points after best play</small></div>';
@@ -996,7 +872,7 @@
       if (!list.some((x) => x[0] === ev.f && x[1] === ev.t)) list.push([ev.f, ev.t, p.ps]);
       list.forEach((x, k) => {
         const played = x[0] === ev.f && x[1] === ev.t;
-        h += `<button class="rv-alt${played ? ' played' : ''}" data-f="${x[0]}" data-t="${x[1]}"><span class="rv-alt-m">${nameAt(x[0])}${sqName(x[0])}\u2192${sqName(x[1])}</span><span class="rv-alt-s">${sgn(x[2])}</span><span class="rv-alt-t">${played ? 'played' : k === 0 ? 'best' : ''}</span></button>`;
+        h += `<button class="rv-alt${played ? ' played' : ''}" data-f="${x[0]}" data-t="${x[1]}"><span class="rv-alt-m">${nameAt(x[0])}${sqName(x[0])}→${sqName(x[1])}</span><span class="rv-alt-s">${sgn(x[2])}</span><span class="rv-alt-t">${played ? 'played' : k === 0 ? 'best' : ''}</span></button>`;
       });
       h += '</div>';
     }
@@ -1027,19 +903,6 @@
     enter(e);
   }
 
-  function showBest(i) {
-    const p = R.an.plies[i];
-    if (!p || !p.b) return;
-    cancelRetry(true);
-    setPly(i, false);
-    const a = R.kind === 'rush' ? p.b.f : toIdx(p.b.f), b2 = R.kind === 'rush' ? p.b.t : toIdx(p.b.t);
-    R.arrows = [{ a, b: b2, c: 'g' }];
-    render();
-    const n = p.n || {};
-    const pg = p.pg;
-    say({ cap: capFor(i), text: 'The best move was ' + (n.bs || sanOf(i)) + ', shown with the green arrow.' + (pg ? ' It scores ' + sgn(pg.bg) + ' straight away' + (pg.l ? ', and the move played lost about ' + ptsW(pg.l) + ' next to it.' : '.') : ''), pills: [{ label: 'Try again', primary: true, fn: () => startRetry({ ply: i }) }, { label: 'Back to the game', fn: () => { setPly(i + 1, true); coachForPly(i); } }] });
-  }
-
   /* ---- moments of the lesson */
   function buildMoments() {
     const e = R.entry, an = R.an, out = [];
@@ -1062,50 +925,118 @@
     return out;
   }
 
+  /** Go to the next highlight. Only possible when the current one is finished (Next highlight is greyed out until then). */
   function nextMoment() {
+    if (!R || R.phase === 'replay' || R.phase === 'try' || R.phase === 'wrong') return;
+    advance();
+  }
+  function advance() {
     cancelRetry(true);
     if (R.mi >= R.moments.length - 1) { finishLesson(); return; }
     gotoMoment(R.mi + 1);
   }
+  /** Skip is only offered next to Try Again. */
+  function skipMoment() {
+    if (!R || R.phase !== 'wrong') return;
+    advance();
+  }
 
-  function gotoMoment(k) {
+  /** Replay what really happened around move m.ply, one real move at a time, like a puzzle solution. Resolves false if it was interrupted. */
+  async function replayMoment(k) {
+    const run = ++R.run;
+    const m = R.moments[k], i = m.ply, teach = isTeach(i), step = momentCap(k);
+    const start = Math.max(0, i - 1);                                     // the move before gives the context
+    const end = Math.min(R.total, i + 1 + (teach ? 3 : 1));              // and a few real moves after show what came of it
+    R.phase = 'replay';
+    R.cap = step;
+    setPly(start, false);
+    say({ cap: step + ' · Replay', text: 'Watch what really happened in the game.' });
+    await wait(800);
+    for (let n = start; n < end; n++) {
+      if (!R || R.run !== run) return false;
+      const text = moveWords(n);                                          // (R.G is at move n now)
+      setPly(n + 1, true);
+      say({ cap: step + ' · ' + capFor(n), text, rate: n === i ? ratingAt(i) : null });
+      let hold = 1250;
+      if (n === i && teach) {
+        const th = R.an.plies[i].n && R.an.plies[i].n.thr;
+        if (th) { R.arrows = [{ a: th.a, b: th.b, c: 'r' }]; render(); }
+        hold = 2000;
+      }
+      await wait(hold);
+    }
+    return !!R && R.run === run;
+  }
+
+  async function gotoMoment(k) {
     cancelRetry(true);
     R.mi = k;
     markTimeline();
-    const m = R.moments[k];
     R.showResign = false;
-    const step = 'Highlight ' + (k + 1) + ' of ' + R.moments.length;
+    const m = R.moments[k], step = momentCap(k);
+    R.cap = step;
     if (m.type === 'book') {
+      R.run++;
       setPly(m.ply + 1, false);
       const nm = MR.openingName(R.entry.moves, m.ply + 1);
-      say({ cap: step, text: (nm ? nm + '. ' : '') + 'The first ' + plural(m.count, 'analysed move') + ' followed known opening theory. Book moves are safe, tested ideas.', pills: bothPill(), rate: MR.get('book') });
+      R.phase = 'info';
+      say({ cap: step, text: (nm ? nm + '. ' : '') + 'The first ' + plural(m.count, 'analysed move') + ' followed known opening theory. Book moves are safe, tested ideas.', rate: MR.get('book') });
       return;
     }
     if (m.type === 'resign') {
+      const run = ++R.run;
       setPly(R.total, false);
       R.showResign = true;
       render();
       const rs = R.an.resign;
       const r = MR.get(rs.loser === 'w' ? 'resignwhite' : 'resignblack');
-      say({ cap: step, text: rs.t, pills: rs.b ? [{ label: 'Try again', primary: true, fn: () => startRetry({ ply: R.total, resign: true }) }] : [], rate: r });
+      if (rs.b) {
+        R.phase = 'replay';
+        say({ cap: step, text: rs.t, rate: r });
+        await wait(1800);
+        if (!R || R.run !== run) return;
+        startRetry({ ply: R.total, resign: true });
+      } else { R.phase = 'info'; say({ cap: step, text: rs.t, rate: r }); }
       return;
     }
     if (m.type === 'time') {
+      R.run++;
       setPly(R.total, false);
+      R.phase = 'info';
       say({ cap: step, text: R.an.time.t });
       return;
     }
-    setPly(m.ply + 1, true);
-    coachForPly(m.ply);
-    const cap = $('#rv-bubble .rv-cap');
-    if (cap) cap.textContent = step + ' · ' + cap.textContent;
+    const i = m.ply;
+    if (!(await replayMoment(k))) return;
+    const run = R.run;
+    if (isTeach(i)) {
+      R.phase = 'replay';
+      say({ cap: step + ' · ' + capFor(i), text: noteText(i), rate: ratingAt(i) });
+      await wait(1500);
+      if (!R || R.run !== run) return;
+      startRetry({ ply: i });
+    } else {
+      showResult(i, step);
+    }
+  }
+
+  /** A highlight that is done and was good: say why, and open Next highlight. */
+  function showResult(i, step) {
+    const p = R.an.plies[i], text = noteText(i, true);
+    R.phase = 'passed';
+    R.arrows = [];
+    if (R.kind === 'rush' && p && p.pg) { say({ cap: step + ' · ' + capFor(i), html: `<p class="rv-text">${esc(text)}</p>${rushExtras(i, p)}`, rate: ratingAt(i) }); bindAlts(i); }
+    else say({ cap: step + ' · ' + capFor(i), text, rate: ratingAt(i) });
+    render();
   }
 
   function finishLesson() {
     R.mi = R.moments.length;
+    R.run++;
+    R.phase = 'end';
     markTimeline();
     setPly(R.total, false);
-    say({ cap: 'Lesson complete', html: summaryHtml(R.entry, R.an.sum) + '<p class="rv-text">Tap any move in the list to see what the analysis said about it.</p>', pills: [{ label: 'Review again', primary: true, fn: () => { R.mi = -1; markTimeline(); showIntro(); } }] });
+    say({ cap: 'Lesson complete', html: summaryHtml(R.entry, R.an.sum) + '<p class="rv-text">Well done for working through it.</p>', pills: [{ label: 'Review again', primary: true, fn: () => { R.mi = -1; markTimeline(); showIntro(); } }].concat(bothPill()) });
   }
 
   function summaryHtml(e, sum) {
@@ -1123,6 +1054,9 @@
 
   function showIntro() {
     R.showResign = false;
+    R.run++;
+    cancelRetry(true);
+    R.phase = 'intro';
     setPly(0, false);
     const e = R.entry;
     let open = '';
@@ -1134,7 +1068,7 @@
     const nm = R.moments.length;
     say({
       cap: modeLabel(e) + ' · ' + (isRush(e) ? e.score + ' points' : e.result || ''),
-      html: `<p class="rv-text">${nm ? 'Click Begin when ready. ' + plural(nm, 'highlight') + ' to look at.' : 'Nothing stood out in this game. Tap any move in the list below to see what the analysis said.'}</p>${open}${summaryHtml(e, R.an.sum)}`,
+      html: `<p class="rv-text">${nm ? 'Tap Begin when you are ready. ' + plural(nm, 'highlight') + ' to look at. Each one replays what really happened, then gives you a chance to find the better move.' : 'Nothing stood out in this game.'}</p>${open}${summaryHtml(e, R.an.sum)}`,
       pills: bothPill(),
     });
   }
@@ -1147,15 +1081,17 @@
     $('#rv-board').classList.remove('trying');
   }
 
-  /** Start a retry from the position before move `ply` (ply = number of moves played so far). */
+  /** Start (or restart) the try from the position before move `ply` (ply = number of moves played so far). */
   function startRetry(o) {
     cancelRetry(true);
     const e = R.entry;
     const p = o.resign ? null : R.an.plies[o.ply];
     const rs = o.resign ? R.an.resign : null;
     R.showResign = false;
+    R.run++;
     setPly(o.ply, false);
-    const rt = { ply: o.ply, sel: -1, targets: [], hint: -1, fails: 0, last: null, busy: false, done: false };
+    const key = o.resign ? 'resign' : o.ply;
+    const rt = { ply: o.ply, resign: !!o.resign, key, sel: -1, targets: [], hint: -1, fails: R.fails[key] || 0, last: null, busy: false, done: false, locked: false };
     if (R.kind === 'chess') {
       const col = R.G.turn === WHITE ? 'w' : 'b';
       rt.col = col;
@@ -1175,16 +1111,44 @@
       R.view = cellsView(rt.cells, rt.col);
     }
     R.retry = rt;
+    R.phase = 'try';
     R.arrows = [];
     $('#rv-board').classList.add('trying');
     render();
+    if (rt.fails >= 2 && R.kind === 'chess') hintFrom().then((h) => { if (R && R.retry === rt && !rt.done) { rt.hint = h; render(); } });
+    else if (rt.fails >= 2 && rt.best) { rt.hint = rt.best.f; render(); }
+    promptTry();
+  }
+
+  /** The bubble while the player looks for the fix: what went wrong (no spoilers) and what to do. */
+  function promptTry() {
+    const rt = R.retry;
     const who = rt.col === 'w' ? 'White' : 'Black';
-    say({ cap: 'Your turn · ' + who + ' to move', text: rt.kind === 'win' ? 'Find the forced checkmate in ' + plural(rt.n, 'move') + '. Play the moves on the board.' : 'Play a better move from this position.', pills: [{ label: 'Show me', fn: () => showMe() }] });
+    const note = rt.resign ? R.an.resign.t : noteText(rt.ply);
+    const ask = rt.kind === 'win' ? `Your turn: find the forced checkmate in ${plural(rt.n, 'move')}. Play the moves on the board.` : `Your turn: find a better move for ${who}.`;
+    say({ cap: (R.cap ? R.cap + ' · ' : '') + who + ' to move', html: `<p class="rv-text">${esc(note)}</p><p class="rv-ask">${esc(ask)}</p>` });
+  }
+
+  /** Try Again button: back to the start of the try. */
+  function tryAgain() {
+    if (!R || R.phase !== 'wrong' || !R.retry) return;
+    startRetry({ ply: R.retry.ply, resign: R.retry.resign });
+  }
+
+  /** A wrong try: the board locks, Next highlight turns into Try Again, and Skip appears next to it. */
+  function retryWrong(text) {
+    const rt = R.retry;
+    rt.locked = true; rt.busy = false;
+    R.fails[rt.key] = rt.fails;
+    R.phase = 'wrong';
+    say({ cap: (R.cap ? R.cap + ' · ' : '') + 'Not quite', html: `<p class="rv-text">${esc(text)}</p>` });
+    toast('Not quite');
+    render();
   }
 
   function onSquare(i) {
     const rt = R && R.retry;
-    if (!rt || rt.busy || rt.done) return;
+    if (!rt || rt.busy || rt.done || rt.locked) return;
     const v = R.view, p = v.at(i);
     if (rt.sel >= 0 && rt.targets.indexOf(i) >= 0) { attempt(rt.sel, i); return; }
     if (p && p.w === (v.turn() === 'w')) { rt.sel = i; rt.targets = v.targets(i); }
@@ -1192,11 +1156,9 @@
     render();
   }
 
-  function retryMessage(text, pills) {
-    const cap = $('#rv-bubble .rv-cap');
-    say({ cap: cap ? cap.textContent : '', text, pills: pills || [] });
+  function retryMessage(text) {
+    say({ cap: (R.cap ? R.cap + ' · ' : '') + 'Checking', html: `<p class="rv-text">${esc(text)}</p>` });
   }
-  const retryPills = () => [{ label: 'Show me', fn: () => showMe() }];
 
   function pickMove(g, from, to) {
     const ms = g.legalMovesFrom(toSq(from)).filter((m) => toIdx(m.to) === to);
@@ -1211,7 +1173,7 @@
     const g = rt.g;
     const m = pickMove(g, from, to);
     if (!m) { rt.busy = false; render(); return; }
-    retryMessage('Checking your move…', []);
+    retryMessage('Checking your move…');
     render();
     await wait(40);
     let ok = false, mates = false, msg = '';
@@ -1225,7 +1187,7 @@
     else if (isBest) ok = true;
     else {
       let A = null;
-      try { A = AI.run(g, m, rt.kind === 'win' ? 1400 : 900, rt.kind === 'win' ? 2 * rt.n + 2 : 10); } catch (x) { A = null; }
+      try { A = AI.run(MR.clone(g), m, rt.kind === 'win' ? 1600 : 1400, rt.kind === 'win' ? 2 * rt.n + 2 : 14, 5); } catch (x) { A = null; }
       if (A && A.top.length && A.played) {
         const B = A.top[0].score, P = A.played.score;
         if (rt.kind === 'win') { ok = P > MATE - 100; if (!ok) msg = 'That does not force checkmate. Look for a move that keeps the attack going.'; }
@@ -1234,29 +1196,30 @@
           ok = loss <= 0.05 && !(B > MATE - 100 && P <= MATE - 100);
           if (!ok) msg = loss > 0.2 ? 'That is not better. Look at what the opponent could do next.' : 'Close, but there is a stronger move.';
         }
-      } else { ok = false; msg = 'That is not the best idea. Try again.'; }
+      } else { ok = false; msg = 'That is not the best idea.'; }
     }
     if (!ok) {
       rt.fails++;
-      rt.busy = false;
-      if (rt.fails >= 2 && rt.hint < 0) { rt.hint = await hintFrom(); }
-      retryMessage((msg || 'Not quite.') + (rt.hint >= 0 ? ' Hint: move the highlighted piece.' : ' Try again.'), retryPills());
-      toast(rt.hint >= 0 ? 'Hint: move the highlighted piece' : 'Not quite, try again');
-      render();
+      if (rt.fails >= 2 && rt.hint < 0) rt.hint = await hintFrom();
+      if (!R || R.retry !== rt) return;
+      retryWrong((msg || 'Not quite.') + (rt.hint >= 0 ? ' After Try Again, the piece to move is highlighted.' : ''));
       return;
     }
-    const san = LP.fmt(g.moveToSan(m));
+    const lm = g.legalMoves().find((x) => same(x, m)) || m;
+    const ph = EX.phrase(g, lm);
+    let w = '';
+    try { w = EX.why(g, lm); } catch (x) { w = ''; }
     g.makeMove(m);
     rt.last = [toIdx(m.from), toIdx(m.to)];
-    rt.hint = -1; rt.fails = 0;
+    rt.hint = -1; rt.fails = 0; R.fails[rt.key] = 0;
     render();
     slide(toIdx(m.from), toIdx(m.to));
     if (rt.kind === 'win') {
-      if (g.isCheckmate()) { retryDone(`Checkmate! ${san} finishes it. You found the win.`); return; }
-      retryMessage(`Yes, ${san}! Keep going: checkmate in ${plural(rt.n - 1, 'more move')}.`, retryPills());
+      if (g.isCheckmate()) { retryDone(`Checkmate! ${cap1(ph.ger)} finishes it. You found the win.`); return; }
+      retryMessage(`Yes! That keeps the attack going. Checkmate in ${plural(rt.n - 1, 'more move')}.`);
       await wait(650);
       let reply = null;
-      try { const A2 = AI.run(g, null, 900, 2 * (rt.n - 1) + 1); reply = A2.top[0] && A2.top[0].move; } catch (x) { reply = null; }
+      try { const A2 = AI.run(MR.clone(g), null, 900, 2 * (rt.n - 1) + 1, 5); reply = A2.top[0] && A2.top[0].move; } catch (x) { reply = null; }
       if (!reply) reply = g.legalMoves()[0];
       g.makeMove(reply);
       rt.last = [toIdx(reply.from), toIdx(reply.to)];
@@ -1265,53 +1228,35 @@
       render();
       slide(toIdx(reply.from), toIdx(reply.to));
       rt.busy = false;
-      retryMessage(`The opponent replied. Find checkmate in ${plural(rt.n, 'move')}.`, retryPills());
+      retryMessage(`The opponent replied. Find checkmate in ${plural(rt.n, 'move')}.`);
     } else {
-      retryDone(`That's it! ${san} fixes the mistake.`);
+      retryDone(rt.resign ? `That's it! ${cap1(ph.ger)} keeps the game going.` : `That's it! ${cap1(ph.ger)}${w ? ', ' + w + ',' : ''} fixes the mistake.`);
     }
   }
 
   async function hintFrom() {
     const rt = R.retry;
-    if (rt.best) return toIdx(rt.best.f);
-    try { const A = AI.run(rt.g, null, 900, 2 * rt.n + 1); if (A.top[0]) return toIdx(A.top[0].move.from); } catch (x) { /* ignore */ }
+    if (rt.best) return rt.best.f !== undefined ? (R.kind === 'chess' ? toIdx(rt.best.f) : rt.best.f) : -1;
+    try { const A = AI.run(MR.clone(rt.g), null, 900, 2 * rt.n + 1, 5); if (A.top[0]) return toIdx(A.top[0].move.from); } catch (x) { /* ignore */ }
     return -1;
   }
 
+  /** The try succeeded: Next highlight is ready again. */
   function retryDone(text) {
     const rt = R.retry;
     rt.done = true; rt.busy = false;
-    const pills = R.mi < 0 ? [{ label: 'Show what happened', fn: () => { cancelRetry(true); setPly(rt.ply + 1, true); coachForPly(rt.ply); } }] : [];
-    retryMessage(text + (R.mi >= 0 ? ' Tap Next highlight to carry on.' : ''), pills);
+    R.phase = 'passed';
+    const i = rt.ply, p = rt.resign ? null : R.an.plies[i];
+    if (R.kind === 'rush' && p && p.pg) {
+      R.arrows = [];
+      say({ cap: (R.cap ? R.cap + ' · ' : '') + 'Well done', html: `<p class="rv-text">${esc(text)}</p>${rushExtras(i, p)}` });
+      bindAlts(i);
+    } else say({ cap: (R.cap ? R.cap + ' · ' : '') + 'Well done', text });
     toast('Nice!');
     render();
   }
 
-  async function showMe() {
-    const rt = R.retry;
-    if (!rt || rt.busy || rt.done) return;
-    rt.busy = true;
-    if (R.kind === 'rush') {
-      const m = rt.best;
-      rt.hint = -1;
-      applyRush(m.f, m.t);
-      render(); slide(m.f, m.t);
-      retryDone('Here is the best move.');
-      return;
-    }
-    const g = rt.g;
-    let mv = null;
-    if (rt.best) mv = g.legalMoves().find((x) => sameKey(x, rt.best));
-    if (!mv) { try { const A = AI.run(g, null, 900, 2 * rt.n + 1); mv = A.top[0] && A.top[0].move; } catch (x) { mv = null; } }
-    if (!mv) { rt.busy = false; return; }
-    const san = LP.fmt(g.moveToSan(mv));
-    g.makeMove(mv);
-    rt.last = [toIdx(mv.from), toIdx(mv.to)];
-    render(); slide(toIdx(mv.from), toIdx(mv.to));
-    retryDone(`The best move was ${san}.${rt.kind === 'win' ? ' From there the checkmate is forced.' : ''}`);
-  }
-
-  /* ---- Capture Rush retry */
+  /* ---- Capture Rush try */
   function applyRush(from, to) {
     const rt = R.retry, cells = rt.cells;
     const mover = cells[from];
@@ -1327,15 +1272,14 @@
     const isOriginal = rt.played && rt.played.f === from && rt.played.t === to;
     const ok = !isOriginal && hit && hit[2] >= bestScore - 0.9;
     if (!ok) {
-      rt.fails++; rt.busy = false;
+      rt.fails++;
       if (rt.fails >= 2) rt.hint = rt.best.f;
-      retryMessage(isOriginal ? 'That is the move from the game. Look for something stronger.' : (rt.hint >= 0 ? 'Not quite. Hint: move the highlighted piece.' : 'Not quite. Look for a capture, or a safer square.'), retryPills());
-      render();
+      retryWrong(isOriginal ? 'That is the move from the game. Look for something stronger.' : 'Not quite. Look for a capture, or a safer square.');
       return;
     }
     const cap = rt.cells[to];
     applyRush(from, to);
-    rt.hint = -1;
+    rt.hint = -1; R.fails[rt.key] = 0;
     render(); slide(from, to);
     retryDone(cap ? `That's it! Taking the ${PN[RT[cap.t]]} was the right idea.` : "That's it! A smart, safe move.");
   }
@@ -1343,7 +1287,7 @@
   /* ------------------------------------------------------------------ open / close the review */
   function enter(e) {
     ++token;
-    R = { entry: e, an: e.an, kind: isRush(e) ? 'rush' : 'chess', ply: 0, mi: -1, moments: [], retry: null, arrows: [], last: null, showResign: false };
+    R = { entry: e, an: e.an, kind: isRush(e) ? 'rush' : 'chess', ply: 0, mi: -1, moments: [], retry: null, arrows: [], last: null, showResign: false, phase: 'intro', run: 0, fails: {}, cap: '' };
     R.total = nMoves(e);
     const h = humanOf(e);
     flipped = h === 'b';
@@ -1369,6 +1313,7 @@
 
   function leave() {
     cancelRetry(true);
+    if (R) R.run++;
     R = null;
     LP.setSides({ w: 'p1', b: 'p2' });
     showLibrary();
@@ -1407,9 +1352,8 @@
         </div>
         <div id="rv-rate" class="rv-rate"></div>
         <div class="rv-ctl">
-          <button id="rv-prev" class="rv-arrow" aria-label="Previous move"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H5M11 6l-6 6 6 6"/></svg></button>
           <button id="rv-main" class="rv-main">Begin</button>
-          <button id="rv-next" class="rv-arrow" aria-label="Next move"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></button>
+          <button id="rv-skip" class="rv-skip hidden">Skip</button>
         </div>
       </div>`;
     const anchor = $('#sheet-bg');
@@ -1424,19 +1368,12 @@
       box.scrollLeft += ev.deltaY;
       ev.preventDefault();
     }, { passive: false });
-    const nav = (d) => {
-      cancelRetry(true);
-      setPly(R.ply + d, true);
-      if (R.ply > 0) coachForPly(R.ply - 1); else showIntroKeep();
-    };
-    $('#rv-prev').onclick = () => nav(-1);
-    $('#rv-next').onclick = () => nav(1);
+    $('#rv-skip').onclick = skipMoment;
     const m = document.querySelector('.mode[data-mode="analyze"]');
     if (m) m.addEventListener('click', showLibrary);
   }
-  function showIntroKeep() { R.mi = -1; markTimeline(); showIntro(); }
 
   build();
   refreshMenu();
-  LP.analyze = { begin, refreshMenu, show: showLibrary, humanOf, entries, test: { findFork, chessNote, winningCaptures } };
+  LP.analyze = { begin, refreshMenu, show: showLibrary, humanOf, entries };
 })();

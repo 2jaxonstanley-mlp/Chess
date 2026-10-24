@@ -81,8 +81,8 @@
   const glyph = (p) => FILLED[p & 7] + '︎';
   const isWhite = (p) => (p & 24) === WHITE;
   const VALUE = { 1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0 };
-  // pawn moves get a P so every line reads  <piece><square>  e.g. Nf3, Pe4, Pxd5
-  const fmt = (san) => (/^[a-h]/.test(san) ? 'P' + (san.includes('x') ? san.slice(san.indexOf('x')) : san) : san);
+  // standard notation: pawn moves have no letter (e4, exd5), pieces have one (Nf3, Bxc6)
+  const fmt = (san) => String(san || '');
   const isTas = () => mode === 'tas';
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
   const engineMode = (m) => (m === 'secret' ? 'secret' : 'basic');
