@@ -32,13 +32,15 @@
     easy:   { every: 1.3,  noise: 140, margin: 3 },
     medium: { every: 1.0,  noise: 55,  margin: 4 },
     hard:   { every: 0.75, noise: 20,  margin: 5 },
-    insane: { every: 0.5,  noise: 7,   margin: 6, smart: 5, horizon: 1.8 },
+    // insane also looks again right after a hit, a landing or the other piece hitting the puck (react = how soon, in seconds), and plays harder (pro)
+    insane: { every: 0.3,  noise: 7,   margin: 6, smart: 5, horizon: 1.8, pro: 1, min: 0.2, react: 0.1, vary: 9 },
     godly:  { every: 0.5,  noise: 0,   margin: 6, smart: 8, horizon: 2.0 },
   };
-  const nextLook = () => Math.max(0.5, Math.min(1.5, levelOf().every * (0.85 + Math.random() * 0.3)));
-  const levelOf = () => LEVELS[cfg && cfg.level] || LEVELS.medium;
+  // with 0 players each computer has its own level (cfg.levels[side]); otherwise the one computer (the top side) uses cfg.level
+  const levelOf = (b) => LEVELS[cfg && (cfg.levels ? cfg.levels[b === undefined ? 1 : b] : cfg.level)] || LEVELS.medium;
+  const nextLook = (b) => Math.max(levelOf(b).min || 0.5, Math.min(1.5, levelOf(b).every * (0.85 + Math.random() * 0.3)));
   // the first reaction after a serve: never quicker than before (0.8s match start, 0.6s after a goal), but slow bots wait their full reaction time
-  const firstReact = (base) => Math.max(Math.min(base, 1.0), levelOf().every);
+  const firstReact = (base, b) => (levelOf(b).pro ? 0.3 : Math.max(Math.min(base, 1.0), levelOf(b).every));
   const GLYPH = { q: '♛︎', n: '♞︎', k: '♚︎' };
 
   let cfg = null;        // { players, level, piece, names }
@@ -47,7 +49,7 @@
   let raf = 0, last = 0;
   let phase = 'menu';    // menu | play | goal | over | paused
   let freezeUntil = 0;
-  let botClock = 0;
+  let botClock = [0, 0];  // seconds until each computer looks again (side 0 is only used with 0 players)
   let queued = [null, null];
   let stallT = 0;
   let started = 0;
@@ -59,6 +61,8 @@
   let rec = null;        // the recording of this match
   let recAcc = 0;
   let rp = null;         // a replay being watched
+  const newEv = () => ({ wall: 0, hit: [0, 0], land: [false, false] });
+  let ev = newEv();      // what happened during this frame: hardest wall bounce, hardest hit by each piece, which pieces landed
 
   /* ------------------------------------------------------------------ moves */
   /** Squares a piece standing on (f, r) may glide to. Side 0 stays on ranks 1-4, side 1 on ranks 5-8. */
@@ -98,13 +102,13 @@
   }
 
   /** Advance the world by dt seconds. Returns 0 (nothing), 1 (bottom side scored) or 2 (top side scored). */
-  function step(s, dt) {
+  function step(s, dt, ev) {
     for (let i = 0; i < 2; i++) {
       const q = s.q[i];
       if (q.mv) {
         const sp = q.mv.sp * (s.m || 1);
         const dx = q.mv.tx - q.x, dy = q.mv.ty - q.y, dist = Math.hypot(dx, dy), st = sp * dt;
-        if (dist <= st) { q.x = q.mv.tx; q.y = q.mv.ty; q.f = q.mv.f; q.r = q.mv.r; q.mv = null; q.vx = 0; q.vy = 0; }
+        if (dist <= st) { q.x = q.mv.tx; q.y = q.mv.ty; q.f = q.mv.f; q.r = q.mv.r; q.mv = null; q.vx = 0; q.vy = 0; if (ev) ev.land[i] = true; }
         else { q.vx = dx / dist * sp; q.vy = dy / dist * sp; q.x += q.vx * dt; q.y += q.vy * dt; }
       }
     }
@@ -113,17 +117,17 @@
     const k = Math.exp(-0.22 * dt);
     p.vx *= k; p.vy *= k;
     // side walls
-    if (p.x < RP) { p.x = RP; p.vx = Math.abs(p.vx) * 0.92; }
-    if (p.x > 8 - RP) { p.x = 8 - RP; p.vx = -Math.abs(p.vx) * 0.92; }
+    if (p.x < RP) { if (ev) ev.wall = Math.max(ev.wall, -p.vx); p.x = RP; p.vx = Math.abs(p.vx) * 0.92; }
+    if (p.x > 8 - RP) { if (ev) ev.wall = Math.max(ev.wall, p.vx); p.x = 8 - RP; p.vx = -Math.abs(p.vx) * 0.92; }
     // end walls with a goal mouth in the middle
     const inMouth = p.x > MOUTH[0] + 0.12 && p.x < MOUTH[1] - 0.12;
     if (p.y < RP) {
       if (inMouth) { if (p.y < -0.2) return 2; }
-      else { p.y = RP; p.vy = Math.abs(p.vy) * 0.92; }
+      else { if (ev) ev.wall = Math.max(ev.wall, -p.vy); p.y = RP; p.vy = Math.abs(p.vy) * 0.92; }
     }
     if (p.y > 8 - RP) {
       if (inMouth) { if (p.y > 8.2) return 1; }
-      else { p.y = 8 - RP; p.vy = -Math.abs(p.vy) * 0.92; }
+      else { if (ev) ev.wall = Math.max(ev.wall, p.vy); p.y = 8 - RP; p.vy = -Math.abs(p.vy) * 0.92; }
     }
     // the pieces hit the puck
     for (let i = 0; i < 2; i++) {
@@ -140,6 +144,7 @@
           const sp = Math.hypot(p.vx, p.vy);
           if (sp > MAXV) { p.vx *= MAXV / sp; p.vy *= MAXV / sp; }
           q.touched = true;
+          if (ev) ev.hit[i] = Math.max(ev.hit[i], -vrel);
         }
         p.x = q.x + nx * (RQ + RP + 0.001);
         p.y = q.y + ny * (RQ + RP + 0.001);
@@ -147,6 +152,76 @@
       }
     }
     return 0;
+  }
+
+  /* ------------------------------------------------------------------ sound (synthesised, follows the Settings sound switch and volume) */
+  let ac = null, noiseBuf = null;
+  const sfxAt = {};
+  /** The audio context, or null when sound is off or unavailable. Created and resumed on a tap, as phones require. */
+  function audio() {
+    try {
+      if (LP.prefs && LP.prefs.get('sound') === false) return null;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (!ac) ac = new AC();
+      if (ac.state === 'suspended') ac.resume();
+      return ac;
+    } catch (e) { return null; }
+  }
+  const gain = () => { const v = LP.prefs ? LP.prefs.get('volume') : 0.6; return Math.max(0, Math.min(1, v == null ? 0.6 : v)); };
+  const gate = (name, ms) => { const n = performance.now(); if (n - (sfxAt[name] || 0) < ms) return false; sfxAt[name] = n; return true; };
+  function tone(c, t, f0, f1, dur, type, g) {
+    const o = c.createOscillator(), a = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    a.gain.setValueAtTime(Math.max(0.0002, g), t); a.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(a); a.connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  /** A short burst of noise through a filter: the click of plastic on plastic, or a soft slide. */
+  function burst(c, t, freq, dur, g, kind, freq2) {
+    if (!noiseBuf) { noiseBuf = c.createBuffer(1, Math.floor(c.sampleRate * 0.6), c.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+    const src = c.createBufferSource(), f = c.createBiquadFilter(), a = c.createGain();
+    src.buffer = noiseBuf; f.type = kind; f.frequency.setValueAtTime(freq, t); if (freq2) f.frequency.exponentialRampToValueAtTime(freq2, t + dur);
+    a.gain.setValueAtTime(0.0001, t); a.gain.exponentialRampToValueAtTime(Math.max(0.0002, g), t + Math.min(0.02, dur / 3)); a.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(a); a.connect(c.destination); src.start(t, Math.random() * 0.2); src.stop(t + dur + 0.02);
+  }
+  /** The puck bounces off a wall: a dull knock, louder the harder it hit. imp = speed into the wall in squares per second. */
+  function sfxWall(imp) {
+    if (imp < 1.2 || !gate('wall', 45)) return;
+    const c = audio(); if (!c) return;
+    const g = Math.min(1, 0.12 + imp / 18) * gain() * 0.45, t = c.currentTime;
+    tone(c, t, 230, 105, 0.09, 'triangle', g);
+    burst(c, t, 1100, 0.04, g * 0.5, 'lowpass');
+  }
+  /** A piece hits the puck: a sharper clack, louder the faster the piece was going. */
+  function sfxHit(imp) {
+    if (!gate('hit', 35)) return;
+    const c = audio(); if (!c) return;
+    const g = Math.min(1, 0.2 + imp / 22) * gain() * 0.5, t = c.currentTime;
+    tone(c, t, 640 + imp * 10, 300, 0.07, 'square', g * 0.45);
+    burst(c, t, 2600, 0.03, g * 0.8, 'highpass');
+  }
+  /** A piece starts gliding (a soft slide, higher and brighter the faster) and lands (a small tick). */
+  function sfxGlide(speed, side) {
+    if (!gate('glide' + side, 70)) return;
+    const c = audio(); if (!c) return;
+    const g = Math.min(1, 0.25 + speed / 30) * gain() * 0.22, t = c.currentTime, d = Math.min(0.3, 0.1 + 0.6 / Math.max(2, speed));
+    burst(c, t, 500 + speed * 25, d, g, 'bandpass', 900 + speed * 40);
+  }
+  function sfxLand(side) {
+    if (!gate('land' + side, 70)) return;
+    const c = audio(); if (!c) return;
+    tone(c, c.currentTime, 480, 330, 0.035, 'triangle', gain() * 0.1);
+  }
+  function playEvents() {
+    if (ev.wall) sfxWall(ev.wall);
+    const h = Math.max(ev.hit[0], ev.hit[1]);
+    if (h) sfxHit(h);
+    for (let i = 0; i < 2; i++) if (ev.land[i]) sfxLand(i);
+  }
+  /** Start a glide that is really happening (not one the computer is only trying out), with its sound. */
+  function realGlide(q, side, f, r) {
+    startGlide(q, side, f, r);
+    sfxGlide(q.mv.sp * (S.m || 1), side);
   }
 
   /* ------------------------------------------------------------------ the computer */
@@ -159,8 +234,8 @@
     const p = s.p, q = s.q[b];
     const fwd = b === 0 ? p.y : 8 - p.y;
     const fv = b === 0 ? p.vy : -p.vy;
-    const sm = levelOf().smart ? 1 : 0;
-    let v = fwd * 18 + fv * (3 + 2.5 * sm);                       // the smart computers also value a fast puck heading for the other goal
+    const lv = levelOf(b), sm = lv.smart ? 1 : 0, pro = lv.pro ? 1 : 0;
+    let v = fwd * 18 + fv * (3 + 2.5 * sm + 6 * pro);                       // the smart computers also value a fast puck heading for the other goal
     const toward = -fv;                              // speed toward my own goal
     const own = b === 0 ? p.y : 8 - p.y;
     if (toward > 0.5) {
@@ -170,6 +245,11 @@
     if (q.touched && fv > 0) v += 45;
     if (!q.mv && Math.hypot(p.vx, p.vy) < 5 && (b === 1 ? p.y > 3.2 : p.y < 4.8)) v += strike(q, p, b);
     v -= Math.abs(q.x - 4) * 4;
+    if (pro) {
+      // the quickest computer guards its goal properly: when the puck is not on its side it sits near its back row,
+      // lined up between the puck and the goal, which also gives it a long run-up for the next hit
+      if (fwd < 4.4) { const gx = 4 + (p.x - 4) * 0.45 + gJit, gy = b === 1 ? 6.6 : 1.4; v -= Math.abs(q.y - gy) * 6 + Math.abs(q.x - gx) * 3; }
+    } else
     if (fwd < 4) v -= Math.abs(q.y - (b === 1 ? 6.6 : 1.4)) * 2.5;      // the puck is on the other side: go back toward your goal
     if (!q.mv) v += 0.5;
     if (fwd < 4 && !q.touched) v -= Math.hypot(q.x - p.x, q.y - p.y) * 6;
@@ -187,7 +267,7 @@
       const cx = q.x + dx * u, cy = q.y + dy * u;
       if (Math.hypot(p.x - cx, p.y - cy) < RQ + RP - 0.06) {
         const L = Math.sqrt(L2), dir = (b === 1 ? -dy : dy) / L;       // +1 = straight toward the opponent's goal
-        best = Math.max(best, 34 + L * 2.5 + dir * 22);
+        best = Math.max(best, 34 + L * (levelOf(b).pro ? 8 : 2.5) + dir * 22);
       }
     }
     return best;
@@ -256,21 +336,24 @@
     const mine = b === 1 ? p.y > 3.4 : p.y < 4.6;
     const toMe = b === 1 ? p.vy > 1.2 : p.vy < -1.2;
     const out = Math.abs(q.x - 4) > 2.6 || Math.abs(q.y - (b === 1 ? 6.6 : 1.4)) > 2.6;
+    if (levelOf(b).pro && !mine) return true;               // the quickest computer keeps itself lined up on the goal at every look
     return mine || toMe || out;
   }
 
+  let gJit = 0;           // a small random shift of the guard spot, changed at every look so the guarding is not always from the same square
   function botThink(b) {
-    const lv = levelOf();
+    const lv = levelOf(b);
+    gJit = lv.pro ? (Math.random() - 0.5) * 1.4 : 0;
     const q = S.q[b];
     if (q.mv) return;
     const opts = destinations(b, q.f, q.r, cfg.piece);
     if (!opts.length || !needed(b)) return;                // nothing to do: stay where it is
     if (lv.noise >= 1e5) {                                  // Dumb: moves at random, and not every time
-      if (Math.random() < 0.6) { const c = opts[Math.floor(Math.random() * opts.length)]; startGlide(q, b, c[0], c[1]); }
+      if (Math.random() < 0.6) { const c = opts[Math.floor(Math.random() * opts.length)]; realGlide(q, b, c[0], c[1]); }
       return;
     }
     const T = lv.horizon || 1.1;
-    const oppQ = cfg.players === 1 && b === 1 ? queued[0] : null;
+    const oppQ = cfg.players === 1 && b === 1 ? queued[0] : null;   // a person can queue a move; the computers never do
     const scored = [];
     let stayV;
     if (lv.smart) {
@@ -286,14 +369,16 @@
       }
       top.sort((x, y) => y.v - x.v);
       scored.length = 0;
-      scored.push(top[0]);
+      // not always the single best: pick at random among the moves that are almost as good (so it is hard to predict)
+      const near = lv.vary ? top.filter((e) => e.v >= top[0].v - lv.vary) : [top[0]];
+      scored.push(near[Math.floor(Math.random() * near.length)]);
     } else {
       for (const c of opts) scored.push({ c, v: simulate(S, b, c, T, oppQ) + (Math.random() - 0.5) * 2 * lv.noise });
       scored.sort((x, y) => y.v - x.v);
       stayV = simulate(S, b, null, T, oppQ);
     }
     const best = scored[0];
-    if (best && best.v > stayV + lv.margin) startGlide(q, b, best.c[0], best.c[1]);   // otherwise staying put is as good: do not move
+    if (best && best.v > stayV + lv.margin) realGlide(q, b, best.c[0], best.c[1]);   // otherwise staying put is as good: do not move
   }
 
   /* ------------------------------------------------------------------ drawing */
@@ -340,7 +425,7 @@
     // dots for the squares each idle piece can glide to
     const show = new Set();
     for (let i = 0; i < 2; i++) {
-      if (i === 1 && cfg.players === 1) continue;
+      if (cfg.players === 0 || (i === 1 && cfg.players === 1)) continue;   // computers' pieces show no dots
       const q = S.q[i];
       if (!q.mv && phase === 'play') destinations(i, q.f, q.r, cfg.piece).forEach(([f, r]) => show.add(r * 8 + f));
     }
@@ -362,9 +447,10 @@
 
   /* ------------------------------------------------------------------ input */
   function onTap(f, r) {
+    audio();                                              // wakes the sound up on the first tap
     if (phase !== 'play') return;
     const side = r <= 3 ? 0 : 1;
-    if (side === 1 && cfg.players === 1) return;          // the top piece belongs to the computer
+    if (cfg.players === 0 || (side === 1 && cfg.players === 1)) return;          // computer pieces are not played by taps
     const q = S.q[side];
     if (q.mv) { queued[side] = [f, r]; return; }           // you can plan the next move while gliding
     go(side, f, r);
@@ -372,7 +458,7 @@
   function go(side, f, r) {
     const q = S.q[side];
     if (!destinations(side, q.f, q.r, cfg.piece).some((d) => d[0] === f && d[1] === r)) return false;
-    startGlide(q, side, f, r);
+    realGlide(q, side, f, r);
     return true;
   }
 
@@ -386,7 +472,9 @@
       roundT += dt; S.m = speedMul(roundT);
       sideCheck(dt);
       let n = Math.ceil(dt / (1 / 120)), h = dt / n, goal = 0;
-      for (let i = 0; i < n && !goal; i++) goal = step(S, h);
+      ev = newEv();
+      for (let i = 0; i < n && !goal; i++) goal = step(S, h, ev);
+      playEvents();
       const pk = S.p;
       if (Math.hypot(pk.vx, pk.vy) < 0.3) {
         stallT += dt;
@@ -397,9 +485,12 @@
         const q = S.q[i];
         if (!q.mv && queued[i]) { const t = queued[i]; queued[i] = null; go(i, t[0], t[1]); }
       }
-      if (cfg.players === 1) {
-        botClock -= dt;
-        if (botClock <= 0) { botThink(1); botClock = nextLook(); }
+      for (let b = cfg.players === 0 ? 0 : 1; b < 2 && cfg.players < 2; b++) {   // 0 players: both sides are computers; 1 player: the top one
+        const lv = levelOf(b);
+        // the quickest computers look again at once when something happens: the other piece hit the puck, or their own piece landed
+        if (lv.react && (ev.hit[1 - b] || ev.land[b])) botClock[b] = Math.min(botClock[b], ev.land[b] ? lv.react * 0.5 : lv.react);
+        botClock[b] -= dt;
+        if (botClock[b] <= 0) { botThink(b); botClock[b] = nextLook(b); }
       }
       if (goal) scored(goal === 1 ? 0 : 1);
     } else if (phase === 'goal' && now >= freezeUntil) {
@@ -460,7 +551,7 @@
     S = newState();
     S.p.y = serveTo === 0 ? 2.2 : 5.8;
     queued = [null, null];
-    botClock = firstReact(0.6);
+    botClock = [firstReact(0.6, 0), firstReact(0.6, 1)];
     setScore();
   }
 
@@ -473,6 +564,7 @@
     S.p.vx = S.p.vy = 0;
     const name = cfg.names[side];
     if (score[side] >= GOAL_TO) { finish(side); return; }
+    if (LP.fx) LP.fx.play('goal');
     phase = 'goal';
     freezeUntil = performance.now() + 1300;
     toast(name + ' scores!  ' + score[0] + ' – ' + score[1], 1200);
@@ -481,15 +573,15 @@
   function finish(winner) {
     phase = 'over';
     const secs = Math.round((Date.now() - started) / 1000);
-    if (LP.rewards && LP.rewards.event) {
+    if (LP.rewards && LP.rewards.event && cfg.players !== 0) {   // two computers playing each other earn nothing
       const human = cfg.players === 1;
       LP.rewards.event('game', { mode: 'hockey', won: human ? winner === 0 : true, draw: false, level: human ? cfg.level : 'pvp', moves: score[0] + score[1], secs, elo: null, q: {} });
     }
     if (rec) { try { recordFrame(0.1); } catch (e) { /* ignore */ } }
     let payload = null;
     if (rec && rec.f.length >= 12) {
-      payload = { v: 1, kind: 'hockey', id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), piece: cfg.piece, names: cfg.names.slice(), players: cfg.players, level: cfg.players === 1 ? cfg.level : null, score: score.slice(), hz: 10, f: rec.f, cut: rec.cut, goals: rec.goals, tele: rec.tele, dur: secs };
-      if (LP.history) { try { LP.history.add({ kind: 'hockey', id: payload.id, mode: 'hockey', modeLabel: 'Chess x Air Hockey', names: { w: cfg.names[0], b: cfg.names[1] }, level: payload.level, bots: false, result: cfg.names[winner] + ' wins \u00b7 ' + score[0] + ' \u2013 ' + score[1], winner: winner === 0 ? 'w' : 'b', dur: secs, moves: score[0] + score[1], timed: true, payload }); } catch (e) { /* best effort */ } }
+      payload = { v: 1, kind: 'hockey', id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), piece: cfg.piece, names: cfg.names.slice(), players: cfg.players, level: cfg.players === 1 ? cfg.level : null, levels: cfg.players === 0 ? cfg.levels.slice() : null, score: score.slice(), hz: 10, f: rec.f, cut: rec.cut, goals: rec.goals, tele: rec.tele, dur: secs };
+      if (LP.history) { try { LP.history.add({ kind: 'hockey', id: payload.id, mode: 'hockey', modeLabel: 'Chess x Air Hockey', names: { w: cfg.names[0], b: cfg.names[1] }, level: payload.level, bots: cfg.players === 0, result: cfg.names[winner] + ' wins \u00b7 ' + score[0] + ' \u2013 ' + score[1], winner: winner === 0 ? 'w' : 'b', dur: secs, moves: score[0] + score[1], timed: true, payload }); } catch (e) { /* best effort */ } }
     }
     if (LP.fx) LP.fx.play(cfg.players === 1 && winner === 1 ? 'lose' : 'win');
     setTimeout(() => { if (phase === 'over') overSheet(winner, payload); }, 700);
@@ -517,12 +609,13 @@
     $('#hk-top-name').textContent = cfg.names[1];
     $('#hk-bottom-name').textContent = cfg.names[0];
     setScore();
-    $('#hk-status').textContent = 'First to ' + GOAL_TO + ' goals. Tap a square to glide there; the further it is, the faster you hit. Pieces speed up the longer the puck is in play.';
+    $('#hk-status').textContent = cfg.players === 0 ? 'First to ' + GOAL_TO + ' goals. Two computers are playing; just watch.' : 'First to ' + GOAL_TO + ' goals. Tap a square to glide there; the further it is, the faster you hit. Pieces speed up the longer the puck is in play.';
     $('#hk-pause').textContent = 'Pause';
     LP.setSides({ w: 'p1', b: 'p2' });
     LP.showPage('hockey');
     phase = 'play';
-    botClock = firstReact(0.8);
+    audio();
+    botClock = [firstReact(0.8, 0), firstReact(0.8, 1)];
     cancelAnimationFrame(raf);
     last = performance.now();
     raf = requestAnimationFrame(frame);
@@ -632,7 +725,8 @@
   /* ------------------------------------------------------------------ setup */
   function start() {
     LP.openSheet(`<h2>Chess x Air Hockey<span class="sub">Hit the puck into the other goal. First to ${GOAL_TO} wins. Pieces cannot cross the middle.</span></h2>
-      <div class="stack"><button class="btn big" id="hk-1">1 player</button><button class="btn big" id="hk-2">2 players</button><button class="btn" id="hk-x">Cancel</button></div>`, true);
+      <div class="stack"><button class="btn big" id="hk-1">1 player</button><button class="btn big" id="hk-2">2 players</button><button class="btn big" id="hk-0">0 players<small style="display:block;font-weight:400;opacity:.7">Watch two computers play</small></button><button class="btn" id="hk-x">Cancel</button></div>`, true);
+    $('#hk-0').onclick = () => pickPiece(0);
     $('#hk-1').onclick = () => pickPiece(1);
     $('#hk-2').onclick = () => pickPiece(2);
     $('#hk-x').onclick = LP.closeSheet;
@@ -642,6 +736,18 @@
       <div class="stack"><button class="btn big tc" id="hp-q"><b>Queen</b><small>Glides in any straight line. Long moves are very fast.</small></button><button class="btn big tc" id="hp-n"><b>Knight</b><small>Jumps in an L shape. Quick short hops.</small></button><button class="btn big tc" id="hp-k"><b>King</b><small>Glides to any square in its own half. Far squares are fast.</small></button><button class="btn" id="hp-x">Cancel</button></div>`, true);
     const go = (piece) => {
       if (players === 2) { cfg = { players: 2, piece, names: ['Player 1', 'Player 2'] }; LP.closeSheet(); newMatch(); return; }
+      if (players === 0) {
+        // pick the bottom computer, then the top one, and watch them play
+        const lab = (lv) => (LP.LEVEL_LABEL && LP.LEVEL_LABEL[lv]) || lv;
+        LP.levelMenu('Bottom computer', 'Pick the first computer.', (a) => {
+          LP.levelMenu('Top computer', 'Pick the second computer.', (b) => {
+            cfg = { players: 0, levels: [a, b], piece, names: ['Computer (' + lab(a) + ')', 'Computer (' + lab(b) + ')'] };
+            LP.closeSheet();
+            newMatch();
+          });
+        });
+        return;
+      }
       LP.levelMenu('Computer', 'Pick how good the computer is.', (lv) => {
         const nm = (LP.profile && LP.profile.name && LP.profile.name()) || 'You';
         cfg = { players: 1, level: lv, piece, names: [nm, 'Computer'] };
