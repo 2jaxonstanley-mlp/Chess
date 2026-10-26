@@ -59,7 +59,8 @@
   let started = 0;
   let toastT = 0;
   let els = {};
-  let qEls = [], puckEl = null;
+  let qEls = [], puckEls = [];
+  let placeArm = false;                 // the mod menu's Place puck: the next tap on a square puts the puck there
   let roundT = 0;        // seconds the puck has been in play this round (pieces speed up with it)
   let sideNow = -1, sideT = 0;   // which half the puck is in and for how long
   let rec = null;        // the recording of this match: { ev: [[tick, type, ...]], goals: [{ k, side, s }] }
@@ -69,7 +70,7 @@
   const note = (a) => { if (rec && rec.ev.length < REC_MAX) rec.ev.push(a); };
   let rp = null;         // a replay being watched
   /* mods */
-  const DEFHK = { spd: [1, 1], any: false, slow: 1, slowPick: 0.5, norm: true, puckT: 0, plTraj: false };
+  const DEFHK = { spd: [1, 1], any: false, slow: 1, slowPick: 0.5, norm: true, puckT: 0, plTraj: false, pk: 1, slide: 1, psize: 1, gw: 3, xp: 0, sz: [1, 1], gh: [false, false], tm: [false, false], inst: false };
   const HK = () => (LP.mods && LP.mods.hk) || DEFHK;
   const usedMods = new Set();           // which mods were used in this match (shown as Modded in History)
   let hist = [], rw = null;             // saved ticks for rewinding, and the rewind animation in progress { cur, to, back }
@@ -100,17 +101,32 @@
   }
   const distOf = (piece, f, r, tf, tr) => (piece === 'n' ? 2.2 : piece === 'k' ? Math.hypot(tf - f, tr - r) : Math.max(Math.abs(tf - f), Math.abs(tr - r)));
 
-  function newState() {
-    return {
-      m: speedMul(0),
-      p: { x: 4, y: 4, vx: 0, vy: 0 },
-      q: [
-        { x: 3.5, y: 0.5, f: 3, r: 0, mv: null, vx: 0, vy: 0, touched: false },
-        { x: 3.5, y: 7.5, f: 3, r: 7, mv: null, vx: 0, vy: 0, touched: false },
-      ],
-    };
+  /* Physics settings. KD is the normal game; mods change them (noted in the recording as event 5 so replays match):
+     pk = puck speed multiplier   fr = puck friction (1 = normal, 0 = never slows)   rp = puck radius   gw = goal width in squares
+     rq = each side's piece radius   gh = which sides' pieces are ghosts (the puck passes through)   xn = extra pucks   tm = AI teammates */
+  const KD = { pk: 1, fr: 1, rp: RP, gw: 3, rq: [RQ, RQ], gh: [0, 0], xn: 0, tm: [0, 0] };
+  const mkQ = (side) => ({ x: 3.5, y: side === 0 ? 0.5 : 7.5, f: 3, r: side === 0 ? 0 : 7, mv: null, vx: 0, vy: 0, touched: false, side });
+  const XSPOT = [[1.5, 4], [6.5, 4], [2.6, 4.7], [5.4, 3.3], [4, 5]];      // where extra pucks start (and start each round)
+  const spawnX = (i) => ({ x: XSPOT[i % XSPOT.length][0], y: XSPOT[i % XSPOT.length][1], vx: 0, vy: 0 });
+  /** Put the settings into a state: adds or removes extra pucks and AI teammates to match. */
+  function applyK(s, k) {
+    s.k = k;
+    const old = s.q.slice(2), out = s.q.slice(0, 2);
+    [0, 1].forEach((side) => {
+      if (!k.tm[side]) return;
+      out.push(old.find((q) => q.side === side) || Object.assign(mkQ(side), { x: 4.5, f: 4 }));
+    });
+    s.q = out;
+    const xp = s.xp || [];
+    s.xp = [];
+    for (let i = 0; i < k.xn; i++) s.xp.push(xp[i] || spawnX(i));
   }
-  const copy = (s) => ({ m: s.m, p: Object.assign({}, s.p), q: s.q.map((q) => Object.assign({}, q, { mv: q.mv ? Object.assign({}, q.mv) : null })) });
+  function newState(k) {
+    const s = { m: speedMul(0), k: KD, p: { x: 4, y: 4, vx: 0, vy: 0 }, xp: [], q: [mkQ(0), mkQ(1)] };
+    applyK(s, k || KD);
+    return s;
+  }
+  const copy = (s) => ({ m: s.m, k: s.k, p: Object.assign({}, s.p), xp: (s.xp || []).map((x) => Object.assign({}, x)), q: s.q.map((q) => Object.assign({}, q, { mv: q.mv ? Object.assign({}, q.mv) : null })) });
 
   const humanSide = (s) => !!cfg && (cfg.players === 2 || (cfg.players === 1 && s === 0));
   /** The mod speed multiplier for a glide that starts now (always 1 in a replay, which uses the noted value instead). */
@@ -131,64 +147,87 @@
     const tx = f + 0.5, ty = r + 0.5;
     q.mv = { tx, ty, f, r, sp: speedFor(Math.hypot(tx - q.x, ty - q.y)), k: k === undefined ? kFor(side) : k };
   }
+  /** Instant move: the piece is simply there, no glide. */
+  function jumpTo(q, f, r) { q.x = f + 0.5; q.y = r + 0.5; q.f = f; q.r = r; q.mv = null; q.vx = 0; q.vy = 0; }
 
   /** Advance the world by dt seconds. Returns 0 (nothing), 1 (bottom side scored) or 2 (top side scored).
       A very fast piece (speed mods) is moved in several smaller steps so it cannot skip over the puck. */
   function step(s, dt, ev) {
     let fast = 0;
-    for (let i = 0; i < 2; i++) { const q = s.q[i]; if (q.mv) fast = Math.max(fast, q.mv.sp * (s.m || 1) * (q.mv.k || 1)); }
+    for (let i = 0; i < s.q.length; i++) { const q = s.q[i]; if (q.mv) fast = Math.max(fast, q.mv.sp * (s.m || 1) * (q.mv.k || 1)); }
     const n = Math.min(80, Math.max(1, Math.ceil(fast * dt / 0.5)));
     if (n === 1) return stepOnce(s, dt, ev);
     for (let j = 0; j < n; j++) { const g = stepOnce(s, dt / n, ev); if (g) return g; }
     return 0;
   }
   function stepOnce(s, dt, ev) {
-    for (let i = 0; i < 2; i++) {
+    const K = s.k || KD, RPK = K.rp;
+    for (let i = 0; i < s.q.length; i++) {
       const q = s.q[i];
       if (q.mv) {
         const sp = q.mv.sp * (s.m || 1) * (q.mv.k || 1);
         const dx = q.mv.tx - q.x, dy = q.mv.ty - q.y, dist = Math.hypot(dx, dy), st = sp * dt;
-        if (dist <= st) { q.x = q.mv.tx; q.y = q.mv.ty; q.f = q.mv.f; q.r = q.mv.r; q.mv = null; q.vx = 0; q.vy = 0; if (ev) ev.land[i] = true; }
+        if (dist <= st) { q.x = q.mv.tx; q.y = q.mv.ty; q.f = q.mv.f; q.r = q.mv.r; q.mv = null; q.vx = 0; q.vy = 0; if (ev && i < 2) ev.land[i] = true; }
         else { q.vx = dx / dist * sp; q.vy = dy / dist * sp; q.x += q.vx * dt; q.y += q.vy * dt; }
       }
     }
-    const p = s.p;
-    p.x += p.vx * dt; p.y += p.vy * dt;
-    const k = Math.exp(-0.22 * dt);
-    p.vx *= k; p.vy *= k;
-    // side walls
-    if (p.x < RP) { if (ev) ev.wall = Math.max(ev.wall, -p.vx); p.x = RP; p.vx = Math.abs(p.vx) * 0.92; }
-    if (p.x > 8 - RP) { if (ev) ev.wall = Math.max(ev.wall, p.vx); p.x = 8 - RP; p.vx = -Math.abs(p.vx) * 0.92; }
-    // end walls with a goal mouth in the middle
-    const inMouth = p.x > MOUTH[0] + 0.12 && p.x < MOUTH[1] - 0.12;
-    if (p.y < RP) {
-      if (inMouth) { if (p.y < -0.2) return 2; }
-      else { if (ev) ev.wall = Math.max(ev.wall, -p.vy); p.y = RP; p.vy = Math.abs(p.vy) * 0.92; }
-    }
-    if (p.y > 8 - RP) {
-      if (inMouth) { if (p.y > 8.2) return 1; }
-      else { if (ev) ev.wall = Math.max(ev.wall, p.vy); p.y = 8 - RP; p.vy = -Math.abs(p.vy) * 0.92; }
-    }
-    // the pieces hit the puck
-    for (let i = 0; i < 2; i++) {
-      const q = s.q[i];
-      let dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy);
-      if (d < RQ + RP) {
-        if (d < 1e-4) { dx = 0; dy = i === 0 ? 1 : -1; d = 1; }
-        const nx = dx / d, ny = dy / d;
-        const vrel = (p.vx - q.vx) * nx + (p.vy - q.vy) * ny;       // how fast they are closing
-        if (vrel < 0) {
-          const e = 0.92;
-          p.vx -= (1 + e) * vrel * nx;
-          p.vy -= (1 + e) * vrel * ny;
-          const sp = Math.hypot(p.vx, p.vy);
-          if (sp > MAXV) { p.vx *= MAXV / sp; p.vy *= MAXV / sp; }
-          q.touched = true;
-          if (ev) ev.hit[i] = Math.max(ev.hit[i], -vrel);
+    const nx0 = s.xp && s.xp.length ? s.xp.length : 0;
+    const fk = Math.exp(-0.22 * K.fr * dt), m0 = 4 - K.gw / 2 + 0.12, m1 = 4 + K.gw / 2 - 0.12, cap = MAXV * K.pk;
+    for (let pi = 0; pi <= nx0; pi++) {
+      const p = pi === 0 ? s.p : s.xp[pi - 1];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= fk; p.vy *= fk;
+      // side walls
+      if (p.x < RPK) { if (ev) ev.wall = Math.max(ev.wall, -p.vx); p.x = RPK; p.vx = Math.abs(p.vx) * 0.92; }
+      if (p.x > 8 - RPK) { if (ev) ev.wall = Math.max(ev.wall, p.vx); p.x = 8 - RPK; p.vx = -Math.abs(p.vx) * 0.92; }
+      // end walls with a goal mouth in the middle
+      const inMouth = p.x > m0 && p.x < m1;
+      if (p.y < RPK) {
+        if (inMouth) { if (p.y < -0.2) return 2; }
+        else { if (ev) ev.wall = Math.max(ev.wall, -p.vy); p.y = RPK; p.vy = Math.abs(p.vy) * 0.92; }
+      }
+      if (p.y > 8 - RPK) {
+        if (inMouth) { if (p.y > 8.2) return 1; }
+        else { if (ev) ev.wall = Math.max(ev.wall, p.vy); p.y = 8 - RPK; p.vy = -Math.abs(p.vy) * 0.92; }
+      }
+      // the pieces hit the puck
+      for (let i = 0; i < s.q.length; i++) {
+        const q = s.q[i], sd = q.side === undefined ? i : q.side;
+        if (K.gh[sd]) continue;                                           // a ghost piece: the puck passes straight through
+        const RQK = K.rq[sd];
+        let dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy);
+        if (d < RQK + RPK) {
+          if (d < 1e-4) { dx = 0; dy = sd === 0 ? 1 : -1; d = 1; }
+          const nx = dx / d, ny = dy / d;
+          const vrel = (p.vx - q.vx) * nx + (p.vy - q.vy) * ny;       // how fast they are closing
+          if (vrel < 0) {
+            const e = 0.92;
+            p.vx -= (1 + e) * vrel * nx;
+            p.vy -= (1 + e) * vrel * ny;
+            if (K.pk !== 1) { p.vx *= K.pk; p.vy *= K.pk; }
+            const sp = Math.hypot(p.vx, p.vy);
+            if (sp > cap) { p.vx *= cap / sp; p.vy *= cap / sp; }
+            q.touched = true;
+            if (ev) ev.hit[sd] = Math.max(ev.hit[sd], -vrel);
+          }
+          p.x = q.x + nx * (RQK + RPK + 0.001);
+          p.y = q.y + ny * (RQK + RPK + 0.001);
+          p.x = Math.max(RPK, Math.min(8 - RPK, p.x));
         }
-        p.x = q.x + nx * (RQ + RP + 0.001);
-        p.y = q.y + ny * (RQ + RP + 0.001);
-        p.x = Math.max(RP, Math.min(8 - RP, p.x));
+      }
+    }
+    // extra pucks bounce off each other (equal mass)
+    if (nx0) {
+      const all = [s.p].concat(s.xp);
+      for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+        const a = all[i], b = all[j];
+        let dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+        if (d >= 2 * RPK) continue;
+        if (d < 1e-4) { dx = 1; dy = 0; d = 1; }
+        const nx = dx / d, ny = dy / d, vr = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+        if (vr > 0) { a.vx -= vr * nx; a.vy -= vr * ny; b.vx += vr * nx; b.vy += vr * ny; if (ev) ev.wall = Math.max(ev.wall, vr * 0.5); }
+        const push = (2 * RPK - d) / 2 + 0.0005;
+        a.x -= nx * push; a.y -= ny * push; b.x += nx * push; b.y += ny * push;
       }
     }
     return 0;
@@ -314,7 +353,7 @@
       let u = ((p.x - q.x) * dx + (p.y - q.y) * dy) / L2;
       u = Math.max(0, Math.min(1, u));
       const cx = q.x + dx * u, cy = q.y + dy * u;
-      if (Math.hypot(p.x - cx, p.y - cy) < RQ + RP - 0.06) {
+      if (Math.hypot(p.x - cx, p.y - cy) < (S.k || KD).rq[b] + (S.k || KD).rp - 0.06) {
         const L = Math.sqrt(L2), dir = (b === 1 ? -dy : dy) / L;       // +1 = straight toward the opponent's goal
         best = Math.max(best, 34 + L * (levelOf(b).pro ? 8 : 2.5) + dir * 22);
       }
@@ -466,19 +505,33 @@
     const layer = $('#hk-layer');
     layer.innerHTML = '<svg id="hk-traj" class="hk-traj" viewBox="0 0 8 8" preserveAspectRatio="none" aria-hidden="true"></svg><i class="hk-mid"></i><i class="hk-goal top"></i><i class="hk-goal bot"></i>';
     trajEl = layer.querySelector('#hk-traj');
-    qEls = [0, 1].map((i) => {
-      const d = document.createElement('div');
-      d.className = 'hk-q';
-      const s = document.createElement('span');
-      s.className = 'piece ' + (i === 0 ? 'w' : 'b');
-      s.textContent = GLYPH[cfg.piece];
-      d.appendChild(s);
-      layer.appendChild(d);
-      return d;
+    qEls = []; puckEls = [];
+    syncEls();
+  }
+
+  /** Make the piece and puck pictures match the state: how many there are, whose they are, how big, ghosts, and the goal width. */
+  function syncEls() {
+    const layer = $('#hk-layer'), K = S.k || KD;
+    while (qEls.length < S.q.length) {
+      const d = document.createElement('div'), sp = document.createElement('span');
+      sp.textContent = GLYPH[cfg.piece]; d.appendChild(sp); layer.appendChild(d); qEls.push(d);
+    }
+    while (qEls.length > S.q.length) qEls.pop().remove();
+    S.q.forEach((q, i) => {
+      const sd = q.side === undefined ? i : q.side, d = qEls[i];
+      d.classList.add('hk-q');
+      d.classList.toggle('tm', i >= 2);
+      d.classList.toggle('ghost', !!K.gh[sd]);
+      d.firstChild.className = 'piece ' + (sd === 0 ? 'w' : 'b');
+      d.style.setProperty('--sc', (K.rq[sd] / RQ).toFixed(3));
     });
-    puckEl = document.createElement('div');
-    puckEl.className = 'hk-puck';
-    layer.appendChild(puckEl);
+    const np = 1 + (S.xp ? S.xp.length : 0);
+    while (puckEls.length < np) { const d = document.createElement('div'); d.className = 'hk-puck'; layer.appendChild(d); puckEls.push(d); }
+    while (puckEls.length > np) puckEls.pop().remove();
+    const w = (K.rp * 2 / 8 * 100).toFixed(2) + '%';
+    puckEls.forEach((d) => { d.style.width = w; });
+    const gl = (4 - K.gw / 2) / 8 * 100, gwp = K.gw / 8 * 100;
+    layer.querySelectorAll('.hk-goal').forEach((g) => { g.style.left = gl.toFixed(2) + '%'; g.style.width = gwp.toFixed(2) + '%'; });
   }
 
   function place(el, x, y) {
@@ -488,11 +541,22 @@
 
   function draw() {
     const hk = HK();
+    syncEls();
     // a slowed game turns into ticks only now and then, so draw between the last two ticks to keep it smooth
     const a = (phase === 'play' && prevPos && hk.slow < 1 && !rp) ? Math.min(1, acc / TICK) : 1;
-    const L = (cur, k) => (a < 1 ? prevPos[k] + (cur - prevPos[k]) * a : cur);
-    for (let i = 0; i < 2; i++) { place(qEls[i], L(S.q[i].x, 2 + i * 2), L(S.q[i].y, 3 + i * 2)); qEls[i].classList.toggle('sel', sel === i); }
-    place(puckEl, L(S.p.x, 0), L(S.p.y, 1));
+    const lp = (cur, prev) => (a < 1 && typeof prev === 'number' ? prev + (cur - prev) * a : cur);
+    S.q.forEach((q, i) => {
+      const pv = a < 1 && prevPos ? prevPos.q[i] : null;
+      place(qEls[i], lp(q.x, pv && pv[0]), lp(q.y, pv && pv[1]));
+      qEls[i].classList.toggle('sel', sel === i);
+    });
+    const pucks = [S.p].concat(S.xp || []), shown = [];
+    pucks.forEach((pk, i) => {
+      const pv = a < 1 && prevPos ? (i === 0 ? prevPos.p : prevPos.xp[i - 1]) : null;
+      const x = lp(pk.x, pv && pv[0]), y = lp(pk.y, pv && pv[1]);
+      shown.push([x, y]);
+      place(puckEls[i], x, y);
+    });
     // dots for the squares each idle piece can glide to (none with move anywhere: every square is allowed)
     const show = new Set();
     const anyOn = hk.any && cfg.players > 0 && !rp;
@@ -502,12 +566,14 @@
       if (!q.mv && phase === 'play') destinations(i, q.f, q.r, cfg.piece).forEach(([f, r]) => show.add(r * 8 + f));
     }
     for (const k in els) els[k].classList.toggle('legal', show.has(+k));
-    drawTraj(hk);
+    drawTraj(hk, shown);
   }
 
-  /** Trajectory overlays (mods): where the puck goes in the next few seconds (bounces included), and where each piece is heading. */
+  /** Trajectory overlays (mods): where each puck goes in the next few seconds (bounces included), and where each piece is heading.
+      The prediction runs the real simulation at the real tick size from the real state, so it is exactly what will happen unless
+      someone moves (a coarser step made the line flicker near pieces and walls). */
   let trajHtml = '';
-  function drawTraj(hk) {
+  function drawTraj(hk, shown) {
     if (!trajEl) return;
     let html = '';
     const live = !rp && (phase === 'play' || phase === 'paused' || phase === 'goal');
@@ -515,26 +581,36 @@
       const pt = (x, y) => x.toFixed(2) + ',' + (8 - y).toFixed(2);
       if (hk.puckT > 0) {
         if (phase === 'play') usedMods.add('Puck path');
-        const s = copy(S), pts = [pt(s.p.x, s.p.y)], dots = [];
-        let pvx = s.p.vx, pvy = s.p.vy;
-        const n = Math.round(hk.puckT * 60);
-        for (let i = 0; i < n; i++) {
-          const g = step(s, 1 / 60);
-          pts.push(pt(s.p.x, s.p.y));
-          if ((s.p.vx * pvx < 0 || s.p.vy * pvy < 0) && Math.hypot(pvx, pvy) > 0.5) dots.push([s.p.x, s.p.y]);
-          pvx = s.p.vx; pvy = s.p.vy;
-          if (g) break;
+        const s = copy(S), np = 1 + s.xp.length;
+        const get = (i) => (i === 0 ? s.p : s.xp[i - 1]);
+        const pts = [], dots = [], pv = [];
+        for (let i = 0; i < np; i++) { pts.push([pt(shown[i][0], shown[i][1])]); dots.push([]); pv.push([get(i).vx, get(i).vy]); }
+        const n = Math.round(hk.puckT / TICK);
+        let hit = null;
+        for (let t = 0; t < n; t++) {
+          const g = step(s, TICK);
+          for (let i = 0; i < np; i++) {
+            const q = get(i);
+            if (t % 2 === 1 || g) pts[i].push(pt(q.x, q.y));
+            if ((q.vx * pv[i][0] < 0 || q.vy * pv[i][1] < 0) && Math.hypot(pv[i][0], pv[i][1]) > 0.5) dots[i].push([q.x, q.y]);
+            pv[i] = [q.vx, q.vy];
+          }
+          if (g) { hit = [s.p.x, s.p.y]; break; }
         }
-        html += '<polyline class="tj-puck" points="' + pts.join(' ') + '"/>' + dots.map((d) => '<circle class="tj-bounce" cx="' + d[0].toFixed(2) + '" cy="' + (8 - d[1]).toFixed(2) + '" r="0.1"/>').join('');
+        for (let i = 0; i < np; i++) {
+          if (Math.hypot(pv[i][0], pv[i][1]) < 0.05 && pts[i].length < 3) continue;      // a puck that is not going anywhere
+          html += '<polyline class="tj-puck' + (i ? ' x' : '') + '" points="' + pts[i].join(' ') + '"/>' + dots[i].map((d) => '<circle class="tj-bounce" cx="' + d[0].toFixed(2) + '" cy="' + (8 - d[1]).toFixed(2) + '" r="0.1"/>').join('');
+        }
+        if (hit) html += '<circle class="tj-goal" cx="' + hit[0].toFixed(2) + '" cy="' + (8 - Math.max(0, Math.min(8, hit[1]))).toFixed(2) + '" r="0.22"/>';
       }
       if (hk.plTraj) {
         if (phase === 'play') usedMods.add('Player paths');
-        for (let i = 0; i < 2; i++) {
-          const q = S.q[i];
+        for (let i = 0; i < S.q.length; i++) {
+          const q = S.q[i], sd = q.side === undefined ? i : q.side, c = sd === 0 ? 'w' : 'b';
           if (!q.mv) continue;
-          html += '<line class="tj-pl ' + (i === 0 ? 'w' : 'b') + '" x1="' + q.x.toFixed(2) + '" y1="' + (8 - q.y).toFixed(2) + '" x2="' + q.mv.tx.toFixed(2) + '" y2="' + (8 - q.mv.ty).toFixed(2) + '"/><circle class="tj-end ' + (i === 0 ? 'w' : 'b') + '" cx="' + q.mv.tx.toFixed(2) + '" cy="' + (8 - q.mv.ty).toFixed(2) + '" r="0.16"/>';
-          const nx = queued[i];
-          if (nx) html += '<line class="tj-pl q ' + (i === 0 ? 'w' : 'b') + '" x1="' + q.mv.tx.toFixed(2) + '" y1="' + (8 - q.mv.ty).toFixed(2) + '" x2="' + (nx[0] + 0.5) + '" y2="' + (8 - nx[1] - 0.5) + '"/>';
+          html += '<line class="tj-pl ' + c + '" x1="' + q.x.toFixed(2) + '" y1="' + (8 - q.y).toFixed(2) + '" x2="' + q.mv.tx.toFixed(2) + '" y2="' + (8 - q.mv.ty).toFixed(2) + '"/><circle class="tj-end ' + c + '" cx="' + q.mv.tx.toFixed(2) + '" cy="' + (8 - q.mv.ty).toFixed(2) + '" r="0.16"/>';
+          const nx = i < 2 ? queued[i] : null;
+          if (nx) html += '<line class="tj-pl q ' + c + '" x1="' + q.mv.tx.toFixed(2) + '" y1="' + (8 - q.mv.ty).toFixed(2) + '" x2="' + (nx[0] + 0.5) + '" y2="' + (8 - nx[1] - 0.5) + '"/>';
         }
       }
     }
@@ -558,11 +634,13 @@
   function onTap(f, r) {
     audio();                                              // wakes the sound up on the first tap
     if (phase !== 'play') return;
-    if (HK().any && cfg.players > 0) { tapAnywhere(f, r); return; }
+    if (placeArm) { placePuck(f, r); return; }
+    const hk = HK();
+    if (hk.any && cfg.players > 0) { tapAnywhere(f, r); return; }
     const side = r <= 3 ? 0 : 1;
     if (cfg.players === 0 || (side === 1 && cfg.players === 1)) return;          // computer pieces are not played by taps
     const q = S.q[side];
-    if (q.mv) { queued[side] = [f, r]; return; }           // you can plan the next move while gliding
+    if (q.mv && !hk.inst) { queued[side] = [f, r]; return; }           // you can plan the next move while gliding
     go(side, f, r);
   }
   /** Move anywhere. One player: every tap sends your piece there. Two players: tap a piece first to pick it, then any square
@@ -580,20 +658,100 @@
       side = sel >= 0 ? sel : (r <= 3 ? 0 : 1);
       sel = -1;
     }
-    freeGlide(side, f, r);
+    if (HK().inst) instantTo(side, f, r); else freeGlide(side, f, r);
   }
   function go(side, f, r) {
     const q = S.q[side];
     if (!destinations(side, q.f, q.r, cfg.piece).some((d) => d[0] === f && d[1] === r)) return false;
+    if (HK().inst) { instantTo(side, f, r); return true; }
     realGlide(q, side, f, r);
     return true;
+  }
+  /** Instant move (mod): the piece is there at once. */
+  function instantTo(side, f, r) {
+    jumpTo(S.q[side], f, r);
+    note([tk, 7, side, f, r]);
+    usedMods.add('Instant move');
+    sfxLand(side);
+  }
+  /** Mod menu: Stop puck takes the speed off every puck. Place puck arms the next tap on a square to put the main puck there, standing still. */
+  function stopPucks() {
+    if (!(phase === 'play' || phase === 'paused')) return;
+    [S.p].concat(S.xp || []).forEach((p) => { p.vx = 0; p.vy = 0; });
+    note([tk, 6, -1]);
+    usedMods.add('Puck control');
+  }
+  function armPlace() {
+    if (phase !== 'play') { toast('Start or resume a match first', 1200); return; }
+    placeArm = true;
+    toast('Tap a square to put the puck there', 2200);
+  }
+  function placePuck(f, r) {
+    placeArm = false;
+    S.p.x = f + 0.5; S.p.y = r + 0.5; S.p.vx = 0; S.p.vy = 0;
+    note([tk, 6, 0, S.p.x, S.p.y]);
+    usedMods.add('Puck control');
+    sideNow = -1; sideT = 0; stallT = 0;
+    $('#hk-toast').classList.remove('show');
+  }
+
+  /* ---- physics mods: the settings the menu asks for are put into the state, and noted so a replay does the same */
+  const r4 = (v) => Math.round(v * 10000) / 10000;
+  function wantK() {
+    const h = HK();
+    return { pk: r4(h.pk), fr: h.slide >= 5.5 ? 0 : r4(1 / h.slide), rp: r4(RP * h.psize), gw: h.gw, rq: [r4(RQ * h.sz[0]), r4(RQ * h.sz[1])], gh: [h.gh[0] ? 1 : 0, h.gh[1] ? 1 : 0], xn: h.xp | 0, tm: [h.tm[0] ? 1 : 0, h.tm[1] ? 1 : 0] };
+  }
+  function syncParams() {
+    if (rp) return;
+    const w = wantK();
+    if (JSON.stringify(w) !== JSON.stringify(S.k || KD)) { applyK(S, w); note([tk, 5, w]); }
+    const k = S.k || KD;
+    if (k.pk !== 1) usedMods.add('Puck speed');
+    if (k.fr !== 1) usedMods.add('Puck slide');
+    if (k.rp !== RP) usedMods.add('Puck size');
+    if (k.gw !== 3) usedMods.add('Goal size');
+    if (k.xn) usedMods.add('Extra pucks');
+    if (k.rq[0] !== RQ || k.rq[1] !== RQ) usedMods.add('Piece size');
+    if (k.gh[0] || k.gh[1]) usedMods.add('Ghost piece');
+    if (k.tm[0] || k.tm[1]) usedMods.add('AI teammate');
+  }
+  /** The AI teammate: stays on its side's back row and slides to where the puck is heading (or, when nothing is coming, in line with the closest puck). */
+  const TM_K = 4;                                         // it glides this many times faster than a normal piece
+  let tmClock = [0, 0, 0, 0];
+  const fold = (x) => { let v = x; for (let n = 0; n < 4; n++) { if (v < 0) v = -v; else if (v > 8) v = 16 - v; } return v; };
+  function tmThink(dtg) {
+    const pucks = [S.p].concat(S.xp || []);
+    for (let i = 2; i < S.q.length; i++) {
+      const q = S.q[i];
+      tmClock[i] -= dtg;
+      if (tmClock[i] > 0) continue;
+      tmClock[i] = 0.05;
+      const side = q.side, row = side === 0 ? 0 : 7, ry = row + 0.5;
+      let tx = 4, bestT = 1e9, found = false;
+      for (const pk of pucks) {
+        const toward = side === 0 ? -pk.vy : pk.vy, dist = side === 0 ? pk.y - ry : ry - pk.y;
+        if (toward > 0.4 && dist > 0) { const t = dist / toward; if (t < bestT) { bestT = t; tx = fold(pk.x + pk.vx * t * 0.85); found = true; } }
+      }
+      if (!found) {
+        let bd = 1e9;
+        for (const pk of pucks) {
+          const mine = side === 0 ? pk.y < 4.6 : pk.y > 3.4, d = side === 0 ? pk.y : 8 - pk.y;
+          if (mine && d < bd) { bd = d; tx = pk.x; }
+        }
+      }
+      const f = Math.max(2, Math.min(5, Math.floor(tx)));      // the goal is in front of files c to f
+      if ((q.mv ? q.mv.f : q.f) === f && (!q.mv || q.mv.r === row)) continue;
+      const k = r4(TM_K * (HK().spd[side] || 1));
+      startFree(q, side, f, row, k);
+      note([tk, 4, i, f, row, k]);
+    }
   }
 
   /* ------------------------------------------------------------------ loop */
   /** One step of the simulation. Returns the goal result of step(). */
   function tick() {
     sideCheck(TICK);                                      // may move the puck (recorded), before this tick's step
-    prevPos = [S.p.x, S.p.y, S.q[0].x, S.q[0].y, S.q[1].x, S.q[1].y];
+    prevPos = { p: [S.p.x, S.p.y], q: S.q.map((q) => [q.x, q.y]), xp: (S.xp || []).map((x) => [x.x, x.y]) };
     tk++; roundT += TICK; S.m = speedMul(roundT);
     const goal = step(S, TICK, ev);
     if (goal) return goal;
@@ -659,6 +817,7 @@
     if (phase === 'play') {
       if (hk.spd[0] !== 1 || hk.spd[1] !== 1) usedMods.add('Piece speed');
       if (gs < 1) usedMods.add('Slow motion');
+      syncParams();
       updateSpeedLabel();
       ev = newEv();
       acc += dt * gs;
@@ -674,6 +833,7 @@
         botClock[b] -= dt * gs;
         if (botClock[b] <= 0) { botThink(b); botClock[b] = nextLook(b); }
       }
+      if (!goal && S.q.length > 2) tmThink(dt * gs);
       if (goal) scored(goal === 1 ? 0 : 1);
     } else if (phase === 'rewind') {
       rewindFrame(dt);
@@ -725,6 +885,8 @@
     LP.mods.on(() => { sel = -1; lastSpd = ''; });
     LP.mods.hook('hockey', {
       rewind,
+      stop: stopPucks,
+      place: armPlace,
       state: () => ({ live: !!cfg && !rp && (phase === 'play' || phase === 'paused' || phase === 'goal' || phase === 'rewind'), players: cfg ? cfg.players : 0, canRewind: !rp && !!rec && hist.length > 0 && (phase === 'play' || phase === 'paused' || phase === 'goal' || phase === 'rewind') }),
     });
   }
@@ -734,7 +896,7 @@
   let serveTo = 0;       // the side that was just scored on gets the puck in its half
   function resetRound() {
     roundT = 0; sideNow = -1; sideT = 0; showCount(0); prevPos = null; sel = -1;
-    S = newState();
+    S = newState(S.k);
     S.p.y = serveTo === 0 ? 2.2 : 5.8;
     note([tk, 1, S.p.y]);
     queued = [null, null];
@@ -792,7 +954,7 @@
     queued = [null, null];
     started = Date.now();
     rec = { ev: [], goals: [] }; tk = 0; acc = 0; stallT = 0; roundT = 0; sideNow = -1; sideT = 0; lastSpd = ''; showCount(0);
-    hist = []; rw = null; sel = -1; prevPos = null; usedMods.clear(); trajHtml = '';
+    hist = []; rw = null; sel = -1; prevPos = null; usedMods.clear(); trajHtml = ''; placeArm = false; tmClock = [0, 0, 0, 0];
     $('#hockey').classList.remove('rewinding');
     note([0, 1, S.p.y]);
     snap();
@@ -833,7 +995,10 @@
   function rpApply(e) {
     if (e[1] === 0) startGlide(S.q[e[2]], e[2], e[3], e[4], e[5] || 1);
     else if (e[1] === 4) startFree(S.q[e[2]], e[2], e[3], e[4], e[5] || 1);
-    else if (e[1] === 1) { S = newState(); S.p.y = e[2]; rp.roundT = 0; rp.frozen = false; }
+    else if (e[1] === 1) { S = newState(S.k); S.p.y = e[2]; rp.roundT = 0; rp.frozen = false; }
+    else if (e[1] === 5) applyK(S, e[2]);
+    else if (e[1] === 6) { if (e[2] < 0) [S.p].concat(S.xp || []).forEach((p) => { p.vx = 0; p.vy = 0; }); else { S.p.x = e[3]; S.p.y = e[4]; S.p.vx = 0; S.p.vy = 0; } }
+    else if (e[1] === 7) jumpTo(S.q[e[2]], e[3], e[4]);
     else if (e[1] === 2) { S.p.vx = e[2]; S.p.vy = e[3]; }
     else if (e[1] === 3) { S.p.x = 4; S.p.y = e[2] === 1 ? 6 : 2; S.p.vx = S.p.vy = 0; }
   }
@@ -1003,5 +1168,5 @@
 
   /** For tests. */
   window.Hockey = { watch };
-  window.__hockey = { LEVELS, setLevel(l) { cfg.level = l; }, botThink, candidates(b) { const q = S.q[b]; return [null].concat(destinations(b, q.f, q.r, cfg.piece)).map((c) => [c, Math.round(simulate(S, b, c, 1.1))]); }, get S() { return S; }, get score() { return score; }, step, copy, simulate, speedFor, get phase() { return phase; }, destinations, get tk() { return tk; }, get hist() { return hist; }, get rec() { return rec; }, get used() { return Array.from(usedMods); }, rewind, freeGlide, kFor, get cfg() { return cfg; }, get rp() { return rp; }, seek(t) { rp.t = t; rpShow(); return rp.tk; } };
+  window.__hockey = { LEVELS, setLevel(l) { cfg.level = l; }, botThink, candidates(b) { const q = S.q[b]; return [null].concat(destinations(b, q.f, q.r, cfg.piece)).map((c) => [c, Math.round(simulate(S, b, c, 1.1))]); }, get S() { return S; }, get score() { return score; }, step, copy, simulate, speedFor, get phase() { return phase; }, destinations, get tk() { return tk; }, get hist() { return hist; }, get rec() { return rec; }, get used() { return Array.from(usedMods); }, rewind, freeGlide, kFor, get cfg() { return cfg; }, get tmpK() { return S.k; }, wantK, get rp() { return rp; }, seek(t) { rp.t = t; rpShow(); return rp.tk; } };
 })();

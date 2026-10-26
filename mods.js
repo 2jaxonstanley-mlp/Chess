@@ -9,7 +9,9 @@
  *   any      move anywhere: your piece goes to any square at any moment, even while gliding and even on the other side (never the computer)
  *   slow     game speed, 10% to 100% (slowPick is the speed the Slow motion switch uses)    norm: your own piece keeps moving at normal speed while slowed
  *   puckT    show the puck's path this many seconds ahead (0 = off)       plTraj: show where the pieces are heading
- *   Rewind 1s is a button: it takes a live match back about one second, points included (hockey.js provides it through LP.mods.hook)
+ *   pk puck speed  slide puck slide (friction)  psize puck size  gw goal width  xp extra pucks  sz piece sizes  gh ghost pieces (50% see-through, the puck passes through)
+ *   tm AI teammates (stay on their back row, fast, defend the goal)  inst instant move (no glide)
+ *   Buttons (hockey.js provides them through LP.mods.hook): Rewind 1s (a live match goes back about a second, points included), Stop puck, Place puck
  * hockey.js reads LP.mods.hk while it plays, and notes every mod that was used so the match shows as Modded in History.
  */
 (() => {
@@ -18,7 +20,7 @@
   if (!LP) return;
   const KEY = 'localPieces.mods';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const defHk = () => ({ spd: [1, 1], any: false, slow: 1, slowPick: 0.5, norm: true, puckT: 0, plTraj: false });
+  const defHk = () => ({ spd: [1, 1], any: false, slow: 1, slowPick: 0.5, norm: true, puckT: 0, plTraj: false, pk: 1, slide: 1, psize: 1, gw: 3, xp: 0, sz: [1, 1], gh: [false, false], tm: [false, false], inst: false });
   let st = { unlocked: false, pos: { x: 0.92, y: 0.34 }, hk: defHk(), open: { hockey: true } };
   const subs = [];
   const hooks = {};
@@ -36,6 +38,15 @@
       norm: h.norm !== false,
       puckT: n(h.puckT, 0, 5, 0),
       plTraj: !!h.plTraj,
+      pk: n(h.pk, 0.5, 3, 1),
+      slide: n(h.slide, 0.25, 5.5, 1),
+      psize: n(h.psize, 0.5, 2.5, 1),
+      gw: n(h.gw, 1, 8, 3),
+      xp: Math.round(n(h.xp, 0, 5, 0)),
+      sz: [0, 1].map((i) => n(h.sz && h.sz[i], 0.5, 2.5, 1)),
+      gh: [0, 1].map((i) => !!(h.gh && h.gh[i])),
+      tm: [0, 1].map((i) => !!(h.tm && h.tm[i])),
+      inst: !!h.inst,
     };
   }
   try {
@@ -44,7 +55,7 @@
       st.unlocked = !!v.unlocked;
       st.hk = clean(v.hk);
       if (v.pos && isFinite(v.pos.x) && isFinite(v.pos.y)) st.pos = { x: clamp(v.pos.x, 0, 1), y: clamp(v.pos.y, 0, 1) };
-      if (v.open && typeof v.open === 'object') st.open = { hockey: v.open.hockey !== false };
+      if (v.open && typeof v.open === 'object') st.open = Object.assign({ hockey: true }, v.open);
     }
   } catch (e) { /* defaults */ }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { /* best effort */ } };
@@ -116,43 +127,81 @@
     return `<div class="mm-row"><span>${label}</span><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"><output id="${id}-o">${out}</output></div>`;
   }
   const sw = (label, id, on, note) => `<label class="mm-sw"><span>${label}${note ? `<small id="${id}-n">${note}</small>` : ''}</span><input type="checkbox" id="${id}"${on ? ' checked' : ''}><i></i></label>`;
+  const sub = (id, title, body) => `<details class="mm-sub" id="mm-d-${id}"${st.open[id] ? ' open' : ''}><summary>${title}</summary><div class="mm-in">${body}</div></details>`;
+  const slideTxt = (v) => (v >= 5.5 ? 'Endless' : xs(v));
 
   function paint() {
     const h = st.hk;
+    const pieces = row('White speed', 'mm-sw', 1, 15, 0.5, h.spd[0], xs(h.spd[0]))
+      + row('Black speed', 'mm-sb', 1, 15, 0.5, h.spd[1], xs(h.spd[1]))
+      + row('White size', 'mm-zw', 0.5, 2.5, 0.1, h.sz[0], xs(h.sz[0]))
+      + row('Black size', 'mm-zb', 0.5, 2.5, 0.1, h.sz[1], xs(h.sz[1]))
+      + sw('White ghost', 'mm-gw', h.gh[0], '50% see-through, the puck passes through')
+      + sw('Black ghost', 'mm-gb', h.gh[1], '50% see-through, the puck passes through')
+      + sw('Move anywhere', 'mm-any', h.any, 'players only')
+      + sw('Instant move', 'mm-inst', h.inst, 'no glide, players only')
+      + sw('AI teammate (White)', 'mm-tw', h.tm[0], 'guards the bottom row, very fast')
+      + sw('AI teammate (Black)', 'mm-tb', h.tm[1], 'guards the top row, very fast');
+    const puck = row('Puck speed', 'mm-pk', 0.5, 3, 0.25, h.pk, xs(h.pk))
+      + row('Puck slide', 'mm-sl', 0.25, 5.5, 0.25, h.slide, slideTxt(h.slide))
+      + row('Puck size', 'mm-ps', 0.5, 2.5, 0.1, h.psize, xs(h.psize))
+      + row('Extra pucks', 'mm-xp', 0, 5, 1, h.xp, String(h.xp))
+      + '<div class="mm-two"><button type="button" class="mm-act" id="mm-stop">Stop puck</button><button type="button" class="mm-act" id="mm-place">Place puck</button></div>';
+    const arena = row('Goal width', 'mm-gw2', 1, 8, 0.5, h.gw, h.gw + ' sq');
+    const time = sw('Slow motion', 'mm-slow', h.slow < 1)
+      + row('Game speed', 'mm-sp', 10, 95, 5, Math.round((h.slow < 1 ? h.slow : h.slowPick) * 100), pct(h.slow < 1 ? h.slow : h.slowPick))
+      + sw('My piece stays normal speed', 'mm-norm', h.norm)
+      + '<button type="button" class="mm-act" id="mm-rw">Rewind 1s</button>';
+    const view = row('Puck path', 'mm-puck', 0, 5, 0.5, h.puckT, h.puckT ? h.puckT + 's' : 'Off')
+      + sw('Show piece paths', 'mm-pl', h.plTraj);
     panel.innerHTML = `<div class="mm-head"><b>Mod menu</b><button type="button" class="mm-x" id="mm-x" aria-label="Close">&times;</button></div>
       <div class="mm-body">
         <details class="mm-cat" id="mm-hk"${st.open.hockey ? ' open' : ''}>
           <summary>Hockey</summary>
-          <div class="mm-in">
-            ${row('White speed', 'mm-sw', 1, 15, 0.5, h.spd[0], xs(h.spd[0]))}
-            ${row('Black speed', 'mm-sb', 1, 15, 0.5, h.spd[1], xs(h.spd[1]))}
-            ${sw('Move anywhere', 'mm-any', h.any, 'players only')}
-            ${sw('Slow motion', 'mm-slow', h.slow < 1)}
-            ${row('Game speed', 'mm-sp', 10, 95, 5, Math.round((h.slow < 1 ? h.slow : h.slowPick) * 100), pct(h.slow < 1 ? h.slow : h.slowPick))}
-            ${sw('My piece stays normal speed', 'mm-norm', h.norm)}
-            ${row('Puck path', 'mm-puck', 0, 5, 0.5, h.puckT, h.puckT ? h.puckT + 's' : 'Off')}
-            ${sw('Show piece paths', 'mm-pl', h.plTraj)}
-            <button type="button" class="mm-act" id="mm-rw">Rewind 1s</button>
+          <div class="mm-subs">
+            ${sub('pieces', 'Pieces', pieces)}
+            ${sub('puck', 'Puck', puck)}
+            ${sub('arena', 'Arena', arena)}
+            ${sub('time', 'Time', time)}
+            ${sub('view', 'Trajectories', view)}
             <button type="button" class="mm-link" id="mm-rs">Reset Hockey mods</button>
           </div>
         </details>
         <button type="button" class="mm-link off" id="mm-off">Turn mod menu off</button>
       </div>`;
-    const $ = (s) => panel.querySelector(s);
+    const $ = (q) => panel.querySelector(q);
     const bind = (id, fn, out, fmt) => {
       const el = $('#' + id);
       el.oninput = el.onchange = () => { fn(el); if (out) $('#' + out).textContent = fmt(el); save(); fire(); };
     };
-    bind('mm-sw', (e) => { st.hk.spd[0] = clamp(+e.value, 1, 15); }, 'mm-sw-o', (e) => xs(+e.value));
-    bind('mm-sb', (e) => { st.hk.spd[1] = clamp(+e.value, 1, 15); }, 'mm-sb-o', (e) => xs(+e.value));
-    bind('mm-any', (e) => { st.hk.any = e.checked; });
-    bind('mm-slow', (e) => { st.hk.slow = e.checked ? st.hk.slowPick : 1; });
-    bind('mm-sp', (e) => { const v = clamp(+e.value / 100, 0.1, 0.95); st.hk.slowPick = v; if (st.hk.slow < 1) st.hk.slow = v; }, 'mm-sp-o', (e) => e.value + '%');
-    bind('mm-norm', (e) => { st.hk.norm = e.checked; });
-    bind('mm-puck', (e) => { st.hk.puckT = clamp(+e.value, 0, 5); }, 'mm-puck-o', (e) => (+e.value ? e.value + 's' : 'Off'));
-    bind('mm-pl', (e) => { st.hk.plTraj = e.checked; });
+    const hk = st.hk, v = (e) => +e.value;
+    bind('mm-sw', (e) => { hk.spd[0] = clamp(v(e), 1, 15); }, 'mm-sw-o', (e) => xs(v(e)));
+    bind('mm-sb', (e) => { hk.spd[1] = clamp(v(e), 1, 15); }, 'mm-sb-o', (e) => xs(v(e)));
+    bind('mm-zw', (e) => { hk.sz[0] = clamp(v(e), 0.5, 2.5); }, 'mm-zw-o', (e) => xs(v(e)));
+    bind('mm-zb', (e) => { hk.sz[1] = clamp(v(e), 0.5, 2.5); }, 'mm-zb-o', (e) => xs(v(e)));
+    bind('mm-gw', (e) => { hk.gh[0] = e.checked; });
+    bind('mm-gb', (e) => { hk.gh[1] = e.checked; });
+    bind('mm-any', (e) => { hk.any = e.checked; });
+    bind('mm-inst', (e) => { hk.inst = e.checked; });
+    bind('mm-tw', (e) => { hk.tm[0] = e.checked; });
+    bind('mm-tb', (e) => { hk.tm[1] = e.checked; });
+    bind('mm-pk', (e) => { hk.pk = clamp(v(e), 0.5, 3); }, 'mm-pk-o', (e) => xs(v(e)));
+    bind('mm-sl', (e) => { hk.slide = clamp(v(e), 0.25, 5.5); }, 'mm-sl-o', (e) => slideTxt(v(e)));
+    bind('mm-ps', (e) => { hk.psize = clamp(v(e), 0.5, 2.5); }, 'mm-ps-o', (e) => xs(v(e)));
+    bind('mm-xp', (e) => { hk.xp = Math.round(clamp(v(e), 0, 5)); }, 'mm-xp-o', (e) => String(Math.round(v(e))));
+    bind('mm-gw2', (e) => { hk.gw = clamp(v(e), 1, 8); }, 'mm-gw2-o', (e) => v(e) + ' sq');
+    bind('mm-slow', (e) => { hk.slow = e.checked ? hk.slowPick : 1; });
+    bind('mm-sp', (e) => { const x = clamp(v(e) / 100, 0.1, 0.95); hk.slowPick = x; if (hk.slow < 1) hk.slow = x; }, 'mm-sp-o', (e) => e.value + '%');
+    bind('mm-norm', (e) => { hk.norm = e.checked; });
+    bind('mm-puck', (e) => { hk.puckT = clamp(v(e), 0, 5); }, 'mm-puck-o', (e) => (v(e) ? e.value + 's' : 'Off'));
+    bind('mm-pl', (e) => { hk.plTraj = e.checked; });
+    const keep = (id) => { const d = $('#mm-d-' + id); d.addEventListener('toggle', () => { st.open[id] = d.open; save(); placePanel(); }); };
+    ['pieces', 'puck', 'arena', 'time', 'view'].forEach(keep);
     $('#mm-hk').addEventListener('toggle', () => { st.open.hockey = $('#mm-hk').open; save(); placePanel(); });
-    $('#mm-rw').onclick = () => { const k = hooks.hockey; if (k && k.rewind) k.rewind(); };
+    const call = (name) => () => { const k = hooks.hockey; if (k && k[name]) k[name](); };
+    $('#mm-rw').onclick = call('rewind');
+    $('#mm-stop').onclick = call('stop');
+    $('#mm-place').onclick = () => { const k = hooks.hockey; if (k && k.place) { k.place(); close(); } };
     $('#mm-rs').onclick = () => { st.hk = defHk(); save(); fire(); paint(); };
     $('#mm-x').onclick = close;
     $('#mm-off').onclick = () => { st.unlocked = false; close(); save(); fire(); btn.classList.add('hidden'); };
@@ -165,8 +214,11 @@
     const k = hooks.hockey, s = k && k.state ? k.state() : { live: false };
     const rw = panel.querySelector('#mm-rw');
     if (rw) { rw.disabled = !s.canRewind; rw.textContent = s.live ? 'Rewind 1s' : 'Rewind 1s (start a match first)'; }
+    ['#mm-stop', '#mm-place'].forEach((id) => { const b = panel.querySelector(id); if (b) b.disabled = !s.live; });
     const n = panel.querySelector('#mm-any-n');
     if (n) n.textContent = s.live && s.players === 0 ? 'not in a 0 player match' : 'players only';
+    const n2 = panel.querySelector('#mm-inst-n');
+    if (n2) n2.textContent = s.live && s.players === 0 ? 'not in a 0 player match' : 'no glide, players only';
   }
   function open() {
     build();

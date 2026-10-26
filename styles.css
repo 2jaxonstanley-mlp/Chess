@@ -1195,7 +1195,7 @@ body[data-bd="tile"] .square.light, body[data-bd="tile"] .square.dark { image-re
 .hk-mid { position: absolute; left: 0; right: 0; top: 50%; height: 0; border-top: 3px dashed rgba(255,255,255,.75); mix-blend-mode: difference; }
 .hk-goal { position: absolute; left: 31.25%; width: 37.5%; height: 2.6%; background: #fff; mix-blend-mode: difference; border-radius: 0 0 8px 8px; }
 .hk-goal.top { top: 0; } .hk-goal.bot { bottom: 0; border-radius: 8px 8px 0 0; }
-.hk-q { position: absolute; width: 12.5%; height: 12.5%; transform: translate(-50%, -50%); display: grid; place-items: center; }
+.hk-q { position: absolute; width: 12.5%; height: 12.5%; transform: translate(-50%, -50%) scale(var(--sc, 1)); display: grid; place-items: center; }
 .hk-q .piece { pointer-events: none; }
 .hk-puck { position: absolute; width: 6.6%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle at 35% 30%, #5a5a64, #17171b 70%); box-shadow: 0 0 0 2px #e9e9ee, 0 2px 6px rgba(0,0,0,.6); }
 .hk-puck::after { content: ''; position: absolute; inset: 30%; border-radius: 50%; background: #ff5a6e; }
@@ -1464,5 +1464,19 @@ body[data-bd="doodle"] .board { border-radius: 1.4% 0.7% 1.8% 0.9% / 0.9% 1.8% 0
 .tj-pl.b, .tj-end.b { stroke: #38bdf8; fill: none; }
 .tj-pl.q { opacity: .55; }
 .tj-end { stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.hk-q.ghost { opacity: .5; }
+.hk-q.tm .piece { filter: drop-shadow(0 0 4px #a78bfa); }
+.hk-q.tm::after { content: ''; position: absolute; left: 50%; bottom: 4%; width: 22%; height: 22%; transform: translateX(-50%); border-radius: 50%; background: #a78bfa; }
+.tj-puck.x { stroke: #ffb347; }
+.tj-goal { fill: none; stroke: #ff5a6e; stroke-width: 2px; vector-effect: non-scaling-stroke; }
 .hk-q.sel::before { content: ''; position: absolute; inset: -6%; border-radius: 50%; border: 3px solid #a78bfa; box-shadow: 0 0 10px #a78bfa; }
 #hockey.rewinding .hk-wrap { filter: hue-rotate(200deg) saturate(1.4) brightness(1.1); }
+
+.mm-subs { padding: 0 .5rem .6rem; display: grid; gap: .45rem; }
+.mm-sub { background: #1e1e25; border: 1px solid #333; border-radius: 8px; }
+.mm-sub > summary { cursor: pointer; padding: .45rem .6rem; font-weight: 600; list-style: none; display: flex; justify-content: space-between; color: #ddd; }
+.mm-sub > summary::-webkit-details-marker { display: none; }
+.mm-sub > summary::after { content: '\25BE'; color: #999; transition: transform .2s; }
+.mm-sub[open] > summary::after { transform: rotate(180deg); }
+.mm-sub .mm-in { padding: 0 .6rem .6rem; }
+.mm-two { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
