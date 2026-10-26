@@ -58,7 +58,6 @@
   let stallT = 0;
   let started = 0;
   let toastT = 0;
-  let modPause = false;  // the match was paused only because the mod menu is open
   let els = {};
   let qEls = [], puckEl = null;
   let roundT = 0;        // seconds the puck has been in play this round (pieces speed up with it)
@@ -645,7 +644,6 @@
     phase = rw.back; rw = null; last = performance.now();
     $('#hockey').classList.remove('rewinding');
     if (phase === 'paused') $('#hk-pause').textContent = 'Resume';
-    paintBar();
   }
   function sfxRewind() {
     const c = audio(); if (!c) return;
@@ -658,7 +656,6 @@
     last = now;
     const hk = HK();
     const gs = hk.slow < 1 ? hk.slow : 1;                 // slow motion: real time is turned into game time more slowly
-    if (modPause && phase === 'paused' && $('#sheet-bg').classList.contains('hidden')) { modPause = false; phase = 'play'; $('#hk-pause').textContent = 'Pause'; dt = 0; }
     if (phase === 'play') {
       if (hk.spd[0] !== 1 || hk.spd[1] !== 1) usedMods.add('Piece speed');
       if (gs < 1) usedMods.add('Slow motion');
@@ -723,27 +720,12 @@
     if (t !== lastSpd) { lastSpd = t; const e = $('#hk-spd'); if (e) e.textContent = t; }
   }
 
-  /* ---- mod buttons under the board (only once the mod menu has been unlocked) */
-  function paintBar() {
-    const bar = $('#hk-mods');
-    if (!bar) return;
-    const h = HK();
-    bar.classList.toggle('hidden', !(LP.mods && LP.mods.bar) || !cfg || phase === 'menu');
-    const sl = $('#hk-m-slow');
-    sl.textContent = h.slow < 1 ? 'Slow ' + Math.round(h.slow * 100) + '%' : 'Slow';
-    sl.classList.toggle('on', h.slow < 1);
-    const an = $('#hk-m-any');
-    an.classList.toggle('on', !!h.any);
-    an.disabled = !!cfg && cfg.players === 0;
-  }
+  /* ---- the mod menu (mods.js) talks to this match through a hook: Rewind 1s and what it needs to know */
   if (LP.mods) {
-    LP.mods.on(() => { sel = -1; paintBar(); lastSpd = ''; });
-    $('#hk-m-rw').addEventListener('click', rewind);
-    $('#hk-m-slow').addEventListener('click', () => { const h = HK(); LP.mods.setHk({ slow: h.slow < 1 ? 1 : h.slowPick }); });
-    $('#hk-m-any').addEventListener('click', () => LP.mods.setHk({ any: !HK().any }));
-    $('#hk-m-menu').addEventListener('click', () => {
-      if (phase === 'play') { phase = 'paused'; modPause = true; $('#hk-pause').textContent = 'Resume'; }
-      LP.mods.open();
+    LP.mods.on(() => { sel = -1; lastSpd = ''; });
+    LP.mods.hook('hockey', {
+      rewind,
+      state: () => ({ live: !!cfg && !rp && (phase === 'play' || phase === 'paused' || phase === 'goal' || phase === 'rewind'), players: cfg ? cfg.players : 0, canRewind: !rp && !!rec && hist.length > 0 && (phase === 'play' || phase === 'paused' || phase === 'goal' || phase === 'rewind') }),
     });
   }
 
@@ -810,7 +792,7 @@
     queued = [null, null];
     started = Date.now();
     rec = { ev: [], goals: [] }; tk = 0; acc = 0; stallT = 0; roundT = 0; sideNow = -1; sideT = 0; lastSpd = ''; showCount(0);
-    hist = []; rw = null; sel = -1; prevPos = null; modPause = false; usedMods.clear(); trajHtml = '';
+    hist = []; rw = null; sel = -1; prevPos = null; usedMods.clear(); trajHtml = '';
     $('#hockey').classList.remove('rewinding');
     note([0, 1, S.p.y]);
     snap();
@@ -823,7 +805,6 @@
     LP.setSides({ w: 'p1', b: 'p2' });
     LP.showPage('hockey');
     phase = 'play';
-    paintBar();
     audio();
     botClock = [firstReact(0.8, 0), firstReact(0.8, 1)];
     cancelAnimationFrame(raf);
@@ -912,8 +893,7 @@
     $('#hk-status').textContent = 'Replay' + (d.modded && d.modded.length ? ' \u00b7 Modded (' + d.modded.join(', ') + ')' : '');
     $('#hk-spd').textContent = '';
     $('#hockey').classList.remove('rewinding');
-    trajHtml = ''; sel = -1; rw = null; modPause = false;
-    paintBar();
+    trajHtml = ''; sel = -1; rw = null;
     showCount(0);
     const sc = $('#hk-rp-scrub');
     sc.max = String(Math.round(rp.total * 100)); sc.step = '1';
@@ -953,7 +933,7 @@
   function toMenu() {
     if (rp) { cancelAnimationFrame(rp.raf); rp = null; }
     $('#hockey').classList.remove('replaying', 'rewinding');
-    rw = null; modPause = false;
+    rw = null;
     phase = 'menu';
     cancelAnimationFrame(raf);
     LP.closeSheet();
