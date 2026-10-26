@@ -98,10 +98,11 @@
     box.innerHTML = shown.map((e) => {
       const canAnalyze = e.payload && (e.kind === 'rush' || (e.kind === 'chess' && !e.payload.tas)) && LP.analyze;
       return `<div class="an-card hs-card" data-id="${esc(e.id)}">
-        <div class="an-top"><b class="an-mode">${esc(e.modeLabel || e.mode || '')}</b><span class="an-date">${esc(stamp(e.date))}</span></div>
+        <div class="an-top"><b class="an-mode">${esc(e.modeLabel || e.mode || '')}${e.modded && e.modded.length ? ' <span class="hs-mod">Modded</span>' : ''}</b><span class="an-date">${esc(stamp(e.date))}</span></div>
         <div class="an-who">${who(e)}</div>
         <div class="an-res">${esc(e.result || '')}</div>
         <div class="hs-meta">${esc(meta(e))}</div>
+        ${e.modded && e.modded.length ? '<div class="hs-meta hs-mods">Mods used: ' + esc(e.modded.join(', ')) + '</div>' : ''}
         ${e.payload ? '' : '<div class="hs-meta hs-gone">The replay was removed to save space on this device.</div>'}
         <div class="an-btns"><button class="btn primary hs-watch"${e.payload ? '' : ' disabled'}>Watch replay</button>${canAnalyze ? '<button class="btn hs-an">Analyze</button>' : ''}<button class="btn an-del hs-del" aria-label="Delete">Delete</button></div>
       </div>`;

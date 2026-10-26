@@ -103,12 +103,22 @@
     const n = unreadCount();
     try { localStorage.setItem(SEEN, LOG[0].id); } catch (e) { /* ignore */ }
     paintDot();
-    const entry = (u, i) => `<section class="log-entry${i < n ? ' new' : ''}"><div class="log-head"><b>${esc(u.title)}</b><time datetime="${u.date}">${fmtDate(u.date)}</time></div>
+    // the very first update's title hides a secret: its first and last letters are buttons (see mods.js)
+    const keyed = (t) => { const a = Array.from(t); return a.length < 2 ? esc(t) : `<span class="log-k" data-k="0">${esc(a[0])}</span>${esc(a.slice(1, -1).join(''))}<span class="log-k" data-k="1">${esc(a[a.length - 1])}</span>`; };
+    const entry = (u, i) => `<section class="log-entry${i < n ? ' new' : ''}"><div class="log-head"><b>${i === LOG.length - 1 ? keyed(u.title) : esc(u.title)}</b><time datetime="${u.date}">${fmtDate(u.date)}</time></div>
         <ul>${u.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></section>`;
     LP.openSheet(`<h2>Update log<span class="sub">What changed, newest first.</span></h2>
       <div class="log-list">${n ? '<div class="log-new-h">WHATS NEW!</div>' : ''}${LOG.map((u, i) => (i === n && n ? '<div class="log-old-h">Earlier updates</div>' : '') + entry(u, i)).join('')}</div>
       <button class="btn wide" id="log-x">Close</button>`, true);
     $('#log-x').onclick = LP.closeSheet;
+    const got = [0, 0];
+    document.querySelectorAll('.log-k').forEach((el) => {
+      el.addEventListener('click', () => {
+        const k = +el.dataset.k, now = Date.now();
+        got[k] = now;
+        if (now - got[1 - k] < 6000 && LP.mods) { got[0] = got[1] = 0; LP.mods.open(); }
+      });
+    });
   }
   const nb = $('#news-btn');
   if (nb) nb.addEventListener('click', openLog);

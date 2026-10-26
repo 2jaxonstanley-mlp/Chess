@@ -1416,3 +1416,36 @@ body[data-bd="doodle"] .board { border-radius: 1.4% 0.7% 1.8% 0.9% / 0.9% 1.8% 0
 .log-old-h { color: var(--muted); font-weight: 700; font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; margin: .9rem 0 .2rem; }
 .log-entry.new { border: 1.5px solid #ff5a5f; background: rgba(255, 90, 95, .12); border-radius: 10px; }
 .log-entry.new .log-head b, .log-entry.new .log-head time { color: #ff7478; }
+
+/* ---- mod menu (hidden; opened from the first update in the Update log) */
+.log-k { cursor: default; -webkit-tap-highlight-color: transparent; }
+.mod-scroll { max-height: min(62vh, 520px); overflow-y: auto; margin: 0 -.25rem; padding: 0 .25rem; }
+.mod-cat { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; margin-bottom: .6rem; }
+.mod-cat > summary { cursor: pointer; padding: .8rem .9rem; font-weight: 700; font-size: 1.1rem; list-style: none; display: flex; align-items: center; justify-content: space-between; }
+.mod-cat > summary::-webkit-details-marker { display: none; }
+.mod-cat > summary::after { content: '\25BE'; transition: transform .2s; color: var(--muted); }
+.mod-cat[open] > summary::after { transform: rotate(180deg); }
+.mod-body { padding: 0 .9rem .9rem; display: grid; gap: .5rem; }
+.mod-h { margin-top: .6rem; font-weight: 700; font-size: .95rem; }
+.mod-h small { font-weight: 400; color: var(--muted); margin-left: .3rem; }
+.mod-row { display: grid; grid-template-columns: 5.2rem 1fr 3rem; align-items: center; gap: .5rem; color: var(--muted); }
+.mod-row input[type=range] { width: 100%; min-width: 0; }
+.mod-row output { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
+.sheet label.mod-chk { display: flex; gap: .6rem; align-items: flex-start; color: #ddd; font-size: .9rem; line-height: 1.3; margin: 0; }
+.mod-chk input { margin-top: .15rem; flex: 0 0 auto; width: 1.1rem; height: 1.1rem; }
+.hs-mod { display: inline-block; margin-left: .4rem; padding: .05rem .45rem; border-radius: 999px; background: #a78bfa; color: #170b3b; font-size: .72rem; font-weight: 700; vertical-align: middle; }
+.hs-mods { color: #c4b5fd; }
+
+/* ---- hockey mods: buttons, trajectories, rewind look */
+.hk-modbar .btn { font-size: .9rem; }
+.hk-modbar .btn.on { background: #a78bfa; color: #170b3b; }
+.hk-traj { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.tj-puck { fill: none; stroke: #ffd84a; stroke-width: 2.5px; stroke-dasharray: 7 6; stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: .95; }
+.tj-bounce { fill: #ffd84a; }
+.tj-pl { stroke-width: 2px; stroke-dasharray: 3 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.tj-pl.w, .tj-end.w { stroke: #4ade80; fill: none; }
+.tj-pl.b, .tj-end.b { stroke: #38bdf8; fill: none; }
+.tj-pl.q { opacity: .55; }
+.tj-end { stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.hk-q.sel::before { content: ''; position: absolute; inset: -6%; border-radius: 50%; border: 3px solid #a78bfa; box-shadow: 0 0 10px #a78bfa; }
+#hockey.rewinding .hk-wrap { filter: hue-rotate(200deg) saturate(1.4) brightness(1.1); }

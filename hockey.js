@@ -8,6 +8,9 @@
  * 3 second countdown starts, then the puck is moved (still, in the middle) to the other side.
  * Every match is recorded as the moves made (which square, at which tick of the 120 a second simulation) plus the few random events,
  * so History replays it by running the same simulation again, exactly as it happened.
+ * Mods (see mods.js, hidden menu): per-glide speed multiplier (noted with each glide so replays match), move anywhere (a free glide, event 4),
+ * slow motion (only changes how fast real time turns into ticks), rewind (restores a saved tick and cuts the recording back to it),
+ * and trajectory overlays (drawing only). A match that used any mod is saved as Modded.
  */
 (() => {
   'use strict';
@@ -55,6 +58,7 @@
   let stallT = 0;
   let started = 0;
   let toastT = 0;
+  let modPause = false;  // the match was paused only because the mod menu is open
   let els = {};
   let qEls = [], puckEl = null;
   let roundT = 0;        // seconds the puck has been in play this round (pieces speed up with it)
@@ -65,6 +69,15 @@
   const REC_MAX = 30000; // most events kept per match
   const note = (a) => { if (rec && rec.ev.length < REC_MAX) rec.ev.push(a); };
   let rp = null;         // a replay being watched
+  /* mods */
+  const DEFHK = { spd: [1, 1], any: false, slow: 1, slowPick: 0.5, norm: true, puckT: 0, plTraj: false };
+  const HK = () => (LP.mods && LP.mods.hk) || DEFHK;
+  const usedMods = new Set();           // which mods were used in this match (shown as Modded in History)
+  let hist = [], rw = null;             // saved ticks for rewinding, and the rewind animation in progress { cur, to, back }
+  const HIST_MAX = 5400;                // 45 seconds of ticks
+  let sel = -1, selT = 0;               // two players + move anywhere: which piece was tapped first
+  let prevPos = null;                   // positions one tick ago, so a slowed game still draws smoothly
+  let trajEl = null;
   const newEv = () => ({ wall: 0, hit: [0, 0], land: [false, false] });
   let ev = newEv();      // what happened during this frame: hardest wall bounce, hardest hit by each piece, which pieces landed
 
@@ -100,17 +113,41 @@
   }
   const copy = (s) => ({ m: s.m, p: Object.assign({}, s.p), q: s.q.map((q) => Object.assign({}, q, { mv: q.mv ? Object.assign({}, q.mv) : null })) });
 
-  function startGlide(q, side, f, r) {
+  const humanSide = (s) => !!cfg && (cfg.players === 2 || (cfg.players === 1 && s === 0));
+  /** The mod speed multiplier for a glide that starts now (always 1 in a replay, which uses the noted value instead). */
+  function kFor(side) {
+    if (rp || !cfg) return 1;
+    const h = HK();
+    let k = h.spd[side] || 1;
+    if (h.slow < 1 && h.norm && humanSide(side)) k /= h.slow;       // a person's piece keeps its normal speed while the game is slowed
+    return Math.round(k * 1000) / 1000;
+  }
+  /** k = the speed multiplier noted with the glide (left out: the one in force now). */
+  function startGlide(q, side, f, r, k) {
     const d = distOf(cfg.piece, q.f, q.r, f, r);
-    q.mv = { tx: f + 0.5, ty: r + 0.5, f, r, sp: speedFor(d) };
+    q.mv = { tx: f + 0.5, ty: r + 0.5, f, r, sp: speedFor(d), k: k === undefined ? kFor(side) : k };
+  }
+  /** Move anywhere: a glide to any square straight from where the piece is now (even in the middle of another glide). */
+  function startFree(q, side, f, r, k) {
+    const tx = f + 0.5, ty = r + 0.5;
+    q.mv = { tx, ty, f, r, sp: speedFor(Math.hypot(tx - q.x, ty - q.y)), k: k === undefined ? kFor(side) : k };
   }
 
-  /** Advance the world by dt seconds. Returns 0 (nothing), 1 (bottom side scored) or 2 (top side scored). */
+  /** Advance the world by dt seconds. Returns 0 (nothing), 1 (bottom side scored) or 2 (top side scored).
+      A very fast piece (speed mods) is moved in several smaller steps so it cannot skip over the puck. */
   function step(s, dt, ev) {
+    let fast = 0;
+    for (let i = 0; i < 2; i++) { const q = s.q[i]; if (q.mv) fast = Math.max(fast, q.mv.sp * (s.m || 1) * (q.mv.k || 1)); }
+    const n = Math.min(80, Math.max(1, Math.ceil(fast * dt / 0.5)));
+    if (n === 1) return stepOnce(s, dt, ev);
+    for (let j = 0; j < n; j++) { const g = stepOnce(s, dt / n, ev); if (g) return g; }
+    return 0;
+  }
+  function stepOnce(s, dt, ev) {
     for (let i = 0; i < 2; i++) {
       const q = s.q[i];
       if (q.mv) {
-        const sp = q.mv.sp * (s.m || 1);
+        const sp = q.mv.sp * (s.m || 1) * (q.mv.k || 1);
         const dx = q.mv.tx - q.x, dy = q.mv.ty - q.y, dist = Math.hypot(dx, dy), st = sp * dt;
         if (dist <= st) { q.x = q.mv.tx; q.y = q.mv.ty; q.f = q.mv.f; q.r = q.mv.r; q.mv = null; q.vx = 0; q.vy = 0; if (ev) ev.land[i] = true; }
         else { q.vx = dx / dist * sp; q.vy = dy / dist * sp; q.x += q.vx * dt; q.y += q.vy * dt; }
@@ -208,6 +245,7 @@
   function sfxGlide(speed, side) {
     if (!gate('glide' + side, 70)) return;
     const c = audio(); if (!c) return;
+    speed = Math.min(speed, 40);
     const g = Math.min(1, 0.25 + speed / 30) * gain() * 0.22, t = c.currentTime, d = Math.min(0.3, 0.1 + 0.6 / Math.max(2, speed));
     burst(c, t, 500 + speed * 25, d, g, 'bandpass', 900 + speed * 40);
   }
@@ -225,8 +263,15 @@
   /** Start a glide that is really happening (not one the computer is only trying out), with its sound. */
   function realGlide(q, side, f, r) {
     startGlide(q, side, f, r);
-    note([tk, 0, side, f, r]);
-    sfxGlide(q.mv.sp * (S.m || 1), side);
+    note(q.mv.k === 1 ? [tk, 0, side, f, r] : [tk, 0, side, f, r, q.mv.k]);
+    sfxGlide(q.mv.sp * (S.m || 1) * q.mv.k, side);
+  }
+  function freeGlide(side, f, r) {
+    const q = S.q[side];
+    startFree(q, side, f, r);
+    note([tk, 4, side, f, r, q.mv.k]);
+    usedMods.add('Move anywhere');
+    sfxGlide(q.mv.sp * (S.m || 1) * q.mv.k, side);
   }
 
   /* ------------------------------------------------------------------ the computer */
@@ -420,7 +465,8 @@
       }
     }
     const layer = $('#hk-layer');
-    layer.innerHTML = '<i class="hk-mid"></i><i class="hk-goal top"></i><i class="hk-goal bot"></i>';
+    layer.innerHTML = '<svg id="hk-traj" class="hk-traj" viewBox="0 0 8 8" preserveAspectRatio="none" aria-hidden="true"></svg><i class="hk-mid"></i><i class="hk-goal top"></i><i class="hk-goal bot"></i>';
+    trajEl = layer.querySelector('#hk-traj');
     qEls = [0, 1].map((i) => {
       const d = document.createElement('div');
       d.className = 'hk-q';
@@ -442,16 +488,58 @@
   }
 
   function draw() {
-    for (let i = 0; i < 2; i++) place(qEls[i], S.q[i].x, S.q[i].y);
-    place(puckEl, S.p.x, S.p.y);
-    // dots for the squares each idle piece can glide to
+    const hk = HK();
+    // a slowed game turns into ticks only now and then, so draw between the last two ticks to keep it smooth
+    const a = (phase === 'play' && prevPos && hk.slow < 1 && !rp) ? Math.min(1, acc / TICK) : 1;
+    const L = (cur, k) => (a < 1 ? prevPos[k] + (cur - prevPos[k]) * a : cur);
+    for (let i = 0; i < 2; i++) { place(qEls[i], L(S.q[i].x, 2 + i * 2), L(S.q[i].y, 3 + i * 2)); qEls[i].classList.toggle('sel', sel === i); }
+    place(puckEl, L(S.p.x, 0), L(S.p.y, 1));
+    // dots for the squares each idle piece can glide to (none with move anywhere: every square is allowed)
     const show = new Set();
+    const anyOn = hk.any && cfg.players > 0 && !rp;
     for (let i = 0; i < 2; i++) {
-      if (cfg.players === 0 || (i === 1 && cfg.players === 1)) continue;   // computers' pieces show no dots
+      if (cfg.players === 0 || (i === 1 && cfg.players === 1) || anyOn) continue;   // computers' pieces show no dots
       const q = S.q[i];
       if (!q.mv && phase === 'play') destinations(i, q.f, q.r, cfg.piece).forEach(([f, r]) => show.add(r * 8 + f));
     }
     for (const k in els) els[k].classList.toggle('legal', show.has(+k));
+    drawTraj(hk);
+  }
+
+  /** Trajectory overlays (mods): where the puck goes in the next few seconds (bounces included), and where each piece is heading. */
+  let trajHtml = '';
+  function drawTraj(hk) {
+    if (!trajEl) return;
+    let html = '';
+    const live = !rp && (phase === 'play' || phase === 'paused' || phase === 'goal');
+    if (live) {
+      const pt = (x, y) => x.toFixed(2) + ',' + (8 - y).toFixed(2);
+      if (hk.puckT > 0) {
+        if (phase === 'play') usedMods.add('Puck path');
+        const s = copy(S), pts = [pt(s.p.x, s.p.y)], dots = [];
+        let pvx = s.p.vx, pvy = s.p.vy;
+        const n = Math.round(hk.puckT * 60);
+        for (let i = 0; i < n; i++) {
+          const g = step(s, 1 / 60);
+          pts.push(pt(s.p.x, s.p.y));
+          if ((s.p.vx * pvx < 0 || s.p.vy * pvy < 0) && Math.hypot(pvx, pvy) > 0.5) dots.push([s.p.x, s.p.y]);
+          pvx = s.p.vx; pvy = s.p.vy;
+          if (g) break;
+        }
+        html += '<polyline class="tj-puck" points="' + pts.join(' ') + '"/>' + dots.map((d) => '<circle class="tj-bounce" cx="' + d[0].toFixed(2) + '" cy="' + (8 - d[1]).toFixed(2) + '" r="0.1"/>').join('');
+      }
+      if (hk.plTraj) {
+        if (phase === 'play') usedMods.add('Player paths');
+        for (let i = 0; i < 2; i++) {
+          const q = S.q[i];
+          if (!q.mv) continue;
+          html += '<line class="tj-pl ' + (i === 0 ? 'w' : 'b') + '" x1="' + q.x.toFixed(2) + '" y1="' + (8 - q.y).toFixed(2) + '" x2="' + q.mv.tx.toFixed(2) + '" y2="' + (8 - q.mv.ty).toFixed(2) + '"/><circle class="tj-end ' + (i === 0 ? 'w' : 'b') + '" cx="' + q.mv.tx.toFixed(2) + '" cy="' + (8 - q.mv.ty).toFixed(2) + '" r="0.16"/>';
+          const nx = queued[i];
+          if (nx) html += '<line class="tj-pl q ' + (i === 0 ? 'w' : 'b') + '" x1="' + q.mv.tx.toFixed(2) + '" y1="' + (8 - q.mv.ty).toFixed(2) + '" x2="' + (nx[0] + 0.5) + '" y2="' + (8 - nx[1] - 0.5) + '"/>';
+        }
+      }
+    }
+    if (html !== trajHtml) { trajHtml = html; trajEl.innerHTML = html; }
   }
 
   function setScore() {
@@ -471,11 +559,29 @@
   function onTap(f, r) {
     audio();                                              // wakes the sound up on the first tap
     if (phase !== 'play') return;
+    if (HK().any && cfg.players > 0) { tapAnywhere(f, r); return; }
     const side = r <= 3 ? 0 : 1;
     if (cfg.players === 0 || (side === 1 && cfg.players === 1)) return;          // computer pieces are not played by taps
     const q = S.q[side];
     if (q.mv) { queued[side] = [f, r]; return; }           // you can plan the next move while gliding
     go(side, f, r);
+  }
+  /** Move anywhere. One player: every tap sends your piece there. Two players: tap a piece first to pick it, then any square
+      (a tap on a square with no piece picked sends the piece of the half that was tapped, as usual). */
+  function tapAnywhere(f, r) {
+    let side;
+    if (cfg.players === 1) side = 0;
+    else {
+      const here = [0, 1].find((i) => Math.floor(S.q[i].x) === f && Math.floor(S.q[i].y) === r);
+      if (sel >= 0 && Date.now() - selT > 4000) sel = -1;       // a pick only lasts a few seconds
+      if (here !== undefined) {
+        if (sel === here) sel = -1; else { sel = here; selT = Date.now(); toast(cfg.names[here] + ': tap any square', 900); }
+        return;
+      }
+      side = sel >= 0 ? sel : (r <= 3 ? 0 : 1);
+      sel = -1;
+    }
+    freeGlide(side, f, r);
   }
   function go(side, f, r) {
     const q = S.q[side];
@@ -488,6 +594,7 @@
   /** One step of the simulation. Returns the goal result of step(). */
   function tick() {
     sideCheck(TICK);                                      // may move the puck (recorded), before this tick's step
+    prevPos = [S.p.x, S.p.y, S.q[0].x, S.q[0].y, S.q[1].x, S.q[1].y];
     tk++; roundT += TICK; S.m = speedMul(roundT);
     const goal = step(S, TICK, ev);
     if (goal) return goal;
@@ -504,17 +611,60 @@
       const q = S.q[i];
       if (!q.mv && queued[i]) { const t = queued[i]; queued[i] = null; go(i, t[0], t[1]); }
     }
+    snap();
     return 0;
+  }
+
+  /* ---- rewind (mod): every tick is saved, so the match can go back about a second at a time, points included */
+  function snap() {
+    hist.push({ S: copy(S), tk, roundT, sideNow, sideT, stallT, score: score.slice(), serveTo, ne: rec ? rec.ev.length : 0, ng: rec ? rec.goals.length : 0 });
+    if (hist.length > HIST_MAX + 600) hist.splice(0, hist.length - HIST_MAX);
+  }
+  function rewind() {
+    if (!rec || !hist.length || !(phase === 'play' || phase === 'paused' || phase === 'goal' || phase === 'rewind')) return;
+    usedMods.add('Rewind');
+    if (phase === 'rewind') { rw.to = Math.max(0, rw.to - 120); return; }     // pressed again: go back another second
+    const top = hist.length - 1;
+    rw = { cur: top, to: Math.max(0, top - 120), back: phase === 'paused' ? 'paused' : 'play' };
+    phase = 'rewind';
+    sel = -1; queued = [null, null]; showCount(0);
+    $('#hockey').classList.add('rewinding');
+    sfxRewind();
+  }
+  function rewindFrame(dt) {
+    rw.cur -= dt * 260;                                  // about 2x real time
+    const i = Math.max(rw.to, Math.floor(rw.cur)), h = hist[i];
+    S = copy(h.S); score = h.score.slice(); setScore();
+    if (rw.cur > rw.to) return;
+    // arrived: this saved tick becomes the present, everything after it is gone (also from the recording)
+    hist.length = i + 1;
+    tk = h.tk; roundT = h.roundT; sideNow = h.sideNow; sideT = h.sideT; stallT = h.stallT; serveTo = h.serveTo;
+    if (rec) { rec.ev.length = h.ne; rec.goals.length = h.ng; }
+    acc = 0; prevPos = null; queued = [null, null];
+    botClock = [0.3 + Math.random() * 0.4, 0.3 + Math.random() * 0.4];
+    phase = rw.back; rw = null; last = performance.now();
+    $('#hockey').classList.remove('rewinding');
+    if (phase === 'paused') $('#hk-pause').textContent = 'Resume';
+    paintBar();
+  }
+  function sfxRewind() {
+    const c = audio(); if (!c) return;
+    tone(c, c.currentTime, 900, 160, 0.45, 'sawtooth', gain() * 0.08);
   }
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
     let dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    const hk = HK();
+    const gs = hk.slow < 1 ? hk.slow : 1;                 // slow motion: real time is turned into game time more slowly
+    if (modPause && phase === 'paused' && $('#sheet-bg').classList.contains('hidden')) { modPause = false; phase = 'play'; $('#hk-pause').textContent = 'Pause'; dt = 0; }
     if (phase === 'play') {
+      if (hk.spd[0] !== 1 || hk.spd[1] !== 1) usedMods.add('Piece speed');
+      if (gs < 1) usedMods.add('Slow motion');
       updateSpeedLabel();
       ev = newEv();
-      acc += dt;
+      acc += dt * gs;
       let goal = 0;
       while (acc >= TICK && !goal) { acc -= TICK; goal = tick(); }
       if (goal) acc = 0;
@@ -524,10 +674,12 @@
         // the quickest computers look again at once when something happens: the other piece hit the puck, or their own piece landed
         if (lv.react && (ev.hit[1 - b] || ev.land[b])) botClock[b] = Math.min(botClock[b], ev.land[b] ? lv.react * 0.5 : lv.react);
         if (fastDefend(b)) botClock[b] = Math.max(botClock[b], 0.1);
-        botClock[b] -= dt;
+        botClock[b] -= dt * gs;
         if (botClock[b] <= 0) { botThink(b); botClock[b] = nextLook(b); }
       }
       if (goal) scored(goal === 1 ? 0 : 1);
+    } else if (phase === 'rewind') {
+      rewindFrame(dt);
     } else if (phase === 'goal') {
       acc += dt;
       while (acc >= TICK) { acc -= TICK; tk++; }         // time keeps counting while the goal is celebrated, so the replay waits the same
@@ -564,15 +716,42 @@
     note([tk, 3, to]);
   }
   function updateSpeedLabel() {
-    const t = Math.round(speedMul(roundT) * 100) + '%';
-    if (t !== lastSpd) { lastSpd = t; const e = $('#hk-spd'); if (e) e.textContent = 'Piece speed ' + t; }
+    const h = HK();
+    let t = 'Piece speed ' + Math.round(speedMul(roundT) * 100) + '%';
+    if (h.spd[0] !== 1 || h.spd[1] !== 1) t += ' \u00b7 White ' + h.spd[0] + '\u00d7, Black ' + h.spd[1] + '\u00d7';
+    if (h.slow < 1) t += ' \u00b7 Game speed ' + Math.round(h.slow * 100) + '%';
+    if (t !== lastSpd) { lastSpd = t; const e = $('#hk-spd'); if (e) e.textContent = t; }
+  }
+
+  /* ---- mod buttons under the board (only once the mod menu has been unlocked) */
+  function paintBar() {
+    const bar = $('#hk-mods');
+    if (!bar) return;
+    const h = HK();
+    bar.classList.toggle('hidden', !(LP.mods && LP.mods.bar) || !cfg || phase === 'menu');
+    const sl = $('#hk-m-slow');
+    sl.textContent = h.slow < 1 ? 'Slow ' + Math.round(h.slow * 100) + '%' : 'Slow';
+    sl.classList.toggle('on', h.slow < 1);
+    const an = $('#hk-m-any');
+    an.classList.toggle('on', !!h.any);
+    an.disabled = !!cfg && cfg.players === 0;
+  }
+  if (LP.mods) {
+    LP.mods.on(() => { sel = -1; paintBar(); lastSpd = ''; });
+    $('#hk-m-rw').addEventListener('click', rewind);
+    $('#hk-m-slow').addEventListener('click', () => { const h = HK(); LP.mods.setHk({ slow: h.slow < 1 ? 1 : h.slowPick }); });
+    $('#hk-m-any').addEventListener('click', () => LP.mods.setHk({ any: !HK().any }));
+    $('#hk-m-menu').addEventListener('click', () => {
+      if (phase === 'play') { phase = 'paused'; modPause = true; $('#hk-pause').textContent = 'Resume'; }
+      LP.mods.open();
+    });
   }
 
   /* ---- recording: every move (tick, side, square), restart and random push is noted as it happens (see note()) */
 
   let serveTo = 0;       // the side that was just scored on gets the puck in its half
   function resetRound() {
-    roundT = 0; sideNow = -1; sideT = 0; showCount(0);
+    roundT = 0; sideNow = -1; sideT = 0; showCount(0); prevPos = null; sel = -1;
     S = newState();
     S.p.y = serveTo === 0 ? 2.2 : 5.8;
     note([tk, 1, S.p.y]);
@@ -606,7 +785,8 @@
     let payload = null;
     if (rec && rec.ev.length) {
       payload = { v: 2, kind: 'hockey', id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), piece: cfg.piece, names: cfg.names.slice(), players: cfg.players, level: cfg.players === 1 ? cfg.level : null, levels: cfg.players === 0 ? cfg.levels.slice() : null, score: score.slice(), tps: 120, ev: rec.ev, goals: rec.goals, end: tk, dur: secs };
-      if (LP.history) { try { LP.history.add({ kind: 'hockey', id: payload.id, mode: 'hockey', modeLabel: 'Chess x Air Hockey', names: { w: cfg.names[0], b: cfg.names[1] }, level: payload.level, bots: cfg.players === 0, result: cfg.names[winner] + ' wins \u00b7 ' + score[0] + ' \u2013 ' + score[1], winner: winner === 0 ? 'w' : 'b', dur: secs, moves: score[0] + score[1], timed: true, payload }); } catch (e) { /* best effort */ } }
+      if (usedMods.size) payload.modded = Array.from(usedMods);
+      if (LP.history) { try { LP.history.add({ kind: 'hockey', id: payload.id, mode: 'hockey', modeLabel: 'Chess x Air Hockey', names: { w: cfg.names[0], b: cfg.names[1] }, level: payload.level, bots: cfg.players === 0, result: cfg.names[winner] + ' wins \u00b7 ' + score[0] + ' \u2013 ' + score[1], winner: winner === 0 ? 'w' : 'b', dur: secs, moves: score[0] + score[1], timed: true, modded: payload.modded, payload }); } catch (e) { /* best effort */ } }
     }
     if (LP.fx) LP.fx.play(cfg.players === 1 && winner === 1 ? 'lose' : 'win');
     setTimeout(() => { if (phase === 'over') overSheet(winner, payload); }, 700);
@@ -615,7 +795,7 @@
     LP.openSheet(`<h2>${esc(cfg.names[winner])} wins<span class="sub">${score[0]} – ${score[1]}</span></h2>
       <div class="row"><button class="btn" id="hk-menu2">Menu</button><button class="btn primary" id="hk-again">Rematch</button></div>
       ${payload ? '<button class="btn wide" id="hk-watch" style="margin-top:.6rem">Watch replay</button>' : ''}
-      <p class="note">${payload ? 'Saved in History, where you can watch it again.' : ''}</p>`);
+      <p class="note">${payload ? 'Saved in History' + (payload.modded ? ' as a Modded match' : '') + ', where you can watch it again.' : ''}</p>`);
     $('#hk-again').onclick = () => { LP.closeSheet(); newMatch(); };
     $('#hk-menu2').onclick = () => { LP.closeSheet(); toMenu(); };
     const w = $('#hk-watch');
@@ -630,7 +810,10 @@
     queued = [null, null];
     started = Date.now();
     rec = { ev: [], goals: [] }; tk = 0; acc = 0; stallT = 0; roundT = 0; sideNow = -1; sideT = 0; lastSpd = ''; showCount(0);
+    hist = []; rw = null; sel = -1; prevPos = null; modPause = false; usedMods.clear(); trajHtml = '';
+    $('#hockey').classList.remove('rewinding');
     note([0, 1, S.p.y]);
+    snap();
     buildBoard();
     $('#hk-top-name').textContent = cfg.names[1];
     $('#hk-bottom-name').textContent = cfg.names[0];
@@ -640,6 +823,7 @@
     LP.setSides({ w: 'p1', b: 'p2' });
     LP.showPage('hockey');
     phase = 'play';
+    paintBar();
     audio();
     botClock = [firstReact(0.8, 0), firstReact(0.8, 1)];
     cancelAnimationFrame(raf);
@@ -666,7 +850,8 @@
   /* New recordings (v2) are replayed by running the simulation again with the noted moves, so it plays out exactly as it did. */
   function rpReset() { S = newState(); rp.tk = 0; rp.ei = 0; rp.roundT = 0; rp.frozen = false; }
   function rpApply(e) {
-    if (e[1] === 0) startGlide(S.q[e[2]], e[2], e[3], e[4]);
+    if (e[1] === 0) startGlide(S.q[e[2]], e[2], e[3], e[4], e[5] || 1);
+    else if (e[1] === 4) startFree(S.q[e[2]], e[2], e[3], e[4], e[5] || 1);
     else if (e[1] === 1) { S = newState(); S.p.y = e[2]; rp.roundT = 0; rp.frozen = false; }
     else if (e[1] === 2) { S.p.vx = e[2]; S.p.vy = e[3]; }
     else if (e[1] === 3) { S.p.x = 4; S.p.y = e[2] === 1 ? 6 : 2; S.p.vx = S.p.vy = 0; }
@@ -724,8 +909,11 @@
     buildBoard();
     $('#hk-top-name').textContent = cfg.names[1];
     $('#hk-bottom-name').textContent = cfg.names[0];
-    $('#hk-status').textContent = 'Replay';
+    $('#hk-status').textContent = 'Replay' + (d.modded && d.modded.length ? ' \u00b7 Modded (' + d.modded.join(', ') + ')' : '');
     $('#hk-spd').textContent = '';
+    $('#hockey').classList.remove('rewinding');
+    trajHtml = ''; sel = -1; rw = null; modPause = false;
+    paintBar();
     showCount(0);
     const sc = $('#hk-rp-scrub');
     sc.max = String(Math.round(rp.total * 100)); sc.step = '1';
@@ -764,7 +952,8 @@
 
   function toMenu() {
     if (rp) { cancelAnimationFrame(rp.raf); rp = null; }
-    $('#hockey').classList.remove('replaying');
+    $('#hockey').classList.remove('replaying', 'rewinding');
+    rw = null; modPause = false;
     phase = 'menu';
     cancelAnimationFrame(raf);
     LP.closeSheet();
@@ -818,6 +1007,7 @@
 
   $('#hk-back').addEventListener('click', () => {
     if (phase === 'replay') { exitReplay(); return; }
+    if (phase === 'rewind') return;
     if (phase === 'play' || phase === 'paused' || phase === 'goal') {
       phase = 'paused';
       LP.openSheet('<h2>Leave this match?</h2><div class="row"><button class="btn" id="lv-no">Stay</button><button class="btn primary" id="lv-yes">Leave</button></div>', true);
@@ -833,5 +1023,5 @@
 
   /** For tests. */
   window.Hockey = { watch };
-  window.__hockey = { LEVELS, setLevel(l) { cfg.level = l; }, botThink, candidates(b) { const q = S.q[b]; return [null].concat(destinations(b, q.f, q.r, cfg.piece)).map((c) => [c, Math.round(simulate(S, b, c, 1.1))]); }, get S() { return S; }, get score() { return score; }, step, copy, simulate, speedFor, get phase() { return phase; }, destinations };
+  window.__hockey = { LEVELS, setLevel(l) { cfg.level = l; }, botThink, candidates(b) { const q = S.q[b]; return [null].concat(destinations(b, q.f, q.r, cfg.piece)).map((c) => [c, Math.round(simulate(S, b, c, 1.1))]); }, get S() { return S; }, get score() { return score; }, step, copy, simulate, speedFor, get phase() { return phase; }, destinations, get tk() { return tk; }, get hist() { return hist; }, get rec() { return rec; }, get used() { return Array.from(usedMods); }, rewind, freeGlide, kFor, get cfg() { return cfg; }, get rp() { return rp; }, seek(t) { rp.t = t; rpShow(); return rp.tk; } };
 })();
