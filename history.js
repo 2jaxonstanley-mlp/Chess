@@ -96,6 +96,7 @@
       return;
     }
     box.innerHTML = shown.map((e) => {
+      const canExport = e.kind === 'chess' && e.payload && LP.exporter && LP.exporter.canExport(e.payload);
       const canAnalyze = e.payload && (e.kind === 'rush' || (e.kind === 'chess' && !e.payload.tas)) && LP.analyze;
       return `<div class="an-card hs-card" data-id="${esc(e.id)}">
         <div class="an-top"><b class="an-mode">${esc(e.modeLabel || e.mode || '')}${e.modded && e.modded.length ? ' <span class="hs-mod">Modded</span>' : ''}</b><span class="an-date">${esc(stamp(e.date))}</span></div>
@@ -104,7 +105,7 @@
         <div class="hs-meta">${esc(meta(e))}</div>
         ${e.modded && e.modded.length ? '<div class="hs-meta hs-mods">Mods used: ' + esc(e.modded.join(', ')) + '</div>' : ''}
         ${e.payload ? '' : '<div class="hs-meta hs-gone">The replay was removed to save space on this device.</div>'}
-        <div class="an-btns"><button class="btn primary hs-watch"${e.payload ? '' : ' disabled'}>Watch replay</button>${canAnalyze ? '<button class="btn hs-an">Analyze</button>' : ''}<button class="btn an-del hs-del" aria-label="Delete">Delete</button></div>
+        <div class="an-btns"><button class="btn primary hs-watch"${e.payload ? '' : ' disabled'}>Watch replay</button>${canAnalyze ? '<button class="btn hs-an">Analyze</button>' : ''}${canExport ? '<button class="btn hs-ex">Export</button>' : ''}<button class="btn an-del hs-del" aria-label="Delete">Delete</button></div>
       </div>`;
     }).join('');
     box.querySelectorAll('.hs-card').forEach((c) => {
@@ -112,6 +113,8 @@
       c.querySelector('.hs-watch').onclick = () => watch(id);
       const an = c.querySelector('.hs-an');
       if (an) an.onclick = () => analyse(id);
+      const ex = c.querySelector('.hs-ex');
+      if (ex) ex.onclick = () => { const x = find(id); if (x && x.payload) LP.exporter.matchSheet(x.payload); };
       c.querySelector('.hs-del').onclick = () => {
         LP.openSheet('<h2>Delete this match?<span class="sub">It is removed from your history and its replay is lost.</span></h2><div class="row"><button class="btn" id="d-no">Keep it</button><button class="btn primary" id="d-yes">Delete</button></div>', true);
         $('#d-no').onclick = LP.closeSheet;

@@ -3,7 +3,7 @@
  * (what you did well, what went wrong) and lets you try again from there. Works for every mode: normal chess games
  * (Classic, Bullet, Rapid, Secret Queen) and Capture Rush. TAS is a sandbox, so it is never saved or analysed.
  *
- * Stored on each saved game: e.an = { v, both, done, plies: { [moveIndex]: {...} }, sum, resign, time }.
+ * Stored on each saved game: e.an = { v, both, sides: ['w', 'b'] (which colours were analysed), done, plies: { [moveIndex]: {...} }, sum, resign, time }.
  */
 (() => {
   'use strict';
@@ -43,6 +43,13 @@
     return e.level ? 'w' : null;
   }
   const nameOf = (e, c) => (e.names && e.names[c]) || (c === 'w' ? 'White' : 'Black');
+  /** Which colours have been analysed (older analyses did not record it: they covered the person who played, or both). */
+  const sidesOf = (e) => {
+    const a = e.an || {};
+    if (Array.isArray(a.sides) && a.sides.length) return a.sides;
+    return a.both ? ['w', 'b'] : humanOf(e) ? [humanOf(e)] : ['w', 'b'];
+  };
+  const addSides = (an, sd) => { const set = new Set(an.sides || []); (sd === 'both' ? ['w', 'b'] : [sd]).forEach((c) => set.add(c)); an.sides = ['w', 'b'].filter((c) => set.has(c)); an.both = an.sides.length === 2; };
   const nMoves = (e) => (isRush(e) ? e.events.length : e.moves.length);
 
   /* ------------------------------------------------------------------ chess helpers */
@@ -122,10 +129,10 @@
     });
   }
 
-  async function analyseChess(e, both, my) {
-    const h = humanOf(e);
-    const want = (i) => both || !h || (i % 2 === 0) === (h === 'w');
-    const an = e.an && e.an.v === 4 ? e.an : { v: 4, both: false, done: false, plies: {} };
+  async function analyseChess(e, sd, my) {
+    const want = (i) => sd === 'both' || (i % 2 === 0) === (sd === 'w');
+    const an = e.an && e.an.v === 4 ? e.an : { v: 4, both: false, sides: [], done: false, plies: {} };
+    if (!an.sides || !an.sides.length) an.sides = e.an && e.an.v === 4 ? sidesOf(e) : [];
     an.done = false;
     const idxs = [];
     e.moves.forEach((m, i) => { if (want(i) && !an.plies[i]) idxs.push(i); });
@@ -148,19 +155,19 @@
     }
     // how the game ended: a forfeit or the clock
     an.resign = null; an.time = null;
-    if (e.resigned && (both || !h || h === e.resigned)) {
+    if (e.resigned && (sd === 'both' || sd === e.resigned)) {
       progress(98, 'Checking the forfeit');
       await wait(20);
       try { an.resign = resignNote(e, g); } catch (x) { an.resign = null; }
     } else if (/ran out of time/i.test(e.result || '')) {
       const loserC = e.winner === 'w' ? 'b' : e.winner === 'b' ? 'w' : null;
-      if (loserC && (both || !h || h === loserC)) {
+      if (loserC && (sd === 'both' || sd === loserC)) {
         const vt = voice(e, loserC);
         an.time = { t: `${vt.S} ran out of time. In a clock game, play quick moves in simple positions and save your time for the hard ones.` };
       }
     }
     summarise(e, an);
-    an.both = an.both || !!both || !h;
+    addSides(an, sd);
     an.done = true;
     return an;
   }
@@ -255,17 +262,17 @@
     return bestGain >= 8 && loss >= 8 ? 'missedwin' : 'blunder';
   }
 
-  async function analyseRush(e, both, my) {
+  async function analyseRush(e, sd, my) {
     const lab = window.Rush && window.Rush.lab;
     if (!lab) return null;
-    const h = humanOf(e);
-    const an = e.an && e.an.v === 4 ? e.an : { v: 4, both: false, done: false, plies: {} };
+    const an = e.an && e.an.v === 4 ? e.an : { v: 4, both: false, sides: [], done: false, plies: {} };
+    if (!an.sides || !an.sides.length) an.sides = e.an && e.an.v === 4 ? sidesOf(e) : [];
     an.done = false;
     const frames = lab.framesOf(e);
     const want = (i) => {
-      if (both || !h) return true;
+      if (sd === 'both') return true;
       const c = frames[i].cells[e.events[i].f];
-      return !!c && c.c === h;
+      return !!c && c.c === sd;
     };
     const idxs = [];
     e.events.forEach((ev, i) => { if (want(i) && !an.plies[i]) idxs.push(i); });
@@ -308,7 +315,7 @@
       await wait(120);
     }
     summarise(e, an);
-    an.both = an.both || !!both || !h;
+    addSides(an, sd);
     an.done = true;
     return an;
   }
@@ -401,8 +408,8 @@
       const h = humanOf(e);
       let chips = '';
       if (done && sum) {
-        const cols = h && !e.an.both ? [h] : ['w', 'b'].filter((c) => sum[c].n);
-        chips = cols.map((c) => `<span class="an-chip">${h && !e.an.both ? 'You' : esc(nameOf(e, c))}: <b>${sum[c].acc}%</b></span>`).join('');
+        const cols = sidesOf(e).filter((c) => sum[c] && sum[c].n);
+        chips = cols.map((c) => `<span class="an-chip">${h === c ? 'You' : esc(nameOf(e, c))}: <b>${sum[c].acc}%</b></span>`).join('');
       }
       return `<div class="an-card" data-id="${esc(e.id)}">
         <div class="an-top"><b class="an-mode">${esc(modeLabel(e))}</b><span class="an-date">${when(e.date)}</span></div>
@@ -438,18 +445,22 @@
     const e = find(id);
     if (!e) { showLibrary(); return; }
     if (anDone(e)) { enter(e); return; }
-    const h = humanOf(e);
-    if (h) {
-      const me = nameOf(e, h);
-      LP.openSheet(`<h2>Who should I analyze?<span class="sub">I will look at every move with a deeper search than the game used.</span></h2>
-        <div class="stack"><button class="btn primary big" id="aw-me">Just ${esc(me)}</button><button class="btn big" id="aw-both">Both players</button><button class="btn" id="aw-x">Cancel</button></div>`, true);
-      $('#aw-me').onclick = () => run(e, false);
-      $('#aw-both').onclick = () => run(e, true);
-      $('#aw-x').onclick = () => { LP.closeSheet(); };
-    } else run(e, true);
+    // always ask which side to analyze, with the player names (also for two-player games)
+    const nm = (c) => esc(nameOf(e, c));
+    LP.openSheet(`<h2>Who should I analyze?<span class="sub">I will look at every move with a deeper search than the game used.</span></h2>
+      <div class="stack">
+        <button class="btn primary big" id="aw-w">Just ${nm('w')}<small>${isRush(e) ? 'the White pieces' : 'White'}</small></button>
+        <button class="btn big" id="aw-b">Just ${nm('b')}<small>${isRush(e) ? 'the Black pieces' : 'Black'}</small></button>
+        <button class="btn big" id="aw-both">Both players<small>${nm('w')} and ${nm('b')}</small></button>
+        <button class="btn" id="aw-x">Cancel</button>
+      </div>`, true);
+    $('#aw-w').onclick = () => run(e, 'w');
+    $('#aw-b').onclick = () => run(e, 'b');
+    $('#aw-both').onclick = () => run(e, 'both');
+    $('#aw-x').onclick = () => { LP.closeSheet(); };
   }
 
-  async function run(e, both) {
+  async function run(e, sd) {
     const my = ++token;
     LP.openSheet(`<h2>Analyzing your game<span class="sub" id="an-sub">Getting ready</span></h2>
       <div class="an-bar"><i id="an-fill"></i></div><p class="an-pct"><b id="an-pct">0%</b></p>
@@ -457,7 +468,7 @@
       <button class="btn wide" id="an-cancel">Cancel</button>`, false);
     $('#an-cancel').onclick = () => { token++; LP.closeSheet(); };
     let an = null;
-    try { an = isRush(e) ? await analyseRush(e, both, my) : await analyseChess(e, both, my); } catch (x) { an = null; }
+    try { an = isRush(e) ? await analyseRush(e, sd, my) : await analyseChess(e, sd, my); } catch (x) { an = null; }
     if (my !== token) return;
     if (!an) { LP.openSheet('<h2>Could not analyze this game<span class="sub">Something went wrong. Try again.</span></h2><button class="btn wide" id="an-ok">OK</button>', true); $('#an-ok').onclick = LP.closeSheet; return; }
     progress(100, 'Done');
@@ -829,12 +840,16 @@
     b.disabled = off;
     b.classList.toggle('again', again);
     sk.classList.toggle('hidden', !skip);
+    // export the board: chess only, and only while nothing is playing on its own
+    const ex = $('#rv-export');
+    if (ex) { ex.classList.toggle('hidden', R.kind !== 'chess'); ex.disabled = R.phase === 'replay'; }
   }
 
   const capFor = (i) => (R.kind === 'chess' ? 'Move ' + (Math.floor(i / 2) + 1) + (i % 2 ? ' (Black)' : ' (White)') : 'Move ' + (i + 1));
   const momentCap = (k) => 'Highlight ' + (k + 1) + ' of ' + R.moments.length;
-  const canAddBoth = () => !R.an.both && humanOf(R.entry);
-  const bothPill = () => (canAddBoth() ? [{ label: 'Analyze both players', fn: () => addBoth() }] : []);
+  /** The side that has not been analysed yet (offered at the end of the lesson). */
+  const missingSide = () => ['w', 'b'].filter((c) => !sidesOf(R.entry).includes(c))[0] || null;
+  const bothPill = () => { const c = missingSide(); return c ? [{ label: 'Analyze ' + nameOf(R.entry, c), fn: () => addSide(c) }] : []; };
   const isTeach = (i) => { const p = R.an.plies[i]; return !!(p && TEACH[p.r]); };
   /** What went wrong, without giving the fix away (the fix is what the player is about to look for). */
   function noteText(i, full) {
@@ -889,13 +904,13 @@
     });
   }
 
-  async function addBoth() {
+  async function addSide(c) {
     const e = R.entry;
     const my = ++token;
-    LP.openSheet(`<h2>Analyzing both players<span class="sub" id="an-sub">Getting ready</span></h2><div class="an-bar"><i id="an-fill"></i></div><p class="an-pct"><b id="an-pct">0%</b></p><button class="btn wide" id="an-cancel">Cancel</button>`, false);
+    LP.openSheet(`<h2>Analyzing ${esc(nameOf(e, c))}<span class="sub" id="an-sub">Getting ready</span></h2><div class="an-bar"><i id="an-fill"></i></div><p class="an-pct"><b id="an-pct">0%</b></p><button class="btn wide" id="an-cancel">Cancel</button>`, false);
     $('#an-cancel').onclick = () => { token++; LP.closeSheet(); };
     let an = null;
-    try { an = isRush(e) ? await analyseRush(e, true, my) : await analyseChess(e, true, my); } catch (x) { an = null; }
+    try { an = isRush(e) ? await analyseRush(e, c, my) : await analyseChess(e, c, my); } catch (x) { an = null; }
     if (my !== token) return;
     LP.closeSheet();
     if (!an) return;
@@ -1360,6 +1375,7 @@
         <div class="rv-ctl">
           <button id="rv-main" class="rv-main">Begin</button>
           <button id="rv-skip" class="rv-skip hidden">Skip</button>
+          <button id="rv-export" class="rv-exp" title="Export the board shown now">Export board</button>
         </div>
       </div>`;
     const anchor = $('#sheet-bg');
@@ -1375,6 +1391,11 @@
       ev.preventDefault();
     }, { passive: false });
     $('#rv-skip').onclick = skipMoment;
+    $('#rv-export').onclick = () => {
+      if (!R || R.kind !== 'chess' || R.phase === 'replay' || !LP.exporter) return;
+      const g = (R.retry && R.retry.g) || R.G;
+      LP.exporter.boardSheet(g.toFen());
+    };
     const m = document.querySelector('.mode[data-mode="analyze"]');
     if (m) m.addEventListener('click', showLibrary);
   }

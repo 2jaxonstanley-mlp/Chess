@@ -1237,6 +1237,7 @@
     openSheet(`<h2>${esc(over.title)}<span class="sub">${esc(over.sub)}</span></h2>
       <div class="stack">
         ${tas ? '' : '<button class="btn primary" id="ov-analyze">Analyze game</button>'}
+        ${exportable() ? '<button class="btn" id="ov-export">Export match</button>' : ''}
         <div class="row"><button class="btn" id="ov-new">Rematch</button><button class="btn" id="ov-close">Close</button></div>
       </div>
       ${over.elo ? `<p class="elo-line ${over.elo.delta >= 0 ? 'up' : 'down'}"><span>${MODE_LABEL[mode]} rating</span><b>${over.elo.after}</b><em>${over.elo.delta >= 0 ? '+' : '\u2212'}${Math.abs(over.elo.delta)}</em></p>` : ''}
@@ -1250,9 +1251,13 @@
       closeSheet();
       if (window.LP.analyze) window.LP.analyze.begin(data.id);
     };
+    const ex = $('#ov-export');
+    if (ex) ex.onclick = () => window.LP.exporter.matchSheet(buildReplayData(), showOverSheet);
     $('#ov-new').onclick = () => { closeSheet(); startGame(mode, true); };
     $('#ov-close').onclick = closeSheet;
   }
+  /** Export match is for Classic and the timed games (not Secret Queen or TAS). */
+  function exportable() { return !!(window.LP.exporter && over && sans.length && window.LP.exporter.canExport(buildReplayData())); }
 
   function buildReplayData() {
     return {
@@ -1448,6 +1453,8 @@
   function syncReplayUI() {
     const { data, idx, timer } = replay;
     $('#scrub').value = replay.timed ? replay.t : idx;
+    const ex = $('#rp-export');
+    if (ex) { ex.disabled = !!timer; ex.title = timer ? 'Pause the replay to export the board' : ''; ex.classList.toggle('hidden', !!data.tas); }
     const play = $('#rp-play');
     play.textContent = timer ? 'Pause' : (replay.timed ? replay.t >= replay.total : idx >= data.moves.length) ? 'Restart' : 'Play';
     const tl = $('#rp-time');
@@ -1553,6 +1560,7 @@
     }
   }
 
+  $('#rp-export').addEventListener('click', () => { if (replay && !replay.timer && window.LP.exporter) window.LP.exporter.boardSheet(rgame.toFen()); });
   $('#rp-play').addEventListener('click', () => { replay.timer ? pauseReplay() : playReplay(); });
   $('#rp-next').addEventListener('click', () => { pauseReplay(); goTo(replay.idx + 1, true); });
   $('#rp-prev').addEventListener('click', () => { pauseReplay(); goTo(replay.idx - 1, true); });
