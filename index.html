@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=41">
+  <link rel="stylesheet" href="styles.css?v=42">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -55,8 +55,8 @@
           <span class="mode-go" aria-hidden="true">&rsaquo;</span>
         </button>
 
-        <section class="mgrp" data-g="classic">
-          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Classic</span><span class="mgrp-s">Untimed and timed chess</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+        <section class="mgrp closed" data-g="classic">
+          <button class="mgrp-h" type="button" aria-expanded="false"><span class="mgrp-t">Classic</span><span class="mgrp-s">Untimed and timed chess</span><i class="mgrp-chev" aria-hidden="true"></i></button>
           <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="basic" style="--accent:#8fc15b">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:3"></i></span>
@@ -84,8 +84,8 @@
           </button>
           </div></div>
         </section>
-        <section class="mgrp" data-g="custom">
-          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Custom</span><span class="mgrp-s">Chess with a twist</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+        <section class="mgrp closed" data-g="custom">
+          <button class="mgrp-h" type="button" aria-expanded="false"><span class="mgrp-t">Custom</span><span class="mgrp-s">Chess with a twist</span><i class="mgrp-chev" aria-hidden="true"></i></button>
           <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="secret" style="--accent:#b48cf2">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:2"></i></span>
@@ -119,6 +119,22 @@
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
+          <button class="mode" data-mode="foresight" style="--accent:#4fd1c5">
+            <span class="mode-ic" aria-hidden="true"><i class="ic-fore"></i></span>
+            <span class="mode-text">
+              <span class="mode-name">Foresight Chess</span>
+              <span class="mode-desc">Plan your next move before you see their reply.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="royale" style="--accent:#e8607a">
+            <span class="mode-ic" aria-hidden="true"><i class="ic-royale"></i></span>
+            <span class="mode-text">
+              <span class="mode-name">Chess Royale</span>
+              <span class="mode-desc">Start with a king. Spend elixir to spawn your army.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
           <button class="mode" data-mode="tas" style="--accent:#5ab0ff">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:5"></i></span>
             <span class="mode-text">
@@ -145,8 +161,8 @@
           </button>
           </div></div>
         </section>
-        <section class="mgrp" data-g="train">
-          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Train</span><span class="mgrp-s">Get better</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+        <section class="mgrp closed" data-g="train">
+          <button class="mgrp-h" type="button" aria-expanded="false"><span class="mgrp-t">Train</span><span class="mgrp-s">Get better</span><i class="mgrp-chev" aria-hidden="true"></i></button>
           <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="puzzle" style="--accent:#f2c45a">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:0"></i></span>
@@ -182,8 +198,8 @@
           </button>
           </div></div>
         </section>
-        <section class="mgrp" data-g="rewards">
-          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Rewards</span><span class="mgrp-s">Tokens and cosmetics</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+        <section class="mgrp closed" data-g="rewards">
+          <button class="mgrp-h" type="button" aria-expanded="false"><span class="mgrp-t">Rewards</span><span class="mgrp-s">Tokens and cosmetics</span><i class="mgrp-chev" aria-hidden="true"></i></button>
           <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="tasks" style="--accent:#3fbfa3">
             <span class="mode-ic" aria-hidden="true"><i class="ic-check"></i></span>
@@ -203,8 +219,8 @@
           </button>
           </div></div>
         </section>
-        <section class="mgrp" data-g="progress">
-          <button class="mgrp-h" type="button" aria-expanded="true"><span class="mgrp-t">Progress</span><span class="mgrp-s">Your numbers</span><i class="mgrp-chev" aria-hidden="true"></i></button>
+        <section class="mgrp closed" data-g="progress">
+          <button class="mgrp-h" type="button" aria-expanded="false"><span class="mgrp-t">Progress</span><span class="mgrp-s">Your numbers</span><i class="mgrp-chev" aria-hidden="true"></i></button>
           <div class="mgrp-b"><div class="modes">
           <button class="mode" data-mode="board" style="--accent:#e8c14a">
             <span class="mode-ic" aria-hidden="true"><i class="ic-star"></i></span>
@@ -292,6 +308,22 @@
             <span class="od-bar"><i id="od-w" class="od-w"><b id="od-wp">50%</b></i><i id="od-b" class="od-b"><b id="od-bp">50%</b></i></span>
             <span id="od-hint" class="od-hint"></span>
           </button>
+
+          <button id="fs-info" class="snail-info hidden" type="button" aria-label="Foresight Chess rules"></button>
+          <div id="royale" class="royale hidden">
+            <button id="ry-top" class="ry-top" type="button" aria-label="Chess Royale rules">
+              <span class="ry-el" id="ry-w"><span class="ry-nm"></span><span class="ry-bar"></span><b>0</b></span>
+              <span class="ry-el" id="ry-b"><span class="ry-nm"></span><span class="ry-bar"></span><b>0</b></span>
+            </button>
+            <div id="ry-tray" class="ry-tray"></div>
+            <div id="ry-hint" class="ry-hint"></div>
+          </div>
+
+          <!-- Foresight: lock in the planned move -->
+          <div id="fs-bar" class="arr-bar hidden">
+            <button id="fs-change" class="btn">Change</button>
+            <button id="fs-lock" class="btn primary" disabled>Lock in</button>
+          </div>
 
           <!-- secret queen pick bar -->
           <div id="pick-bar" class="pick-bar hidden">
@@ -524,19 +556,19 @@
     </div>
   </div>
 
-  <script src="chess.js?v=27"></script>
-  <script src="ai.js?v=34"></script>
-  <script src="guessbot.js?v=1"></script>
-  <script src="app.js?v=33"></script>
+  <script src="chess.js?v=28"></script>
+  <script src="ai.js?v=35"></script>
+  <script src="guessbot.js?v=2"></script>
+  <script src="app.js?v=35"></script>
   <script src="export.js?v=2"></script>
   <script src="prefs.js?v=1"></script>
-  <script src="history.js?v=6"></script>
-  <script src="saves.js?v=4"></script>
+  <script src="history.js?v=7"></script>
+  <script src="saves.js?v=5"></script>
   <script src="leaderboard.js?v=30"></script>
   <script src="profile.js?v=24"></script>
   <script src="hats.js?v=2"></script>
   <script src="shop.js?v=35"></script>
-    <script src="stats.js?v=32"></script>
+    <script src="stats.js?v=33"></script>
   <script src="rush.js?v=25"></script>
   <script src="puzzlegen.js?v=30"></script>
   <script src="ratings.js?v=30"></script>
@@ -549,6 +581,6 @@
   <script src="hockey.js?v=10"></script>
   <script src="tutorial.js?v=4"></script>
   <script src="extras.js?v=12"></script>
-  <script src="menu.js?v=1"></script>
+  <script src="menu.js?v=2"></script>
 </body>
 </html>

@@ -18,6 +18,12 @@ const PIECE_CHARS = {
 
 const FILES = 'abcdefgh';
 
+/** Chess Royale: what spawning each kind of piece costs in elixir (kings cannot be spawned). */
+const SPAWN_COST = { [PAWN]: 1, [KNIGHT]: 3, [BISHOP]: 3, [ROOK]: 5, [QUEEN]: 9 };
+const SPAWN_TYPES = [PAWN, KNIGHT, BISHOP, ROOK, QUEEN];
+const ELIXIR_MAX = 10;
+const SPAWN_FILES = [3, 4, 2, 5, 1, 6, 0, 7];   // centre-most files first (used when a bot only wants a few candidate squares)
+
 function sq(file, rank) { return rank * 16 + file; }
 function fileOf(s) { return s & 15; }
 function rankOf(s) { return s >> 4; }
@@ -42,11 +48,14 @@ class Chess {
     this.history = [];
     this.secretQueen = { [WHITE]: -1, [BLACK]: -1 }; // square of secret queen (still disguised)
     this.revealed = { [WHITE]: false, [BLACK]: false };
-    this.mode = 'basic'; // 'basic' | 'secret' | 'snail' | 'gamble'
+    this.mode = 'basic'; // 'basic' | 'secret' | 'snail' | 'gamble' | 'royale'
     this.snW = -1;       // Immortal Snail: square of White's snail (it hunts White's king), -1 when there are no snails
     this.snB = -1;       // ... and of Black's snail (it hunts Black's king)
     this.pW = 50;        // Gamblite: the chance (%) White had of getting the turn at the last roll
     this.kingTaken = 0;  // Gamblite: the colour whose king was captured (there is no check, a king is simply taken)
+    this.el = { [WHITE]: 0, [BLACK]: 0 };   // Chess Royale: each side's elixir
+    this.noKingCap = false;   // Foresight Chess bots: planning a move in a position where the opponent's king is in check must not 'capture' it
+    this.spawnCap = 0;   // bots' private copies only: how many squares per piece to consider when spawning (0 = all)
     this.snailKilled = 0; // a snail reached a king: WHITE / BLACK = that side lost, WHITE|BLACK = both kings reached at once
     this.reset();
   }
@@ -72,6 +81,13 @@ class Chess {
     this.kingTaken = 0;
     // Immortal Snail: both snails start on the d-file in the middle (White's on d4, Black's on d5)
     this.snailKilled = 0;
+    this.el = { [WHITE]: 0, [BLACK]: 0 };
+    if (this.mode === 'royale') {   // Chess Royale: only the kings are on the board, no castling (the army is spawned later)
+      this.board.fill(0);
+      this.board[sq(4, 0)] = WHITE | KING;
+      this.board[sq(4, 7)] = BLACK | KING;
+      this.castling = 0;
+    }
     if (this.mode === 'snail') { this.snW = sq(3, 3); this.snB = sq(3, 4); }
     else { this.snW = -1; this.snB = -1; }
   }
@@ -270,6 +286,7 @@ class Chess {
       if (to === this.snW || to === this.snB) return;   // a snail is a wall
       const target = this.board[to];
       if (target && this.colorOf(target) === col) return;
+      if (this.noKingCap && target && (target & TYPE_MASK) === KING) return;
       moves.push({ from: s, to, flags, promo: 0 });
     };
 
@@ -297,6 +314,7 @@ class Chess {
         to = s + dir + df;
         if (to & 0x88) continue;
         if (this.board[to] && this.colorOf(this.board[to]) === enemy) {
+          if (this.noKingCap && (this.board[to] & TYPE_MASK) === KING) continue;
           if (rankOf(to) === promoRank) {
             for (const pr of [QUEEN, ROOK, BISHOP, KNIGHT]) {
               moves.push({ from: s, to, flags: 0, promo: pr });
@@ -354,6 +372,44 @@ class Chess {
     return moves;
   }
 
+  /**
+   * Chess Royale: every spawn the side to move can pay for, as moves { from: to, to, spawn: type, flags: 16 } (from === to marks a spawn).
+   * A side may spawn on any empty square of its two starting ranks. `full` ignores the bots' square limit (see spawnCap).
+   */
+  genSpawns(full) {
+    const col = this.turn, el = this.el[col];
+    const out = [];
+    if (this.mode !== 'royale' || el < 1) return out;
+    // bots (spawnCap set on their private copy) only look at a few squares per piece, except when they are in check and need the exact blocking square
+    const cap = !full && this.spawnCap && !this.kingAttacked(col) ? this.spawnCap : 0;
+    const r0 = col === WHITE ? 0 : 7, r1 = col === WHITE ? 1 : 6;
+    const squares = [];
+    for (const r of [r1, r0]) {   // (own second rank first)
+      const row = [];
+      for (const f of SPAWN_FILES) { const t = sq(f, r); if (!this.board[t]) row.push(t); }
+      squares.push(row);
+    }
+    for (const type of SPAWN_TYPES) {
+      if (SPAWN_COST[type] > el) continue;
+      let list;
+      if (cap) list = squares[0].slice(0, Math.ceil(cap / 2)).concat(squares[1].slice(0, Math.floor(cap / 2)));
+      else list = squares[0].concat(squares[1]);
+      for (const t of list) out.push({ from: t, to: t, flags: 16, promo: 0, spawn: type });
+    }
+    return out;
+  }
+
+  /** Chess Royale: the spawns that leave the king safe (so a spawn can block a check, but not ignore one). */
+  legalSpawns() {
+    const col = this.turn, out = [];
+    for (const m of this.genSpawns(false)) {
+      this.makeMove(m);
+      if (!this.kingAttacked(col)) out.push(m);
+      this.unmakeMove();
+    }
+    return out;
+  }
+
   /** All legal moves for side to move */
   legalMoves() {
     const col = this.turn;
@@ -369,6 +425,7 @@ class Chess {
         this.unmakeMove();
       }
     }
+    if (this.mode === 'royale') for (const m of this.legalSpawns()) result.push(m);
     return result;
   }
 
@@ -398,10 +455,19 @@ class Chess {
         if (ok) return true;
       }
     }
+    if (this.mode === 'royale') {   // spawning is a move too: it can block a check or give a side something to do
+      for (const m of this.genSpawns(true)) {
+        this.makeMove(m);
+        const ok = !this.kingAttacked(col);
+        this.unmakeMove();
+        if (ok) return true;
+      }
+    }
     return false;
   }
 
   makeMove(m) {
+    if (m.spawn) return this._makeSpawn(m);
     const p = this.board[m.from];
     const col = this.colorOf(p);
     const captured = this.board[m.to];
@@ -418,6 +484,7 @@ class Chess {
       enemySecret: this.secretQueen[col === WHITE ? BLACK : WHITE],
       revealed: this.revealed[col],
       wasSecretMove: false,
+      elW: this.el[WHITE], elB: this.el[BLACK],
     };
 
     // Detect if this is a revealing secret-queen move
@@ -496,6 +563,9 @@ class Chess {
 
     if (col === BLACK) this.fullmove++;
 
+    // Chess Royale: moving a piece earns 1 elixir (up to 10)
+    if (this.mode === 'royale') this.el[col] = Math.min(ELIXIR_MAX, this.el[col] + 1);
+
     // Immortal Snail: after Black's 3rd, 6th, 9th... move both snails take one step
     if (this.mode === 'snail' && col === BLACK && (this.fullmove - 1) % 3 === 0) this._snailTick(hist);
 
@@ -508,10 +578,37 @@ class Chess {
     this.history.push(hist);
   }
 
+  /** Chess Royale: put a new piece on the board. It costs elixir, earns none, and counts as the turn. */
+  _makeSpawn(m) {
+    const col = this.turn, enemy = col === WHITE ? BLACK : WHITE;
+    const hist = {
+      move: m, mover: col, pW: this.pW, kt: this.kingTaken, captured: 0, castling: this.castling, ep: this.ep, halfmove: this.halfmove,
+      secretFrom: this.secretQueen[col], enemySecret: this.secretQueen[enemy], revealed: this.revealed[col], wasSecretMove: false,
+      elW: this.el[WHITE], elB: this.el[BLACK],
+    };
+    this.board[m.to] = col | m.spawn;
+    this.el[col] -= SPAWN_COST[m.spawn];
+    this.ep = -1;
+    this.halfmove = 0;
+    if (col === BLACK) this.fullmove++;
+    this.turn = enemy;
+    this.history.push(hist);
+  }
+
   unmakeMove() {
     const hist = this.history.pop();
     if (!hist) return;
     const m = hist.move;
+    if (m.spawn) {
+      this.board[m.to] = EMPTY;
+      this.el[WHITE] = hist.elW; this.el[BLACK] = hist.elB;
+      this.pW = hist.pW; this.kingTaken = hist.kt;
+      this.castling = hist.castling; this.ep = hist.ep; this.halfmove = hist.halfmove;
+      if (hist.mover === BLACK) this.fullmove--;
+      this.turn = hist.mover;
+      return;
+    }
+    this.el[WHITE] = hist.elW; this.el[BLACK] = hist.elB;
     const col = this.colorOf(this.board[m.to]) || (this.turn === WHITE ? BLACK : WHITE);
     // Actually after make, turn has flipped, so the mover is the opposite of current turn
     const mover = hist.mover || (this.turn === WHITE ? BLACK : WHITE);
@@ -572,6 +669,7 @@ class Chess {
   }
 
   moveToSan(m) {
+    if (m.spawn) return ({ [PAWN]: 'P', [KNIGHT]: 'N', [BISHOP]: 'B', [ROOK]: 'R', [QUEEN]: 'Q' })[m.spawn] + '@' + alg(m.to);
     const p = this.board[m.from]; // before make
     // We call this before making the move
     const type = this.typeOf(p);
@@ -723,3 +821,6 @@ window.fileOf = fileOf;
 window.rankOf = rankOf;
 window.alg = alg;
 window.PIECE_CHARS = PIECE_CHARS;
+window.SPAWN_COST = SPAWN_COST;
+window.SPAWN_TYPES = SPAWN_TYPES;
+window.ELIXIR_MAX = ELIXIR_MAX;

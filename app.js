@@ -80,6 +80,12 @@
   let arrTypes = [];           // ... the one being edited right now
   let arrColor = 0;
   let gFirst = 0;              // Gamblite: the side the opening roll gave the first move to
+  let spawnSel = 0;            // Chess Royale: the piece type picked in the spawn tray (0 = none)
+  let fsPlan = { [WHITE]: null, [BLACK]: null };   // Foresight: each side's secret planned move { from, to, promo }
+  let fsStage = '';            // Foresight: '' idle | 'wait' a pause between steps | 'cover' a hand-off cover is up | 'plan' a human is choosing their plan | 'bot' the computer is planning
+  let fsWho = 0;               // Foresight: the side choosing a plan right now
+  let fsNeed = 0;              // Foresight: the side that has just moved and still has to plan
+  let fsDraft = null;          // Foresight: the plan being chosen (not locked in yet)
   let startFen = null;         // a custom starting position (FEN) from the position editor, or null for the normal start
   let moveAt = [];             // when each move was played, in ms since the first move (timed replays)
   let moveClk = [];            // both clocks after each move (timed games)
@@ -93,9 +99,9 @@
   const fmt = (san) => String(san || '');
   const isTas = () => mode === 'tas';
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
-  const engineMode = (m) => (m === 'secret' ? 'secret' : m === 'snail' ? 'snail' : m === 'gamble' ? 'gamble' : m === 'guess' ? 'guess' : 'basic');
-  const isTwist = () => mode === 'snail' || mode === 'gamble' || mode === 'guess';   // custom rules the move-strength labels, Analyze and Export know nothing about
-  const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS', bullet: 'Bullet', rapid: 'Rapid', snail: 'Immortal Snail', gamble: 'Gamblite Chess', guess: 'Guess Who Chess' };
+  const engineMode = (m) => (m === 'secret' ? 'secret' : m === 'snail' ? 'snail' : m === 'gamble' ? 'gamble' : m === 'guess' ? 'guess' : m === 'royale' ? 'royale' : 'basic');
+  const isTwist = () => mode === 'snail' || mode === 'gamble' || mode === 'guess' || mode === 'royale' || mode === 'foresight';   // custom rules the move-strength labels, Analyze and Export know nothing about
+  const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS', bullet: 'Bullet', rapid: 'Rapid', snail: 'Immortal Snail', gamble: 'Gamblite Chess', guess: 'Guess Who Chess', foresight: 'Foresight Chess', royale: 'Chess Royale' };
   const LEVEL_LABEL = { dumb: 'Dumb', easy: 'Easy', medium: 'Medium', hard: 'Hard', insane: 'Insane', godly: 'Godly' };
   const cname = (c) => (c === WHITE ? 'White' : 'Black');
   const nameOf = (c) => viewNames[c] || cname(c);
@@ -413,6 +419,8 @@
       const hf = hintMoves.some((m) => m.from === s), ht = hintMoves.some((m) => m.to === s);
       el.classList.toggle('hint-from', hf);
       el.classList.toggle('hint-to', ht);
+      el.classList.toggle('plan-from', !!fsDraft && fsStage === 'plan' && fsDraft.from === s);
+      el.classList.toggle('plan-to', !!fsDraft && fsStage === 'plan' && fsDraft.to === s);
       const nums = [];
       hintMoves.forEach((m, i) => { if ((m.from === s || m.to === s) && !nums.includes(i + 1)) nums.push(i + 1); });
       let hb = el._hb;
@@ -493,6 +501,7 @@
   }
 
   function animateMove(m, reverse) {
+    if (m.spawn) { if (!reverse) popReveal(m.to); return; }
     const pairs = [[m.from, m.to]];
     if (m.flags === 4 || m.flags === 8) {
       const r = rankOf(m.from);
@@ -558,8 +567,9 @@
     fillBar('top', topColor, capsFor(topColor), advFor(topColor));
     fillBar('bottom', botColor, capsFor(botColor), advFor(botColor));
     const live = phase === 'play' || phase === 'replay';
-    $('#top-bar').classList.toggle('active', live && G.turn === topColor);
-    $('#bottom-bar').classList.toggle('active', live && G.turn === botColor);
+    const turnC = mode === 'foresight' && fsStage === 'plan' && G === game ? fsWho : G.turn;   // (Foresight: the side planning is the one "on the clock")
+    $('#top-bar').classList.toggle('active', live && turnC === topColor);
+    $('#bottom-bar').classList.toggle('active', live && turnC === botColor);
     updateClocks();
   }
 
@@ -701,6 +711,7 @@
       text = nameOf(who) + ' revealed a Secret Queen. ' + text;
     }
     if (G.mode === 'snail') text = snailLine(h) + text;
+    if (G.mode === 'royale' && h && h.move.spawn) text = nameOf(h.mover) + ' spawned a ' + PNAME[h.move.spawn] + '. ' + text;
     if (G.mode === 'gamble') {
       if (h && h.mover === G.turn) text = nameOf(G.turn) + ' moves again';
       if (G.kingAttacked(G.turn)) { text += ' — king attacked'; cls = 'check'; }
@@ -733,13 +744,16 @@
     const tas = isTas();
     $('#pick-bar').classList.toggle('hidden', !pickPhase);
     $('#arr-bar').classList.toggle('hidden', !isArr());
+    $('#fs-bar').classList.toggle('hidden', !(mode === 'foresight' && fsStage === 'plan' && phase === 'play'));
+    $('#fs-lock').disabled = !fsDraft;
+    $('#fs-change').disabled = !fsDraft;
     $('#controls').classList.toggle('hidden', pickPhase || isArr() || phase === 'replay');
     $('#controls').classList.toggle('tas', tas);
     $('#replay-controls').classList.toggle('hidden', phase !== 'replay');
     $('#hint-btn').classList.toggle('hidden', !tas);
     $('#save-btn').classList.add('hidden');
     $('#forfeit-btn').classList.toggle('hidden', tas || !!bots || phase !== 'play');
-    const nav = (phase === 'play' || phase === 'over') && !aiBusy && mode !== 'guess';   // no undo in Guess Who: it would show you what you were not meant to see
+    const nav = (phase === 'play' || phase === 'over') && !aiBusy && mode !== 'guess' && mode !== 'foresight';   // no undo in Guess Who or Foresight: it would show you what you were not meant to see
     $('#undo-btn').disabled = !nav || viewPly === 0;
     $('#redo-btn').disabled = !nav || viewPly >= sans.length;
     $('#hint-btn').disabled = !(phase === 'play' && !aiBusy && ai && humanTurn());
@@ -752,7 +766,10 @@
     $('#both-btn').disabled = !(phase === 'play' || phase === 'over');
     updateHintGlow();
     updateQueenBtn();
-    $('#flip-btn').disabled = opts.autoFlip;
+    $('#flip-btn').classList.toggle('hidden', opts.autoFlip);   // auto-flip on: the button is not there at all
+    const noNav = mode === 'guess' || mode === 'foresight';   // modes with no undo / redo
+    $('#undo-btn').classList.toggle('hidden', noNav);
+    $('#redo-btn').classList.toggle('hidden', noNav);
     document.querySelector('.layout').classList.toggle('replaying', phase === 'replay');
   }
 
@@ -763,10 +780,12 @@
     updateRatingLine();
     renderSnailInfo();
     renderOdds();
+    renderRoyale();
+    renderForesight();
   }
 
   /* ------------------------------------------------------------- menu/start */
-  document.querySelectorAll('.mode[data-mode="basic"], .mode[data-mode="secret"], .mode[data-mode="snail"], .mode[data-mode="gamble"], .mode[data-mode="guess"], .mode[data-mode="tas"], .mode[data-mode="bullet"], .mode[data-mode="rapid"]').forEach((b) => {
+  document.querySelectorAll('.mode[data-mode="basic"], .mode[data-mode="secret"], .mode[data-mode="snail"], .mode[data-mode="gamble"], .mode[data-mode="guess"], .mode[data-mode="foresight"], .mode[data-mode="royale"], .mode[data-mode="tas"], .mode[data-mode="bullet"], .mode[data-mode="rapid"]').forEach((b) => {
     b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
 
@@ -869,6 +888,7 @@
     if (startFen) { if (game.loadFen(startFen)) startFen = null; else game.problems(); }
     clearInterval(revealTimer); revealSet = new Set(); revealAll = false; viewSide = 0; arrs = {};
     gFirst = 0;
+    spawnSel = 0; fsPlan = { [WHITE]: null, [BLACK]: null }; fsStage = ''; fsWho = 0; fsNeed = 0; fsDraft = null;
     if (m === 'gamble' && !startFen) { gFirst = Math.random() < 0.5 ? WHITE : BLACK; game.turn = gFirst; }   // even the first turn is a 50/50 roll
     G = game;
     session.fresh();
@@ -935,6 +955,7 @@
       moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
       clock: clock ? { w: clock[WHITE], b: clock[BLACK], inc: clock.inc, base: clock.base } : null,
       fen: startFen, at: moveAt.slice(), clk: moveClk.slice(), gfirst: gFirst || null,
+      fs: mode === 'foresight' ? { plan: { w: fsPlan[WHITE], b: fsPlan[BLACK] }, need: fsNeed } : null,
     });
   }
   function clearSession() { session.clear(); }
@@ -964,6 +985,7 @@
     viewPly = fullMoves.length;
     while (viewPly > d.viewPly) { game.unmakeMove(); viewPly--; }
     playBoth = !!d.playBoth;
+    if (d.fs) { fsPlan = { [WHITE]: d.fs.plan.w || null, [BLACK]: d.fs.plan.b || null }; fsNeed = d.fs.need || 0; }
     if (d.clock) { clock = { [WHITE]: d.clock.w, [BLACK]: d.clock.b, inc: d.clock.inc, base: d.clock.base }; pendingTc = { base: d.clock.base / 1000, inc: d.clock.inc / 1000 }; } else clock = null;
     sidesCtx = ai ? { [ai.human === WHITE ? 'w' : 'b']: 'p1', [ai.human === WHITE ? 'b' : 'w']: 'p2' } : { w: 'p1', b: 'p2' };
     phase = 'play';
@@ -1296,6 +1318,280 @@
     refreshHint();
   }
 
+  /* ------------------------------------------------ Chess Royale */
+  /** The elixir meters (both sides) and the spawn tray for the side to move. */
+  function renderRoyale() {
+    const el = $('#royale');
+    if (!el) return;
+    const on = G.mode === 'royale' && (phase === 'play' || phase === 'over' || phase === 'replay' || phase === 'names');
+    el.classList.toggle('hidden', !on);
+    if (!on) return;
+    for (const c of [WHITE, BLACK]) {
+      const row = $(c === WHITE ? '#ry-w' : '#ry-b');
+      const n = G.el[c];
+      row.querySelector('.ry-nm').textContent = nameOf(c);
+      row.querySelector('b').textContent = n;
+      const bar = row.querySelector('.ry-bar');
+      if (!bar.children.length) for (let i = 0; i < 10; i++) bar.appendChild(document.createElement('i'));
+      [...bar.children].forEach((seg, i) => seg.classList.toggle('on', i < n));
+      row.classList.toggle('turn', phase === 'play' && G.turn === c);
+    }
+    const live = phase === 'play' && G === game && humanTurn() && !bots;
+    const can = spawnCan();
+    const tray = $('#ry-tray');
+    tray.classList.toggle('hidden', !live);
+    const legal = can ? new Set(game.legalSpawns().map((m) => m.spawn)) : new Set();
+    const col = G.turn === WHITE ? 'w' : 'b';
+    if (!tray.children.length) {
+      for (const t of SPAWN_TYPES) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.t = t;
+        b.setAttribute('aria-label', 'Spawn a ' + PNAME[t] + ' for ' + SPAWN_COST[t] + ' elixir');
+        b.innerHTML = '<span class="rp"></span><em>' + SPAWN_COST[t] + '</em>';
+        tray.appendChild(b);
+      }
+    }
+    [...tray.children].forEach((b) => {
+      const t = +b.dataset.t, rp = b.firstChild;
+      rp.className = 'rp ' + col;
+      rp.textContent = glyph(t);
+      b.disabled = !legal.has(t);
+      b.classList.toggle('sel', can && spawnSel === t);
+    });
+    let hint = '';
+    if (live && phase === 'play') {
+      const rank = G.turn === WHITE ? 'first two ranks' : 'last two ranks';
+      if (spawnSel) hint = 'Tap a highlighted square on your ' + rank + ' to place the ' + PNAME[spawnSel] + '.';
+      else if (G.inCheck(G.turn)) hint = 'In check: a spawn only works if it blocks the check.';
+      else hint = 'Move a piece for +1 elixir, or spend elixir to spawn (no elixir gained).';
+    }
+    $('#ry-hint').textContent = hint;
+  }
+
+  const spawnCan = () => mode === 'royale' && phase === 'play' && G === game && !aiBusy && !pendingPromo && humanTurn() && !bots && viewPly === sans.length;
+
+  $('#ry-tray').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled || !spawnCan()) return;
+    const t = +b.dataset.t;
+    if (spawnSel === t) { spawnSel = 0; legalTargets = []; renderAll(); return; }
+    const list = game.legalSpawns().filter((m) => m.spawn === t);
+    if (!list.length) return;
+    spawnSel = t; selected = -1; hintMoves = []; legalTargets = list;
+    renderAll();
+  });
+
+  function showRoyaleRules() {
+    openSheet(`<h2>Chess Royale<span class="sub">Build your army as you go.</span></h2>
+      <div class="sn-rules">
+        <p>You start with <b>only your king</b>. Both sides begin with 0 elixir.</p>
+        <p><b>Move a piece</b> as normal and you gain <b>1 elixir</b> (up to 10).</p>
+        <p>Or <b>spawn a piece</b> on any empty square of your two starting ranks. That is your whole turn and you gain no elixir.</p>
+        <p>Costs: pawn <b>1</b>, knight <b>3</b>, bishop <b>3</b>, rook <b>5</b>, queen <b>9</b>. Kings cannot be spawned.</p>
+        <p>A spawn can block a check, but it can't be used if your king would still be in check. If you have no legal move and no spawn you can afford, it is checkmate or stalemate. There is no castling.</p>
+      </div>
+      <button class="btn wide primary" id="ryr-ok">Got it</button>`, true);
+    $('#ryr-ok').onclick = closeSheet;
+  }
+  $('#ry-top').addEventListener('click', showRoyaleRules);
+
+  /* ------------------------------------------------ Foresight Chess */
+  const isHumanSide = (c) => !bots && (!ai || c === ai.human);
+  const otherOf = (c) => (c === WHITE ? BLACK : WHITE);
+  const EYE_SVG = '<svg class="fs-eye" viewBox="0 0 100 100" aria-hidden="true"><path d="M6 50C20 28 36 18 50 18s30 10 44 32C80 72 64 82 50 82S20 72 6 50Z" fill="none" stroke="currentColor" stroke-width="7" stroke-linejoin="round"/><circle cx="50" cy="50" r="15" fill="currentColor"/></svg>';
+
+  /** The strip under the status: what you have planned (against the computer), or a reminder that plans are secret. */
+  function renderForesight() {
+    const el = $('#fs-info');
+    if (!el) return;
+    const on = mode === 'foresight' && G === game && (phase === 'play' || phase === 'names' || phase === 'over');
+    el.classList.toggle('hidden', !on);
+    if (!on) return;
+    let txt, planned = false;
+    if (bots) txt = 'Both computers plan one move ahead.';
+    else if (ai) {
+      const p = fsPlan[ai.human];
+      if (fsStage === 'plan') { txt = 'Choose your <b>next move</b> now.'; planned = true; }
+      else if (p) { txt = 'Your plan: <b>' + alg(p.from) + ' &rarr; ' + alg(p.to) + '</b>'; planned = true; }
+      else txt = 'Plan your next move after each turn.';
+    } else txt = 'Planned moves stay <b>secret</b> until they are played.';
+    el.classList.toggle('plan', planned);
+    el.innerHTML = '<span class="si-ic">' + EYE_SVG + '</span><span class="si-t">' + txt + '</span><span class="si-q" aria-hidden="true">?</span>';
+  }
+
+  function showForesightRules() {
+    openSheet(`<h2>Foresight Chess<span class="sub">Always think one move ahead.</span></h2>
+      <div class="sn-rules">
+        <p>Each side's <b>first move is played normally</b>.</p>
+        <p>After that, straight after your move you must <b>plan your next move</b>, before your opponent replies. It is played for you when your turn comes.</p>
+        <p>If your plan is <b>no longer legal</b> by then (a piece was taken, your king is in check...), you pick another move yourself.</p>
+        <p>With two players, a prompt asks your opponent to <b>look away</b> while you plan. The computer plans its moves too.</p>
+      </div>
+      <button class="btn wide primary" id="fsr-ok">Got it</button>`, true);
+    $('#fsr-ok').onclick = closeSheet;
+  }
+  $('#fs-info').addEventListener('click', showForesightRules);
+
+  /** Run fn in `ms`, unless the game was reset or left meanwhile. While waiting the board takes no taps. */
+  function fsLater(ms, fn) {
+    const tok = ++aiToken;
+    aiBusy = true; fsStage = 'wait';
+    setTimeout(() => {
+      if (tok !== aiToken) return;
+      aiBusy = false; fsStage = '';
+      if (phase !== 'play' || paused) return;
+      fn();
+    }, ms);
+  }
+
+  function fsCover(title, sub, btn, cb) {
+    coverEl.innerHTML = `<h2>${esc(title)}</h2><p>${esc(sub)}</p><button class="btn primary" id="cover-ok">${esc(btn)}</button>`;
+    coverEl.classList.remove('hidden');
+    $('#cover-ok').onclick = () => { coverEl.classList.add('hidden'); cb(); };
+  }
+  const fsFlipTo = (c) => { if (!ai && opts.autoFlip) setFlipped(c === BLACK, false); };
+
+  /** Run fn as if it were side c's turn (the board as it is now): used to find the moves a side can plan. */
+  function fsHypo(c, fn) {
+    const t = game.turn, ep = game.ep;
+    game.turn = c; game.ep = -1;
+    try { return fn(); } finally { game.turn = t; game.ep = ep; }
+  }
+  const fsMoves = (c, from) => fsHypo(c, () => game.legalMovesFrom(from).filter((m) => (game.board[m.to] & 7) !== KING));
+  const fsMatch = (plan) => (plan ? game.legalMovesFrom(plan.from).find((x) => x.to === plan.to && (x.promo || 0) === (plan.promo || 0)) || null : null);
+
+  /** Work out what happens next: a side has to plan, or the side to move has to play. Safe to call at any time. */
+  function fsDrive() {
+    if (mode !== 'foresight' || phase !== 'play' || paused || fsStage) return;
+    if (fsNeed) fsBeginPlan(fsNeed); else fsBeginTurn(game.turn);
+  }
+
+  /** It is c's turn: their plan is played for them, or (first move / plan no longer legal) they choose. */
+  function fsBeginTurn(c) {
+    const plan = fsPlan[c];
+    const mv = fsMatch(plan);
+    let note = '';
+    if (plan && !mv) { fsPlan[c] = null; note = 'Your planned move is no longer legal. Choose another move.'; saveSession(); }
+    const human = isHumanSide(c);
+    if (!human) {
+      if (mv) fsLater(bots ? 450 : 650, () => doMove(mv)); else botMove();
+      return;
+    }
+    if (!ai && fullMoves.length) {   // two players: hand the device over first
+      fsStage = 'cover';
+      fsCover(nameOf(c) + ', take your turn', mv ? 'Your planned move will be played.' : (note || 'Choose your move.'), mv ? 'Play it' : "I'm ready", () => {
+        fsStage = '';
+        fsFlipTo(c);
+        renderAll();
+        if (mv) doMove(mv); else setStatus(note || nameOf(c) + "'s move");
+      });
+      return;
+    }
+    if (mv) { fsLater(500, () => doMove(mv)); return; }
+    setStatus(note || nameOf(c) + "'s move");
+    if (note) showToast(note, false);
+    renderAll();
+  }
+
+  /** c has just moved and must plan their next move. */
+  function fsBeginPlan(c) {
+    selected = -1; legalTargets = []; fsDraft = null; hintMoves = [];
+    if (!isHumanSide(c)) { fsBotPlan(c); return; }
+    if (!fsHypo(c, () => game.legalMoves().some((m) => (game.board[m.to] & 7) !== KING))) {   // nothing to plan (every piece is stuck for now)
+      showToast(nameOf(c) + ' has no move to plan right now.', false);
+      fsNeed = 0; saveSession();
+      fsLater(500, fsDrive);
+      return;
+    }
+    const start = () => {
+      fsStage = 'plan'; fsWho = c; fsDraft = null;
+      fsFlipTo(c);
+      setStatus(nameOf(c) + ': plan your next move. Tap a piece, then where it goes.');
+      renderAll();
+    };
+    if (ai) { start(); return; }
+    fsStage = 'cover';
+    renderAll();
+    fsCover(nameOf(c) + ', plan your next move', nameOf(otherOf(c)) + ', look away.', "I'm ready", start);
+  }
+
+  function fsTap(s) {
+    const c = fsWho, p = game.board[s];
+    const own = p && (p & 24) === c;
+    if (selected >= 0) {
+      const mv = legalTargets.find((m) => m.to === s);
+      if (mv) {
+        selected = -1; legalTargets = [];
+        if (mv.promo) { showPromotion(mv, fsSetDraft, c); return; }
+        fsSetDraft(mv);
+        return;
+      }
+      if (own && s !== selected) { fsSelect(s); return; }
+      selected = -1; legalTargets = []; renderAll();
+      return;
+    }
+    if (own) fsSelect(s);
+  }
+  function fsSelect(s) {
+    fsDraft = null;
+    selected = s;
+    legalTargets = fsMoves(fsWho, s);
+    setStatus(nameOf(fsWho) + ': plan your next move. Tap a piece, then where it goes.');
+    renderAll();
+  }
+  function fsSetDraft(mv) {
+    const san = fsHypo(fsWho, () => game.moveToSan(mv));
+    fsDraft = { from: mv.from, to: mv.to, promo: mv.promo || 0 };
+    setStatus('Planned: ' + fmt(san) + '. Lock it in, or change it.');
+    renderAll();
+  }
+  $('#fs-change').addEventListener('click', () => {
+    if (fsStage !== 'plan') return;
+    fsDraft = null; selected = -1; legalTargets = [];
+    setStatus(nameOf(fsWho) + ': plan your next move. Tap a piece, then where it goes.');
+    renderAll();
+  });
+  $('#fs-lock').addEventListener('click', () => {
+    if (fsStage !== 'plan' || !fsDraft) return;
+    fsPlan[fsWho] = fsDraft;
+    fsDraft = null; selected = -1; legalTargets = [];
+    fsStage = ''; fsNeed = 0;
+    saveSession();
+    renderAll();
+    fsLater(ai ? 350 : 150, fsDrive);
+  });
+
+  /** The computer plans its next move: it searches the position as if it were to move again (the opponent's reply is unknown). */
+  function fsBotPlan(c) {
+    const level = bots ? bots[c] : ai.level;
+    const hg = new Chess();
+    hg.mode = 'basic';
+    hg.board.set(game.board);
+    hg.turn = c; hg.castling = game.castling; hg.ep = -1; hg.halfmove = game.halfmove; hg.fullmove = game.fullmove;
+    hg.noKingCap = true;   // the opponent's king may be in check right now, but it can't be taken
+    hg.history = [];
+    const token = ++aiToken;
+    aiBusy = true; fsStage = 'bot';
+    setStatus('', 'dim', (bots ? esc(nameOf(c)) : 'Computer') + ' is planning<span class="dots"><i>.</i><i>.</i><i>.</i></span>');
+    const t0 = Date.now(), minWait = bots ? 350 : 500 + Math.random() * 300;
+    setTimeout(() => {
+      if (token !== aiToken) return;
+      searchMove(hg, level, c, new Map(), (m) => {
+        if (token !== aiToken) return;
+        setTimeout(() => {
+          if (token !== aiToken) return;
+          aiBusy = false; fsStage = '';
+          fsPlan[c] = m ? { from: m.from, to: m.to, promo: m.promo || 0 } : null;
+          fsNeed = 0;
+          saveSession();
+          renderAll();
+          fsDrive();
+        }, Math.max(0, minWait - (Date.now() - t0)));
+      }, 0);
+    }, 20);
+  }
+
   /* ----------------------------------------------------------- the computer */
   function thinkingStatus() {
     setStatus('', 'dim', 'Thinking<span class="dots"><i>.</i><i>.</i><i>.</i></span>');
@@ -1306,6 +1602,12 @@
   const TIMED_WAIT = { dumb: [2400, 3600], easy: [5000, 8000], medium: [4000, 7000], hard: [4000, 7000], insane: [500, 500], godly: [2000, 2000] };
 
   function maybeAI() {
+    if (mode === 'foresight') { fsDrive(); return; }
+    botMove();
+  }
+
+  /** The computer plays its move now, if it is its turn. */
+  function botMove() {
     const level = bots ? bots[game.turn] : (ai && !playBoth && game.turn === ai.color ? ai.level : null);
     if (!level || phase !== 'play' || paused) return;
     if (!isTas() && viewPly < sans.length) return;
@@ -1346,6 +1648,11 @@
   function onSquare(s) {
     if (isArr()) { arrTap(s); return; }
     if (mode === 'guess' && phase === 'play' && coverUp()) return;
+    if (mode === 'foresight' && phase === 'play') {
+      if (coverUp() || pendingPromo) return;
+      if (fsStage === 'plan') { fsTap(s); return; }
+      if (fsStage) return;
+    }
     if (phase === 'pick-w' || phase === 'pick-b') {
       if (!coverEl.classList.contains('hidden')) return;
       const color = phase === 'pick-w' ? WHITE : BLACK;
@@ -1372,6 +1679,15 @@
     const p = game.board[s];
     const own = p && (p & 24) === game.turn;
 
+    if (spawnSel) {   // Chess Royale: a piece was picked in the tray, so a tap on a highlighted square places it
+      const sm = legalTargets.find((m) => m.to === s);
+      if (sm) { doMove(sm); return; }
+      spawnSel = 0; legalTargets = [];
+      if (own) { select(s); return; }
+      renderAll();
+      return;
+    }
+
     if (selected >= 0) {
       const move = legalTargets.find((m) => m.to === s);
       if (move) {
@@ -1391,8 +1707,9 @@
   function select(s) {
     if (hintMoves.length && !hintMoves.some((m) => m.from === s)) hintMoves = [];   // tapping the hinted piece keeps the hint visible
     selected = s;
+    spawnSel = 0;
     legalTargets = game.legalMovesFrom(s);
-    renderBoard();
+    renderAll();
   }
 
   function insufficientMaterial() {
@@ -1418,6 +1735,7 @@
       closeSheet();
     }
     hintMoves = [];
+    spawnSel = 0;
     showQueen = false;   // the queen is hidden again once the turn is done
     const bookMove = !isTas() && !isTwist() && !!(window.MoveRating && window.MoveRating.isBook && window.MoveRating.isBook(game, m));   // only book moves are labelled while you play; everything else comes from Analyze game
     const san = game.moveToSan(m);
@@ -1436,6 +1754,7 @@
     const full = san + (check ? (canMove ? '+' : '#') : '');
     sans.push(full);
     fullMoves.push({ from: m.from, to: m.to, flags: m.flags, promo: m.promo || 0, q: m.q || 0 });
+    if (m.spawn) fullMoves[fullMoves.length - 1].spawn = m.spawn;
     if (mode === 'gamble') { const fm = fullMoves[fullMoves.length - 1]; fm.nx = m.nx; fm.mc = mover; }
     viewPly = sans.length;
     ratings[fullMoves.length - 1] = bookMove ? 'book' : null;
@@ -1458,20 +1777,25 @@
     if (game.snailKilled) end = 'snail';
     else if (game.kingTaken) end = 'king';
     else if (!canMove) end = check ? 'mate' : 'stalemate';
-    else if (!isTwist() && insufficientMaterial()) end = 'material';
+    else if ((!isTwist() || mode === 'foresight') && insufficientMaterial()) end = 'material';
     else if (game.halfmove >= 100) end = 'fifty';
     else if (posKeys.filter((k) => k === posKeys[viewPly]).length >= 3) end = 'repeat';
 
     if (end) { endGame(end, mover); clearSession(); }
-    else if (mode === 'guess') {
+    else if (mode === 'foresight') {   // the mover now has to plan their next move, then the other side's turn comes
+      fsNeed = mover;
+      saveSession();
+      setStatus(nameOf(mover) + ' played ' + fmt(full));
+      fsLater(bots ? 500 : 800, fsDrive);
+    } else if (mode === 'guess') {
       saveSession(); updateStatus(); maybeAI();
       if (!ai && !bots) setTimeout(() => guessHandoff(game.turn), 500);   // hand the device over
     } else { saveSession(); updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
   }
 
-  function showPromotion(move) {
+  function showPromotion(move, cb, color) {
     pendingPromo = true;
-    const col = game.turn;
+    const col = color || game.turn;
     const ov = document.createElement('div');
     ov.className = 'overlay';
     const box = document.createElement('div');
@@ -1484,7 +1808,7 @@
         move.promo = t;
         ov.remove();
         pendingPromo = false;
-        doMove(move);
+        if (cb) cb(move); else doMove(move);
       };
       box.appendChild(b);
     });
@@ -1496,6 +1820,8 @@
   /* --------------------------------------------------------------- end game */
   function endGame(type, mover) {
     phase = 'over';
+    fsStage = ''; fsNeed = 0; fsDraft = null; spawnSel = 0;
+    coverEl.classList.add('hidden');
     clearTimeout(flipTimer);
     const why = { stalemate: 'Stalemate', material: 'Insufficient material', fifty: '50-move rule', repeat: 'Threefold repetition', snail: 'Both snails reached a king' };
     let winner = type === 'mate' || type === 'resign' || type === 'time' ? mover : null;   // mover = the side that won (or that gave the mate)
@@ -1636,7 +1962,7 @@
   /* Two-player and computer games: undo / redo only move the view, nobody can play until it is back at
      the latest move. TAS: undo / redo are real, and playing from an earlier point drops the old future. */
   function navigate(dir) {
-    if (mode === 'guess') return;
+    if (mode === 'guess' || mode === 'foresight') return;
     if ((phase !== 'play' && phase !== 'over') || aiBusy) return;
     const target = viewPly + dir;
     if (target < 0 || target > fullMoves.length || target === viewPly) return;

@@ -29,19 +29,7 @@
 
   /** A starting arrangement for the computer: 16 piece types, back rank a-h then front rank a-h. */
   function arrange(color, level) {
-    if (level === 'dumb' || level === 'easy' || level === 'medium') return STD.slice();
-    if (level === 'hard') return shuffle(STD.slice());
-    // insane / godly: the king hides on the back rank, the queen is disguised in the front rank, the rest is mixed up
-    const slots = [];
-    for (let i = 0; i < 16; i++) slots.push(i);
-    const out = new Array(16).fill(0);
-    const kingAt = [1, 2, 5, 6][Math.floor(Math.random() * 4)];
-    out[kingAt] = 6;
-    const queenAt = 8 + [1, 2, 3, 4, 5, 6][Math.floor(Math.random() * 6)];
-    out[queenAt] = 5;
-    const rest = shuffle([1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4]);
-    for (let i = 0; i < 16; i++) if (!out[i]) out[i] = rest.pop();
-    return out;
+    return shuffle(STD.slice());   // every level: all 16 pieces shuffled randomly over the two ranks
   }
 
   /** Does a piece of type t standing on m.from have move m? (pseudo-legal, using only who stands where) */

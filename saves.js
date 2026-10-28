@@ -139,7 +139,7 @@
     const out = [];
     if (s.kind === 'chess') {
       const g = new Chess();
-      g.mode = s.mode === 'secret' ? 'secret' : s.mode === 'snail' ? 'snail' : s.mode === 'gamble' ? 'gamble' : s.mode === 'guess' ? 'guess' : 'basic';
+      g.mode = s.mode === 'secret' ? 'secret' : s.mode === 'snail' ? 'snail' : s.mode === 'gamble' ? 'gamble' : s.mode === 'guess' ? 'guess' : s.mode === 'royale' ? 'royale' : 'basic';
       g.reset();
       if (s.fen) g.loadFen(s.fen);
       if (s.secrets) g.secretQueen = { [WHITE]: s.secrets[WHITE], [BLACK]: s.secrets[BLACK] };

@@ -17,7 +17,7 @@
     if (remember) { state[g.dataset.g] = open ? 1 : 0; save(state); }
   }
   groups.forEach((g) => {
-    if (state[g.dataset.g] != null) setOpen(g, !!state[g.dataset.g], false);
+    setOpen(g, false, false);   // every section starts closed whenever the menu loads
     g.querySelector('.mgrp-h').addEventListener('click', () => setOpen(g, g.classList.contains('closed'), true));
   });
   /** The tour opens every group so it can point at each button. */

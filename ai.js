@@ -41,6 +41,8 @@
   const ZSNW = new Int32Array(128).map(() => rnd()), ZSNW2 = new Int32Array(128).map(() => rnd());   // Immortal Snail: where each snail is...
   const ZSNB = new Int32Array(128).map(() => rnd()), ZSNB2 = new Int32Array(128).map(() => rnd());
   const ZSNP = new Int32Array(3).map(() => rnd()), ZSNP2 = new Int32Array(3).map(() => rnd());       // ...and how far through the 3-move snail cycle we are
+  const ZELW = new Int32Array(11).map(() => rnd()), ZELW2 = new Int32Array(11).map(() => rnd());   // Chess Royale: elixir of each side
+  const ZELB = new Int32Array(11).map(() => rnd()), ZELB2 = new Int32Array(11).map(() => rnd());
   let hash2 = 0;   // second, independent hash of the position last passed to hashOf (guards against index collisions)
 
   function hashOf(g) {
@@ -56,6 +58,7 @@
       const ph = (g.fullmove - 1) % 3;
       h ^= ZSNW[g.snW & 127] ^ ZSNB[g.snB & 127] ^ ZSNP[ph]; k ^= ZSNW2[g.snW & 127] ^ ZSNB2[g.snB & 127] ^ ZSNP2[ph];
     }
+    if (g.mode === 'royale') { const a = g.el[WHITE], b = g.el[BLACK]; h ^= ZELW[a] ^ ZELB[b]; k ^= ZELW2[a] ^ ZELB2[b]; }
     if (g.ep >= 0) { h ^= ZEP[g.ep]; k ^= ZEP2[g.ep]; }
     hash2 = k | 0;
     return h | 0;
@@ -296,7 +299,7 @@
             if (ff < 1 || ff > 8) continue;
             if (own[ff] === 0) { m -= 12 * W.king; if (opp[ff] === 0) m -= 6 * W.king; }
           }
-          if (F.open && fi === 4 && prog === 0 && (g.castling & (white ? 3 : 12)) === 0) m -= 28;   // can no longer castle
+          if (F.open && fi === 4 && prog === 0 && g.mode !== 'royale' && (g.castling & (white ? 3 : 12)) === 0) m -= 28;   // can no longer castle
         }
       }
       mg += sign * m; eg += sign * e;
@@ -340,10 +343,11 @@
       if (bishB >= 2) { mg -= 30; eg -= 50; }
     }
     mg += stmWhite ? 10 : -10;
-    const ph = phase > 24 ? 24 : phase;
+    // Chess Royale starts from bare kings, which must not be treated as an endgame (kings walking to the centre, 'insufficient material' draws)
+    const ph = g.mode === 'royale' ? Math.min(24, phase + 14) : (phase > 24 ? 24 : phase);
     let score = (mg * ph + eg * (24 - ph)) / 24;
 
-    if (F.endg && g.mode !== 'snail' && g.mode !== 'gamble') {
+    if (F.endg && g.mode !== 'snail' && g.mode !== 'gamble' && g.mode !== 'royale') {
       if (pawnsW === 0 && pawnsB === 0) {
         const adv = matW - matB;
         if (matB === 0 && matW <= 335 || matW === 0 && matB <= 335) return 0;
@@ -365,6 +369,7 @@
     }
     if (snailW) score += snailW * snailTerm(g, wk, bk);
     if (g.mode === 'gamble') score += gambleTerm(g);
+    if (g.mode === 'royale') score += ELX * (g.el[WHITE] - g.el[BLACK]);
     return g.turn === WHITE ? score : -score;
   }
 
@@ -395,6 +400,9 @@
     }
     return sc;
   }
+
+  /** Chess Royale: how much one point of elixir in hand is worth (centipawns). Below a piece's price per elixir, so spending it on something useful is a gain. */
+  const ELX = 55;
 
   /**
    * Gamblite evaluation (centipawns, White's point of view). There is no check, so an attacked king is a real danger:
@@ -441,10 +449,17 @@
         for (let i = 0; i < ms.length; i++) out.push(ms[i]);
       }
     }
+    if (g.mode === 'royale') { const sp = g.genSpawns(false); for (let i = 0; i < sp.length; i++) out.push(sp[i]); }
     return out;
   }
 
   const other = (c) => (c === WHITE ? BLACK : WHITE);
+  /** The move of the real game `g` that matches a move found on the search copy (a spawn needs no matching: it is plain data). */
+  function realOf(g, m) {
+    if (!m) return null;
+    if (m.spawn) return m;
+    return g.legalMovesFrom(m.from).find((x) => x.to === m.to && x.promo === m.promo) || null;
+  }
 
   /** A capture that gives up more than it wins and lands on a defended square. */
   function losingCapture(g, m) {
@@ -458,6 +473,7 @@
   function moveScore(g, m, ply, hashMove) {
     const key = m.from * 128 + m.to;
     if (hashMove && key === hashMove) return 1e7 + (m.promo || 0);
+    if (m.spawn) return 8e5 + VAL[m.spawn] * 4 + (m.spawn === 1 ? 0 : 50);
     const cap = g.board[m.to];
     if (cap) {
       const base = 10 * VAL[cap & 7] - VAL[g.board[m.from] & 7] / 10;
@@ -612,7 +628,7 @@
     const moves = order(g, pseudo(g), ply, hashMove);
     let legal = 0, best = -INF, bestKey = 0;
     for (const m of moves) {
-      const quiet = !g.board[m.to] && !m.promo && m.flags !== 2;
+      const quiet = !g.board[m.to] && !m.promo && m.flags !== 2 && !m.spawn;   // (a spawn is never pruned or reduced: it changes the material)
       g.makeMove(m);
       if (g.inCheck(col)) { g.unmakeMove(); continue; }
       if (quiet && legal > 0 && !inChk && !pv) {
@@ -674,6 +690,7 @@
       k += String.fromCharCode(48 + g.board[s]);
     }
     if (g.mode === 'snail') k += 's' + g.snW + ',' + g.snB + ',' + ((g.fullmove - 1) % 3);   // the snails are part of the position
+    if (g.mode === 'royale') k += 'e' + g.el[WHITE] + ',' + g.el[BLACK];
     return k + g.turn + g.castling + g.ep;
   }
 
@@ -681,6 +698,9 @@
     const c = new Chess();
     c.mode = g.mode;
     c.snW = g.snW; c.snB = g.snB; c.snailKilled = g.snailKilled; c.pW = g.pW; c.kingTaken = g.kingTaken;
+    c.el = { [WHITE]: g.el[WHITE], [BLACK]: g.el[BLACK] };
+    if (g.mode === 'royale') c.spawnCap = 4;
+    c.noKingCap = !!g.noKingCap;
     c.board.set(g.board);
     c.turn = g.turn;
     c.castling = g.castling;
@@ -828,10 +848,10 @@
     let depth = 1;
     let soft = 0.45, prevTop = null, prevTopScore = 0, stableCount = 0;
 
-    if (cfg.mate) {
+    if (cfg.mate && g.mode !== 'royale') {
       const fm = window.findMate(c);              // forced mate in 1 or 2 is always played
       if (fm) {
-        const real = g.legalMovesFrom(fm.move.from).find((x) => x.to === fm.move.to && x.promo === fm.move.promo);
+        const real = realOf(g, fm.move);
         if (real) { setTimeout(() => cb([{ move: real, score: MATE - 10 * fm.n, forced: true }]), 0); return; }
       }
     }
@@ -870,7 +890,7 @@
       if (castle) list = [{ m: castle.m, sc: castle.sc, forced: true }];
       const out = [];
       for (const t of list.slice(0, cfg.pick)) {
-        const real = g.legalMovesFrom(t.m.from).find((x) => x.to === t.m.to && x.promo === t.m.promo);
+        const real = realOf(g, t.m);
         if (real) out.push({ move: real, score: t.sc, forced: !!t.forced });
       }
       cb(out);
@@ -929,7 +949,7 @@
     const c = cloneForSearch(g, color === WHITE ? BLACK : WHITE);
     const all = c.legalMoves();
     if (all.length <= 1) {
-      cb(all.map((m) => ({ move: g.legalMovesFrom(m.from).find((x) => x.to === m.to && x.promo === m.promo) || m, score: 0 })));
+      cb(all.map((m) => ({ move: realOf(g, m) || m, score: 0 })));
       return;
     }
     multiSearch(g, cfg, color, seen, cb);
@@ -962,12 +982,12 @@
 
     const finish = (m) => {
       let out = null;
-      if (m) out = g.legalMovesFrom(m.from).find((x) => x.to === m.to && x.promo === m.promo) || null;
+      if (m) out = realOf(g, m);
       if (!out) {
         const all = g.legalMoves();
         out = all.length ? all[Math.floor(Math.random() * all.length)] : null;
       }
-      if (out && cfg.polish && g.mode !== 'snail' && g.mode !== 'gamble') out = polish(g, out);   // (the move-strength labels know nothing about snails)
+      if (out && cfg.polish && g.mode !== 'snail' && g.mode !== 'gamble' && g.mode !== 'royale') out = polish(g, out);   // (the move-strength labels know nothing about snails)
       cb(out);
     };
 

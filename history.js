@@ -97,7 +97,7 @@
     }
     box.innerHTML = shown.map((e) => {
       const canExport = e.kind === 'chess' && e.payload && LP.exporter && LP.exporter.canExport(e.payload);
-      const canAnalyze = e.payload && (e.kind === 'rush' || (e.kind === 'chess' && !e.payload.tas && e.payload.mode !== 'snail' && e.payload.mode !== 'gamble' && e.payload.mode !== 'guess')) && LP.analyze;
+      const canAnalyze = e.payload && (e.kind === 'rush' || (e.kind === 'chess' && !e.payload.tas && !['snail', 'gamble', 'guess', 'royale', 'foresight'].includes(e.payload.mode2 || e.payload.mode))) && LP.analyze;
       return `<div class="an-card hs-card" data-id="${esc(e.id)}">
         <div class="an-top"><b class="an-mode">${esc(e.modeLabel || e.mode || '')}${e.modded && e.modded.length ? ' <span class="hs-mod">Modded</span>' : ''}</b><span class="an-date">${esc(stamp(e.date))}</span></div>
         <div class="an-who">${who(e)}</div>
