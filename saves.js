@@ -32,7 +32,7 @@
     const d = Math.round(h / 24);
     return d === 1 ? 'yesterday' : d + ' days ago';
   }
-  const modeOf = (s) => (s.kind === 'chess' ? (s.fen ? 'Custom position' : LP.MODE_LABEL[s.mode] || 'Chess') : s.kind === 'rush' ? 'Capture Rush' : 'Puzzles');
+  const modeOf = (s) => (s.kind === 'chess' ? (s.fen && s.mode !== 'guess' ? 'Custom position' : LP.MODE_LABEL[s.mode] || 'Chess') : s.kind === 'rush' ? 'Capture Rush' : 'Puzzles');
   function names(s) {
     if (s.kind === 'chess') return { w: (s.names && s.names[8]) || 'White', b: (s.names && s.names[16]) || 'Black' };
     if (s.kind === 'rush') return { w: (s.cfg && s.cfg.names && s.cfg.names.w) || 'White', b: (s.cfg && s.cfg.names && s.cfg.names.b) || 'Black' };
@@ -139,7 +139,7 @@
     const out = [];
     if (s.kind === 'chess') {
       const g = new Chess();
-      g.mode = s.mode === 'secret' ? 'secret' : 'basic';
+      g.mode = s.mode === 'secret' ? 'secret' : s.mode === 'snail' ? 'snail' : s.mode === 'gamble' ? 'gamble' : s.mode === 'guess' ? 'guess' : 'basic';
       g.reset();
       if (s.fen) g.loadFen(s.fen);
       if (s.secrets) g.secretQueen = { [WHITE]: s.secrets[WHITE], [BLACK]: s.secrets[BLACK] };

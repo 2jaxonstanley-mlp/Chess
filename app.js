@@ -72,6 +72,14 @@
   const fx = (name) => { try { if (window.LP && window.LP.fx) window.LP.fx.play(name); } catch (e) { /* ignore */ } };
   const animOn = () => !(window.LP && window.LP.prefs && !window.LP.prefs.get('anim'));
   const guardSlots = (next) => (window.LP && window.LP.saves ? window.LP.saves.guard(next) : next());
+  let viewSide = 0;            // Guess Who: whose eyes the board is shown through (0 = sees everything, -1 = nobody, the hand-off cover is up)
+  let revealSet = new Set();   // Guess Who: enemy squares already uncovered by the end-of-game reveal
+  let revealAll = false;       // Guess Who: the reveal is finished, everything is shown
+  let revealTimer = null;
+  let arrs = {};               // Guess Who: each side's chosen arrangement (16 piece types: back rank a-h, then the front rank a-h)
+  let arrTypes = [];           // ... the one being edited right now
+  let arrColor = 0;
+  let gFirst = 0;              // Gamblite: the side the opening roll gave the first move to
   let startFen = null;         // a custom starting position (FEN) from the position editor, or null for the normal start
   let moveAt = [];             // when each move was played, in ms since the first move (timed replays)
   let moveClk = [];            // both clocks after each move (timed games)
@@ -85,8 +93,9 @@
   const fmt = (san) => String(san || '');
   const isTas = () => mode === 'tas';
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
-  const engineMode = (m) => (m === 'secret' ? 'secret' : 'basic');
-  const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS', bullet: 'Bullet', rapid: 'Rapid' };
+  const engineMode = (m) => (m === 'secret' ? 'secret' : m === 'snail' ? 'snail' : m === 'gamble' ? 'gamble' : m === 'guess' ? 'guess' : 'basic');
+  const isTwist = () => mode === 'snail' || mode === 'gamble' || mode === 'guess';   // custom rules the move-strength labels, Analyze and Export know nothing about
+  const MODE_LABEL = { basic: 'Classic', secret: 'Secret Queen', tas: 'TAS', bullet: 'Bullet', rapid: 'Rapid', snail: 'Immortal Snail', gamble: 'Gamblite Chess', guess: 'Guess Who Chess' };
   const LEVEL_LABEL = { dumb: 'Dumb', easy: 'Easy', medium: 'Medium', hard: 'Hard', insane: 'Insane', godly: 'Godly' };
   const cname = (c) => (c === WHITE ? 'White' : 'Black');
   const nameOf = (c) => viewNames[c] || cname(c);
@@ -223,7 +232,7 @@
   }
 
   /* ---------------------------------------------------------- move strength */
-  const ratingsOn = () => opts.ratings && !!window.MoveRating;
+  const ratingsOn = () => opts.ratings && !isTwist() && !!window.MoveRating;   // (move-strength labels know nothing about snails)
   function ratingIdAt(i) {
     if (i < 0) return null;
     if (phase === 'replay') return (replay && replay.data.ratings && replay.data.ratings[i]) || null;
@@ -255,11 +264,120 @@
     }, 30);
   }
 
+  /* ---------------------------------------------------------- Immortal Snail */
+  const SNAIL_SVG = '<svg viewBox="0 0 100 100" aria-hidden="true"><path class="sn-body" d="M7 83 C7 74 14 70 22 70 L66 70 C72 70 74 66 75 60 L77 46 C77.5 42 80 40 83 40 C87 40 89 43 89 47 L90 62 C91 74 84 83 72 83 Z"/><path class="sn-ant" d="M80 40 L77 24 M87 41 L94 26"/><circle class="sn-shell" cx="38" cy="46" r="29"/><path class="sn-spiral" d="M40 46 C40 44 36 43 34 45 C32 48 34 52 39 52 C45 52 49 47 48 41 C46 34 38 31 32 34 C25 38 24 48 29 54 C35 61 46 61 53 54"/></svg>';
+  const PNAME = { 1: 'pawn', 2: 'knight', 3: 'bishop', 4: 'rook', 5: 'queen', 6: 'king' };
+
+  /** Plies until the snails next step (1 to 6), counted from the position G is showing. */
+  const snailPlies = () => 2 * (G.snailMoveNo() - G.fullmove) + (G.turn === WHITE ? 2 : 1);
+
+  /** What the snails did on the last move, in words ("" when they did not step). */
+  function snailLine(h) {
+    if (!h || !h.sn) return '';
+    const ate = h.sn.eaten.map(([, p]) => (isWhite(p) ? 'White' : 'Black') + ' ' + PNAME[p & 7]);
+    return 'The snails crawled one step' + (ate.length ? ' and ate ' + ate.join(' and ') : '') + '. ';
+  }
+
+  /** The strip under the status line: when the snails step next, tap it for the rules. */
+  function renderSnailInfo() {
+    const el = $('#snail-info');
+    if (!el) return;
+    const on = G.mode === 'snail' && phase !== 'pick-w' && phase !== 'pick-b' && !G.snailKilled && phase !== 'over' && !(phase === 'replay' && replay && replay.idx >= replay.data.moves.length && replay.data.result);
+    el.classList.toggle('hidden', !on);
+    if (!on) return;
+    const pl = snailPlies();
+    const when = pl === 1 ? 'right after this move' : pl === 2 ? "right after Black's reply" : 'after move ' + G.snailMoveNo();
+    el.classList.toggle('soon', pl <= 2);
+    el.innerHTML = '<span class="si-ic">' + SNAIL_SVG + '</span><span class="si-t">Snails step <b>' + when + '</b></span><span class="si-q" aria-hidden="true">?</span>';
+  }
+
+  function showSnailRules() {
+    openSheet(`<h2>Immortal Snail<span class="sub">Two snails, one on each side.</span></h2>
+      <div class="sn-rules">
+        <p><b>Your snail hunts your own king.</b> White's snail starts on d4 and Black's on d5.</p>
+        <p><b>Every 3 full moves</b> (after Black's 3rd, 6th, 9th move...) both snails crawl one tile straight towards their king.</p>
+        <p>If a snail steps onto a king, <b>that king's side loses</b>. If both do on the same step, it is a draw.</p>
+        <p>You cannot capture a snail, and nothing can move onto it or through it. Pieces on the tile a snail steps onto are <b>eaten</b>, whoever owns them.</p>
+        <p>The red tile shows where a snail steps next. Keep your king moving away from it.</p>
+      </div>
+      <button class="btn wide primary" id="snr-ok">Got it</button>`, true);
+    $('#snr-ok').onclick = closeSheet;
+  }
+  $('#snail-info').addEventListener('click', showSnailRules);
+
+  /* ---------------------------------------------------------- Gamblite Chess */
+  let rollTimer = null;
+  /** The odds strip: how the next roll will be weighted if the side to move plays, and how the last roll went. */
+  function renderOdds() {
+    const el = $('#odds');
+    if (!el) return;
+    const on = G.mode === 'gamble' && (phase === 'play' || phase === 'over' || phase === 'replay' || phase === 'names') && !G.kingTaken;
+    el.classList.toggle('hidden', !on);
+    if (!on) return;
+    const pw = G.oddsAfter(G.turn);                       // White's chance at the roll that follows the next move
+    $('#od-w').style.width = pw + '%';
+    $('#od-b').style.width = (100 - pw) + '%';
+    $('#od-wp').textContent = pw + '%';
+    $('#od-bp').textContent = (100 - pw) + '%';
+    $('#od-hint').textContent = 'If ' + nameOf(G.turn) + ' moves, the next roll is weighted like this.';
+    const last = G.history[G.history.length - 1];
+    const chance = G.turn === WHITE ? G.pW : 100 - G.pW;
+    const txt = last ? 'Rolled ' + nameOf(G.turn) + ' · ' + chance + '% chance' : 'Opening roll: ' + nameOf(G.turn) + ' · 50% chance';
+    const roll = $('#od-roll');
+    if (roll.textContent !== txt) {
+      roll.textContent = txt;
+      roll.classList.remove('rolling'); void roll.offsetWidth; roll.classList.add('rolling');
+      clearTimeout(rollTimer); rollTimer = setTimeout(() => roll.classList.remove('rolling'), 700);
+    }
+    roll.classList.toggle('lucky', !!last && chance <= 40);
+  }
+
+  function showGambleRules() {
+    openSheet(`<h2>Gamblite Chess<span class="sub">Nobody knows who moves next.</span></h2>
+      <div class="sn-rules">
+        <p><b>Every turn is rolled.</b> The very first turn is 50/50 White or Black.</p>
+        <p>After each move the odds shift <b>5 points against whoever just moved</b>. If White moves twice, White's chance is down to 40% and Black's is 60%. Odds always stay between 5% and 95%.</p>
+        <p>There is <b>no check</b>. A king can be left attacked, and <b>capturing the king wins</b>.</p>
+        <p>If the side that is rolled has no legal move, the other side moves instead.</p>
+      </div>
+      <button class="btn wide primary" id="gr-ok">Got it</button>`, true);
+    $('#gr-ok').onclick = closeSheet;
+  }
+  $('#odds').addEventListener('click', showGambleRules);
+
+  /** Slide the snail(s) that stepped in h from their old tile to the new one (or back, when undoing). */
+  function animateSnails(h, reverse) {
+    if (!h || !h.sn || !animOn() || h.sn.nw == null) return;
+    for (const [a, b, c] of [[h.sn.w, h.sn.nw, WHITE], [h.sn.b, h.sn.nb, BLACK]]) {
+      const from = reverse ? b : a, to = reverse ? a : b;
+      if (from === to) continue;
+      const se = squareEls[from], de = squareEls[to], sn = de && de._snail;
+      if (!sn || !se) continue;
+      const r1 = se.getBoundingClientRect(), r2 = de.getBoundingClientRect();
+      sn.style.transition = 'none';
+      sn.style.transform = `translate(${r1.left - r2.left}px, ${r1.top - r2.top}px)`;
+      de.style.zIndex = 7;
+      void sn.offsetWidth;
+      sn.style.transition = 'transform .7s cubic-bezier(.4,.1,.2,1)';
+      sn.style.transform = '';
+      setTimeout(() => { sn.style.transition = ''; de.style.zIndex = ''; }, 760);
+    }
+  }
+
   function renderBoard() {
-    const checkSq = G.inCheck(G.turn) ? G.kingSquare(G.turn) : -1;
+    const isSnail = G.mode === 'snail';
+    const kill = isSnail ? G.snailKilled : 0;
+    const killW = kill & WHITE ? G.kingSquare(WHITE) : -1, killB = kill & BLACK ? G.kingSquare(BLACK) : -1;
+    const snNext = isSnail && !kill && phase !== 'pick-w' && phase !== 'pick-b' ? G.snailNext() : null;
+    const snSoon = snNext && snailPlies() <= 2;
+    const checkSq = G.inCheck(G.turn) && !(G.mode === 'guess' && phase !== 'replay') ? G.kingSquare(G.turn) : -1;   // (Guess Who never announces check)
+    const gam = G.mode === 'gamble' && !G.kingTaken;   // no check here, but an attacked king is in real danger
+    const dangerW = gam && G.kingAttacked(WHITE) ? G.kingSquare(WHITE) : -1, dangerB = gam && G.kingAttacked(BLACK) ? G.kingSquare(BLACK) : -1;
     const lastH = G.history[G.history.length - 1];
     const last = lastH ? lastH.move : null;
     const picking = phase === 'pick-w' || phase === 'pick-b';
+    const arrP = isArr();
+    const guessHide = G === game && mode === 'guess' && phase !== 'replay' && viewSide !== 0 && !revealAll;   // Guess Who: enemy pieces are just coloured squares
     const pickColor = phase === 'pick-w' ? WHITE : BLACK;
     // a secret piece's queen-only moves are not hinted unless the player asked to see their queen
     const legalSet = new Map(opts.hints ? legalTargets.filter((m) => !m.q || showQueen).map((m) => [m.to, m]) : []);
@@ -273,9 +391,20 @@
       const el = squareEls[s];
       const p = G.board[s];
 
-      el.classList.toggle('selected', picking ? s === pickSel : s === selected);
+      el.classList.toggle('selected', picking || arrP ? s === pickSel : s === selected);
       el.classList.toggle('last', !!last && (last.from === s || last.to === s));
-      el.classList.toggle('check', s === checkSq);
+      el.classList.toggle('check', s === checkSq || s === killW || s === killB || s === dangerW || s === dangerB);
+      el.classList.toggle('snail-next', !!snNext && (s === snNext[WHITE] || s === snNext[BLACK]));
+      el.classList.toggle('soon', !!snSoon);
+      const sc = isSnail ? (s === G.snW ? WHITE : s === G.snB ? BLACK : 0) : 0;
+      let sne = el._snail;
+      if (!sc) { if (sne) { sne.remove(); el._snail = null; el._sc = 0; } }
+      else if (el._sc !== sc) {
+        if (!sne) { sne = document.createElement('span'); el.appendChild(sne); el._snail = sne; }
+        sne.className = 'snail ' + (sc === WHITE ? 'w' : 'b');
+        sne.innerHTML = SNAIL_SVG;
+        el._sc = sc;
+      }
       const lm = legalSet.get(s);
       el.classList.toggle('legal', !!lm);
       el.classList.toggle('capture', !!lm && (!!p || lm.flags === 2));
@@ -303,17 +432,23 @@
 
       // piece
       let pe = el._piece;
+      const hide = guessHide && !!p && (viewSide === -1 || (p & 24) !== viewSide) && !revealSet.has(s);
+      const code = hide ? p + 1000 : p;
       if (!p) {
         if (pe) { pe.remove(); el._piece = null; el._code = 0; }
-      } else if (el._code !== p) {
+      } else if (el._code !== code) {
         if (!pe) {
           pe = document.createElement('span');
           el.appendChild(pe);
           el._piece = pe;
         }
-        pe.className = 'piece ' + (isWhite(p) ? 'w' : 'b');
-        pe.textContent = glyph(p);
-        el._code = p;
+        pe.className = 'piece ' + (isWhite(p) ? 'w' : 'b') + (hide ? ' blind' : '');
+        if (hide) {   // nothing about the piece may show: no glyph, no skin or hat tags left over from when it was visible
+          pe.textContent = '';
+          for (const k of ['pk', 'k', 'px', 'hat', 'hatk']) delete pe.dataset[k];
+          for (const k of ['--px', '--sheet', '--hx', '--hy', '--hw']) pe.style.removeProperty(k);
+        } else pe.textContent = glyph(p);
+        el._code = code;
       }
     }
   }
@@ -483,6 +618,28 @@
   function renderMoves(list, cur) {
     moveListEl.innerHTML = '';
     let pair = null;
+    if (mode === 'guess' && phase !== 'replay') list = list.map((_, i) => guessText(i));
+    if (phase === 'replay' ? !!(replay && replay.data.mode === 'gamble') : mode === 'gamble') {
+      // turns are rolled, so moves do not alternate: show them one by one in the colour of whoever played them
+      const src = phase === 'replay' ? replay.data.moves : fullMoves;
+      list.forEach((san, i) => {
+        const pr = document.createElement('div');
+        pr.className = 'pair';
+        const b = document.createElement('button');
+        b.className = 'move ' + (src[i] && src[i].mc === BLACK ? 'b' : 'w') + (i === cur - 1 ? ' current' : '');
+        b.dataset.ply = i;
+        const mn = document.createElement('span');
+        mn.className = 'mn';
+        mn.textContent = (i + 1) + '. ';
+        b.appendChild(mn);
+        b.appendChild(document.createTextNode(fmt(san)));
+        pr.appendChild(b);
+        moveListEl.appendChild(pr);
+      });
+      const ce = moveListEl.querySelector('.current');
+      movesScroll.scrollLeft = ce ? ce.parentElement.offsetLeft - movesScroll.clientWidth / 2 : list.length ? movesScroll.scrollWidth : 0;
+      return;
+    }
     list.forEach((san, i) => {
       if (i % 2 === 0) {
         pair = document.createElement('div');
@@ -533,7 +690,7 @@
   function updateStatus() {
     let text = nameOf(G.turn) + "'s move";
     let cls = '';
-    if (G.inCheck(G.turn)) { text += ' — check'; cls = 'check'; }
+    if (G.inCheck(G.turn) && G.mode !== 'guess') { text += ' — check'; cls = 'check'; }
     const h = G.history[G.history.length - 1];
     if (G === game && !isTas() && viewPly < sans.length) {
       setStatus(viewPly ? `Viewing move ${viewPly} of ${sans.length} (${fmt(sans[viewPly - 1])})` : 'Viewing the start position', 'dim');
@@ -542,6 +699,11 @@
     if (G.mode === 'secret' && h && h.wasSecretMove) {
       const who = G.turn === WHITE ? BLACK : WHITE;
       text = nameOf(who) + ' revealed a Secret Queen. ' + text;
+    }
+    if (G.mode === 'snail') text = snailLine(h) + text;
+    if (G.mode === 'gamble') {
+      if (h && h.mover === G.turn) text = nameOf(G.turn) + ' moves again';
+      if (G.kingAttacked(G.turn)) { text += ' — king attacked'; cls = 'check'; }
     }
     setStatus(text, cls);
   }
@@ -570,13 +732,14 @@
     const pickPhase = phase === 'pick-w' || phase === 'pick-b';
     const tas = isTas();
     $('#pick-bar').classList.toggle('hidden', !pickPhase);
-    $('#controls').classList.toggle('hidden', pickPhase || phase === 'replay');
+    $('#arr-bar').classList.toggle('hidden', !isArr());
+    $('#controls').classList.toggle('hidden', pickPhase || isArr() || phase === 'replay');
     $('#controls').classList.toggle('tas', tas);
     $('#replay-controls').classList.toggle('hidden', phase !== 'replay');
     $('#hint-btn').classList.toggle('hidden', !tas);
     $('#save-btn').classList.add('hidden');
     $('#forfeit-btn').classList.toggle('hidden', tas || !!bots || phase !== 'play');
-    const nav = (phase === 'play' || phase === 'over') && !aiBusy;
+    const nav = (phase === 'play' || phase === 'over') && !aiBusy && mode !== 'guess';   // no undo in Guess Who: it would show you what you were not meant to see
     $('#undo-btn').disabled = !nav || viewPly === 0;
     $('#redo-btn').disabled = !nav || viewPly >= sans.length;
     $('#hint-btn').disabled = !(phase === 'play' && !aiBusy && ai && humanTurn());
@@ -598,10 +761,12 @@
     renderBars();
     updateControls();
     updateRatingLine();
+    renderSnailInfo();
+    renderOdds();
   }
 
   /* ------------------------------------------------------------- menu/start */
-  document.querySelectorAll('.mode[data-mode="basic"], .mode[data-mode="secret"], .mode[data-mode="tas"], .mode[data-mode="bullet"], .mode[data-mode="rapid"]').forEach((b) => {
+  document.querySelectorAll('.mode[data-mode="basic"], .mode[data-mode="secret"], .mode[data-mode="snail"], .mode[data-mode="gamble"], .mode[data-mode="guess"], .mode[data-mode="tas"], .mode[data-mode="bullet"], .mode[data-mode="rapid"]').forEach((b) => {
     b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
 
@@ -702,6 +867,9 @@
     game.mode = engineMode(m);
     game.reset();
     if (startFen) { if (game.loadFen(startFen)) startFen = null; else game.problems(); }
+    clearInterval(revealTimer); revealSet = new Set(); revealAll = false; viewSide = 0; arrs = {};
+    gFirst = 0;
+    if (m === 'gamble' && !startFen) { gFirst = Math.random() < 0.5 ? WHITE : BLACK; game.turn = gFirst; }   // even the first turn is a 50/50 roll
     G = game;
     session.fresh();
     moveAt = []; moveClk = []; playStart = 0;
@@ -735,10 +903,11 @@
     sidesCtx = { w: 'p1', b: 'p2' };
     coverEl.classList.add('hidden');
     document.documentElement.classList.toggle('is-tas', m === 'tas');
-    $('#mode-title').textContent = startFen ? 'Custom position' : MODE_LABEL[m];
+    $('#mode-title').textContent = startFen && m !== 'guess' ? 'Custom position' : MODE_LABEL[m];
   }
 
   function startGame(m, keepNames, level) {
+    if (m === 'guess') startFen = null;   // every Guess Who game starts with fresh arrangements
     freshGame(m);
     phase = 'names';
     if (!keepNames) {
@@ -765,7 +934,7 @@
       opts: { autoFlip: opts.autoFlip, hints: opts.hints, ratings: opts.ratings }, ratings: ratings.slice(), secrets: initialSecrets,
       moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
       clock: clock ? { w: clock[WHITE], b: clock[BLACK], inc: clock.inc, base: clock.base } : null,
-      fen: startFen, at: moveAt.slice(), clk: moveClk.slice(),
+      fen: startFen, at: moveAt.slice(), clk: moveClk.slice(), gfirst: gFirst || null,
     });
   }
   function clearSession() { session.clear(); }
@@ -775,6 +944,7 @@
     startFen = d.fen || null;
     freshGame(d.mode);
     session.use(d.id);
+    if (d.gfirst) { gFirst = d.gfirst; game.turn = gFirst; }
     moveAt = (d.at || []).slice(); moveClk = (d.clk || []).slice();
     playStart = Date.now() - (moveAt.length ? moveAt[moveAt.length - 1] : 0);
     names = { [WHITE]: d.names[WHITE], [BLACK]: d.names[BLACK] };
@@ -804,6 +974,11 @@
     renderAll();
     renderMoves(sans, viewPly);
     updateStatus();
+    if (mode === 'guess') {
+      viewSide = ai ? ai.human : bots ? 0 : -1;
+      renderAll();
+      if (!ai && !bots) guessHandoff(game.turn);
+    }
     if (viewPly === sans.length) maybeAI();
     refreshHint();
   }
@@ -911,6 +1086,7 @@
 
   function afterNames() {
     renderBars();
+    if (mode === 'guess') { guessBegin(); return; }
     if (bots) {   // two computers: they each pick a random secret piece, then play
       if (mode === 'secret') {
         game.secretQueen[WHITE] = pickSecretPawn(WHITE);
@@ -921,6 +1097,144 @@
       return;
     }
     if (mode === 'secret') pickHandoff(ai ? ai.human : WHITE); else beginPlay();
+  }
+
+  /* ------------------------------------------------ Guess Who Chess */
+  const GL = { 1: 'p', 2: 'n', 3: 'b', 4: 'r', 5: 'q', 6: 'k' };
+  const STD_ARR = [4, 2, 3, 5, 6, 3, 2, 4, 1, 1, 1, 1, 1, 1, 1, 1];
+  const isArr = () => phase === 'arr-w' || phase === 'arr-b';
+  const coverUp = () => !coverEl.classList.contains('hidden');
+
+  /** The two arrangements as a starting position: no castling, White to move. */
+  function arrFen() {
+    const row = (a, from, up) => a.slice(from, from + 8).map((t) => (up ? GL[t].toUpperCase() : GL[t])).join('');
+    return `${row(arrs[BLACK], 0, false)}/${row(arrs[BLACK], 8, false)}/8/8/8/8/${row(arrs[WHITE], 8, true)}/${row(arrs[WHITE], 0, true)} w - - 0 1`;
+  }
+
+  function guessBegin() {
+    arrs = {};
+    if (bots) {
+      arrs[WHITE] = window.GuessBot.arrange(WHITE, bots[WHITE]);
+      arrs[BLACK] = window.GuessBot.arrange(BLACK, bots[BLACK]);
+      guessStart();
+      return;
+    }
+    if (ai) { arrs[ai.color] = window.GuessBot.arrange(ai.color, ai.level); guessArrange(ai.human); return; }
+    guessArrange(WHITE);
+  }
+
+  /** One player arranges their 16 pieces on their two ranks (tap two pieces to swap them). */
+  function guessArrange(color) {
+    phase = color === WHITE ? 'arr-w' : 'arr-b';
+    arrColor = color;
+    arrTypes = STD_ARR.slice();
+    pickSel = -1;
+    viewSide = color;
+    const other = color === WHITE ? BLACK : WHITE;
+    setFlipped(color === BLACK, false);
+    renderArrange();
+    setStatus('Tap two of your pieces to swap them');
+    if (ai) { coverEl.classList.add('hidden'); return; }
+    coverEl.innerHTML = `<h2>${esc(nameOf(color))}, arrange your pieces</h2>
+      <p>${esc(nameOf(other))}, look away.</p>
+      <button class="btn primary" id="cover-ok">I'm ready</button>`;
+    coverEl.classList.remove('hidden');
+    $('#cover-ok').onclick = () => coverEl.classList.add('hidden');
+  }
+
+  function renderArrange() {
+    game.board.fill(0);
+    arrTypes.forEach((t, i) => { game.board[sq(i % 8, arrColor === WHITE ? (i < 8 ? 0 : 1) : (i < 8 ? 7 : 6))] = arrColor | t; });
+    renderAll();
+  }
+
+  const arrIndex = (s) => {
+    const r = rankOf(s), f = fileOf(s);
+    const rows = arrColor === WHITE ? [0, 1] : [7, 6];
+    const k = rows.indexOf(r);
+    return k < 0 ? -1 : k * 8 + f;
+  };
+
+  function arrTap(s) {
+    if (coverUp()) return;
+    const i = arrIndex(s);
+    if (i < 0) return;
+    if (pickSel < 0) { pickSel = s; renderBoard(); return; }
+    const j = arrIndex(pickSel);
+    pickSel = -1;
+    if (j >= 0 && j !== i) { [arrTypes[i], arrTypes[j]] = [arrTypes[j], arrTypes[i]]; renderArrange(); } else renderBoard();
+  }
+
+  $('#arr-std').addEventListener('click', () => { if (!isArr() || coverUp()) return; arrTypes = STD_ARR.slice(); pickSel = -1; renderArrange(); });
+  $('#arr-rnd').addEventListener('click', () => {
+    if (!isArr() || coverUp()) return;
+    for (let i = arrTypes.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arrTypes[i], arrTypes[j]] = [arrTypes[j], arrTypes[i]]; }
+    pickSel = -1; renderArrange();
+  });
+  $('#arr-ok').addEventListener('click', () => {
+    if (!isArr() || coverUp()) return;
+    arrs[arrColor] = arrTypes.slice();
+    pickSel = -1;
+    if (ai || arrColor === BLACK) guessStart(); else guessArrange(BLACK);
+  });
+
+  /** Both sides are set: build the position and start. */
+  function guessStart() {
+    startFen = arrFen();
+    game.loadFen(startFen);
+    game.problems();
+    viewSide = bots ? 0 : ai ? ai.human : -1;
+    beginPlay();
+    if (!ai && !bots) guessHandoff(game.turn);
+  }
+
+  /** The cover between turns in a two-player game: the board stays hidden until the next player says they are ready. */
+  function guessHandoff(color) {
+    if (phase !== 'play') return;
+    viewSide = -1;
+    selected = -1; legalTargets = [];
+    const other = color === WHITE ? BLACK : WHITE;
+    coverEl.innerHTML = `<h2>${esc(nameOf(color))}, take your turn</h2>
+      <p>${esc(nameOf(other))}, look away.</p>
+      <button class="btn primary" id="cover-ok">I'm ready</button>`;
+    coverEl.classList.remove('hidden');
+    renderBoard();
+    $('#cover-ok').onclick = () => {
+      viewSide = color;
+      setFlipped(color === BLACK, false);
+      coverEl.classList.add('hidden');
+      renderAll();
+    };
+  }
+
+  /** End of a Guess Who game: every hidden piece is turned over, one by one. Returns how long it takes (ms). */
+  function guessReveal() {
+    clearInterval(revealTimer);
+    if (mode !== 'guess' || bots) { revealAll = true; return 0; }
+    if (viewSide <= 0) viewSide = over && over.result === '0-1' ? BLACK : WHITE;
+    const q = [];
+    for (let s = 0; s < 128; s++) { if (s & 0x88) { s += 7; continue; } const p = game.board[s]; if (p && (p & 24) !== viewSide) q.push(s); }
+    for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; }
+    const total = q.length * 380;
+    revealTimer = setInterval(() => {
+      const s = q.shift();
+      if (s == null) { clearInterval(revealTimer); revealAll = true; renderBoard(); return; }
+      revealSet.add(s);
+      renderBoard();
+      const pe = squareEls[s] && squareEls[s]._piece;
+      if (pe) { pe.classList.add('reveal'); pe.addEventListener('animationend', () => pe.classList.remove('reveal'), { once: true }); }
+      fx('move');
+    }, 380);
+    return total + 300;
+  }
+
+  /** The move list in Guess Who: squares only, so nothing says what the pieces are (check is not announced either). */
+  function guessText(i) {
+    const m = fullMoves[i], h = game.history[i];
+    if (!m) return '';
+    const mine = (i % 2 === 0 ? WHITE : BLACK) === viewSide;
+    const cap = h && (h.captured || h.epCaptured);
+    return alg(m.from) + (cap ? 'x' : '-') + alg(m.to) + (m.promo && mine ? '=' + 'xxnbrq'[m.promo] .toUpperCase() : m.promo ? '=?' : '');
   }
 
   /* ------------------------------------------------ secret queen selection */
@@ -1011,14 +1325,16 @@
     posKeys.slice(0, viewPly + 1).forEach((k) => seen.set(k, (seen.get(k) || 0) + 1));
     setTimeout(() => {
       if (token !== aiToken) return;
-      searchMove(game, level, game.turn, seen, (m) => {
+      const done = (m) => {
         if (token !== aiToken) return;
         setTimeout(() => {
           if (token !== aiToken) return;
           aiBusy = false;
           if (m) doMove(m); else updateControls();
         }, Math.max(0, minWait - (Date.now() - t0)));
-      }, maxMs);
+      };
+      if (mode === 'guess' && window.GuessBot) window.GuessBot.choose(game, fullMoves, startFen, level, game.turn, done);   // it only knows what it has seen
+      else searchMove(game, level, game.turn, seen, done, maxMs);
     }, 20);
   }
 
@@ -1028,6 +1344,8 @@
   });
 
   function onSquare(s) {
+    if (isArr()) { arrTap(s); return; }
+    if (mode === 'guess' && phase === 'play' && coverUp()) return;
     if (phase === 'pick-w' || phase === 'pick-b') {
       if (!coverEl.classList.contains('hidden')) return;
       const color = phase === 'pick-w' ? WHITE : BLACK;
@@ -1101,16 +1419,24 @@
     }
     hintMoves = [];
     showQueen = false;   // the queen is hidden again once the turn is done
-    const bookMove = !isTas() && !!(window.MoveRating && window.MoveRating.isBook && window.MoveRating.isBook(game, m));   // only book moves are labelled while you play; everything else comes from Analyze game
+    const bookMove = !isTas() && !isTwist() && !!(window.MoveRating && window.MoveRating.isBook && window.MoveRating.isBook(game, m));   // only book moves are labelled while you play; everything else comes from Analyze game
     const san = game.moveToSan(m);
     const mover = game.turn;
     if (!bots && window.LP.rewards && (game.board[m.to] || m.flags === 2)) window.LP.rewards.event('capture', 1);
+    if (mode === 'gamble') m.nx = Math.random() * 100 < game.oddsAfter(mover) ? WHITE : BLACK;   // roll who moves next
     game.makeMove(m);
+    if (mode === 'gamble' && !game.kingTaken && !game.hasLegalMove()) {   // the rolled side is stuck: the turn goes to the other side
+      game.turn = game.turn === WHITE ? BLACK : WHITE;
+      game.ep = -1;
+      m.nx = game.turn;
+    }
     const check = game.inCheck(game.turn);
+    const gcheck = check && mode !== 'guess';   // Guess Who does not announce check
     const canMove = game.hasLegalMove();
     const full = san + (check ? (canMove ? '+' : '#') : '');
     sans.push(full);
     fullMoves.push({ from: m.from, to: m.to, flags: m.flags, promo: m.promo || 0, q: m.q || 0 });
+    if (mode === 'gamble') { const fm = fullMoves[fullMoves.length - 1]; fm.nx = m.nx; fm.mc = mover; }
     viewPly = sans.length;
     ratings[fullMoves.length - 1] = bookMove ? 'book' : null;
     if (clock && !bots) clock[mover] += clock.inc;
@@ -1125,16 +1451,22 @@
     const h = game.history[game.history.length - 1];
     if (h.wasSecretMove) popReveal(m.to);
     renderMoves(sans, sans.length);
-    fx(!canMove && check ? 'win' : check ? 'check' : h.captured || h.epCaptured ? 'capture' : m.flags === 4 || m.flags === 8 ? 'castle' : 'move');
+    fx(!canMove && check ? 'win' : gcheck ? 'check' : h.captured || h.epCaptured || (h.sn && h.sn.eaten.length) ? 'capture' : m.flags === 4 || m.flags === 8 ? 'castle' : 'move');
+    if (h.sn) animateSnails(h, false);
 
     let end = null;
-    if (!canMove) end = check ? 'mate' : 'stalemate';
-    else if (insufficientMaterial()) end = 'material';
+    if (game.snailKilled) end = 'snail';
+    else if (game.kingTaken) end = 'king';
+    else if (!canMove) end = check ? 'mate' : 'stalemate';
+    else if (!isTwist() && insufficientMaterial()) end = 'material';
     else if (game.halfmove >= 100) end = 'fifty';
     else if (posKeys.filter((k) => k === posKeys[viewPly]).length >= 3) end = 'repeat';
 
     if (end) { endGame(end, mover); clearSession(); }
-    else { saveSession(); updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
+    else if (mode === 'guess') {
+      saveSession(); updateStatus(); maybeAI();
+      if (!ai && !bots) setTimeout(() => guessHandoff(game.turn), 500);   // hand the device over
+    } else { saveSession(); updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
   }
 
   function showPromotion(move) {
@@ -1165,12 +1497,14 @@
   function endGame(type, mover) {
     phase = 'over';
     clearTimeout(flipTimer);
-    const why = { stalemate: 'Stalemate', material: 'Insufficient material', fifty: '50-move rule', repeat: 'Threefold repetition' };
-    const winner = type === 'mate' || type === 'resign' || type === 'time' ? mover : null;   // mover = the side that won (or that gave the mate)
+    const why = { stalemate: 'Stalemate', material: 'Insufficient material', fifty: '50-move rule', repeat: 'Threefold repetition', snail: 'Both snails reached a king' };
+    let winner = type === 'mate' || type === 'resign' || type === 'time' ? mover : null;   // mover = the side that won (or that gave the mate)
+    if (type === 'king') winner = game.kingTaken === WHITE ? BLACK : WHITE;
+    if (type === 'snail') winner = game.snailKilled === 24 ? null : game.snailKilled === WHITE ? BLACK : WHITE;   // the side whose snail reached its king loses
     const loser = winner === WHITE ? BLACK : WHITE;
     if (type === 'resign') resigned = loser;
     over = winner != null
-      ? { title: nameOf(winner) + ' wins', sub: type === 'mate' ? 'Checkmate' : type === 'resign' ? nameOf(loser) + ' forfeited' : nameOf(loser) + ' ran out of time', result: winner === WHITE ? '1-0' : '0-1' }
+      ? { title: nameOf(winner) + ' wins', sub: type === 'mate' ? 'Checkmate' : type === 'snail' ? nameOf(loser) + "'s snail reached their king" : type === 'king' ? nameOf(loser) + "'s king was captured" : type === 'resign' ? nameOf(loser) + ' forfeited' : nameOf(loser) + ' ran out of time', result: winner === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
     const lb = type === 'mate' && !startFen ? recordWin(mover) : null;
     const Pf = window.LP.profile;
@@ -1187,12 +1521,13 @@
     updateControls();
     overStatus();
     fx(winner == null ? 'draw' : ai && !bots && winner !== ai.human ? 'lose' : 'win');
-    if (window.LP.history && fullMoves.length) { try { const d = buildReplayData(); window.LP.history.add({ kind: 'chess', id: d.id, mode: d.mode2 || mode, modeLabel: startFen ? 'Custom position' : MODE_LABEL[mode], names: d.names, level: d.level, bots: !!bots, human: d.human, result: d.result, winner: d.winner, dur: Math.round((Date.now() - (playStart || Date.now())) / 1000) || 0, moves: Math.ceil(fullMoves.length / 2), timed: !!clock, payload: d }); } catch (e) { /* history is best effort */ } }
+    if (window.LP.history && fullMoves.length) { try { const d = buildReplayData(); window.LP.history.add({ kind: 'chess', id: d.id, mode: d.mode2 || mode, modeLabel: startFen && mode !== 'guess' ? 'Custom position' : MODE_LABEL[mode], names: d.names, level: d.level, bots: !!bots, human: d.human, result: d.result, winner: d.winner, dur: Math.round((Date.now() - (playStart || Date.now())) / 1000) || 0, moves: Math.ceil(fullMoves.length / 2), timed: !!clock, payload: d }); } catch (e) { /* history is best effort */ } }
+    const revealMs = mode === 'guess' ? guessReveal() : 0;
     setTimeout(() => {
       if (phase !== 'over' || !sheetBg.classList.contains('hidden')) return;
       if (lb && lb.isBest && window.LP.board) window.LP.board.askName(lb.entry, () => { if (phase === 'over') showOverSheet(); }, 'Your fastest win so far. Choose the name for the leaderboard.');
       else showOverSheet();
-    }, type === 'resign' ? 200 : 800);
+    }, (type === 'resign' ? 200 : 800) + revealMs);
   }
 
   /** Give up the game: the other side wins. */
@@ -1233,15 +1568,15 @@
   }
 
   function showOverSheet() {
-    const tas = isTas();
+    const tas = isTas(), noAn = tas || isTwist();
     openSheet(`<h2>${esc(over.title)}<span class="sub">${esc(over.sub)}</span></h2>
       <div class="stack">
-        ${tas ? '' : '<button class="btn primary" id="ov-analyze">Analyze game</button>'}
+        ${noAn ? '' : '<button class="btn primary" id="ov-analyze">Analyze game</button>'}
         ${exportable() ? '<button class="btn" id="ov-export">Export match</button>' : ''}
         <div class="row"><button class="btn" id="ov-new">Rematch</button><button class="btn" id="ov-close">Close</button></div>
       </div>
       ${over.elo ? `<p class="elo-line ${over.elo.delta >= 0 ? 'up' : 'down'}"><span>${MODE_LABEL[mode]} rating</span><b>${over.elo.after}</b><em>${over.elo.delta >= 0 ? '+' : '\u2212'}${Math.abs(over.elo.delta)}</em></p>` : ''}
-      <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${tas ? 'TAS is a sandbox, so it is not saved or analysed.' : 'Analyzing saves the game. You can open it again any time from Analyze in the Train section.'}</p>`);
+      <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${tas ? 'TAS is a sandbox, so it is not saved or analysed.' : isTwist() ? MODE_LABEL[mode] + ' games are saved in History, but Analyze does not support them.' : 'Analyzing saves the game. You can open it again any time from Analyze in the Train section.'}</p>`);
     const an = $('#ov-analyze');
     if (an) an.onclick = () => {
       const data = buildReplayData();
@@ -1279,6 +1614,7 @@
       winner: over && over.result === '1-0' ? 'w' : over && over.result === '0-1' ? 'b' : null,
       clock: clock ? { base: clock.base, inc: clock.inc } : null,
       fen: startFen || null,
+      gfirst: gFirst || null,
       at: clock ? moveAt.slice() : null, clk: clock ? moveClk.slice() : null,
       endAt: clock && playStart ? Date.now() - playStart : null,
     };
@@ -1300,11 +1636,12 @@
   /* Two-player and computer games: undo / redo only move the view, nobody can play until it is back at
      the latest move. TAS: undo / redo are real, and playing from an earlier point drops the old future. */
   function navigate(dir) {
+    if (mode === 'guess') return;
     if ((phase !== 'play' && phase !== 'over') || aiBusy) return;
     const target = viewPly + dir;
     if (target < 0 || target > fullMoves.length || target === viewPly) return;
-    let m = null;
-    while (viewPly > target) { m = fullMoves[viewPly - 1]; game.unmakeMove(); viewPly--; }
+    let m = null, undone = null;
+    while (viewPly > target) { m = fullMoves[viewPly - 1]; undone = game.history[game.history.length - 1]; game.unmakeMove(); viewPly--; }
     while (viewPly < target) { m = fullMoves[viewPly]; game.makeMove(m); viewPly++; }
     closeSheet();
     hintMoves = [];
@@ -1315,8 +1652,10 @@
     phase = atLive && over ? 'over' : 'play';
     renderAll();
     animateMove(m, dir < 0);
+    if (dir < 0) animateSnails(undone, true);
     const h = game.history[game.history.length - 1];
     if (dir > 0 && h && h.wasSecretMove) popReveal(m.to);
+    if (dir > 0) animateSnails(h, false);
     renderMoves(sans, viewPly);
     if (phase === 'over') overStatus(); else updateStatus();
     saveSession();
@@ -1419,6 +1758,7 @@
     rgame.mode = data.mode;
     rgame.reset();
     if (data.fen) rgame.loadFen(data.fen);
+    if (data.gfirst) rgame.turn = data.gfirst;
     rgame.secretQueen = { [WHITE]: data.secrets.w, [BLACK]: data.secrets.b };
     G = rgame;
     viewNames = { [WHITE]: data.names.w, [BLACK]: data.names.b };
@@ -1446,7 +1786,8 @@
     if (idx === 0) { setStatus('Start position', 'dim'); return; }
     if (idx === data.moves.length && data.result) { setStatus(data.result); return; }
     const check = G.inCheck(G.turn);
-    setStatus(`Move ${Math.ceil(idx / 2)} · ${fmt(data.sans[idx - 1])}${replay.timed ? ' · ' + mmss(replay.t) : ''}`, check ? 'check' : '');
+    const snl = G.mode === 'snail' ? snailLine(G.history[G.history.length - 1]) : '';
+    setStatus(`${snl}Move ${Math.ceil(idx / 2)} · ${fmt(data.sans[idx - 1])}${replay.timed ? ' · ' + mmss(replay.t) : ''}`, check ? 'check' : '');
   }
   const mmss = (ms) => { const t = Math.floor(ms / 1000); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 
@@ -1479,7 +1820,7 @@
     const cur = replay.idx;
     if (replay.timed && !keepT) replay.t = n ? data.at[n - 1] : 0;
     if (n === cur) { if (replay.timed) { renderBars(); syncReplayUI(); } return; }
-    let animated = null, reverse = false;
+    let animated = null, reverse = false, undoneH = null;
     while (replay.idx < n) {
       const m = data.moves[replay.idx];
       rgame.makeMove(m);
@@ -1487,7 +1828,8 @@
       animated = m;
     }
     while (replay.idx > n) {
-      animated = rgame.history[rgame.history.length - 1].move;
+      undoneH = rgame.history[rgame.history.length - 1];
+      animated = undoneH.move;
       rgame.unmakeMove();
       replay.idx--;
       reverse = true;
@@ -1497,6 +1839,7 @@
       animateMove(animated, reverse);
       const h = rgame.history[rgame.history.length - 1];
       if (!reverse && h && h.wasSecretMove) popReveal(animated.to);
+      if (reverse) animateSnails(undoneH, true); else animateSnails(h, false);
     }
     renderMoves(data.sans, n);
     replayStatus();

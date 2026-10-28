@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=38">
+  <link rel="stylesheet" href="styles.css?v=41">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -92,6 +92,30 @@
             <span class="mode-text">
               <span class="mode-name">Secret Queen</span>
               <span class="mode-desc">Every player hides a secret in their army.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="snail" style="--accent:#9bd36b">
+            <span class="mode-ic" aria-hidden="true"><i class="ic-snail"></i></span>
+            <span class="mode-text">
+              <span class="mode-name">Immortal Snail</span>
+              <span class="mode-desc">A snail hunts each king. You can't stop it.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="gamble" style="--accent:#e5b93c">
+            <span class="mode-ic" aria-hidden="true"><i class="ic-dice"></i></span>
+            <span class="mode-text">
+              <span class="mode-name">Gamblite Chess</span>
+              <span class="mode-desc">Every turn is rolled. Move twice and the odds turn on you.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
+          <button class="mode" data-mode="guess" style="--accent:#c9a0ff">
+            <span class="mode-ic" aria-hidden="true"><i class="ic-guess"></i></span>
+            <span class="mode-text">
+              <span class="mode-name">Guess Who Chess</span>
+              <span class="mode-desc">You can't see their pieces. Arrange yours, bluff, guess.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
@@ -262,10 +286,23 @@
         <div class="panel">
           <div id="status" class="status">&nbsp;</div>
           <div id="rating-line" class="rating-line hidden"></div>
+          <button id="snail-info" class="snail-info hidden" type="button" aria-label="Immortal Snail rules"></button>
+          <button id="odds" class="odds hidden" type="button" aria-label="Gamblite odds and rules">
+            <span class="od-top"><span class="od-t">Next roll</span><span id="od-roll" class="od-roll"></span></span>
+            <span class="od-bar"><i id="od-w" class="od-w"><b id="od-wp">50%</b></i><i id="od-b" class="od-b"><b id="od-bp">50%</b></i></span>
+            <span id="od-hint" class="od-hint"></span>
+          </button>
 
           <!-- secret queen pick bar -->
           <div id="pick-bar" class="pick-bar hidden">
             <button id="pick-confirm" class="btn primary" disabled>Confirm</button>
+          </div>
+
+          <!-- Guess Who: arrange your pieces -->
+          <div id="arr-bar" class="arr-bar hidden">
+            <button id="arr-std" class="btn">Standard</button>
+            <button id="arr-rnd" class="btn">Shuffle</button>
+            <button id="arr-ok" class="btn primary">Done</button>
           </div>
 
           <!-- live game controls -->
@@ -487,18 +524,19 @@
     </div>
   </div>
 
-  <script src="chess.js?v=25"></script>
-  <script src="ai.js?v=31"></script>
-  <script src="app.js?v=30"></script>
+  <script src="chess.js?v=27"></script>
+  <script src="ai.js?v=34"></script>
+  <script src="guessbot.js?v=1"></script>
+  <script src="app.js?v=33"></script>
   <script src="export.js?v=2"></script>
   <script src="prefs.js?v=1"></script>
-  <script src="history.js?v=3"></script>
-  <script src="saves.js?v=1"></script>
+  <script src="history.js?v=6"></script>
+  <script src="saves.js?v=4"></script>
   <script src="leaderboard.js?v=30"></script>
   <script src="profile.js?v=24"></script>
   <script src="hats.js?v=2"></script>
   <script src="shop.js?v=35"></script>
-    <script src="stats.js?v=29"></script>
+    <script src="stats.js?v=32"></script>
   <script src="rush.js?v=25"></script>
   <script src="puzzlegen.js?v=30"></script>
   <script src="ratings.js?v=30"></script>

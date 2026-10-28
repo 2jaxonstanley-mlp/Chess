@@ -42,7 +42,12 @@ class Chess {
     this.history = [];
     this.secretQueen = { [WHITE]: -1, [BLACK]: -1 }; // square of secret queen (still disguised)
     this.revealed = { [WHITE]: false, [BLACK]: false };
-    this.mode = 'basic'; // 'basic' | 'secret'
+    this.mode = 'basic'; // 'basic' | 'secret' | 'snail' | 'gamble'
+    this.snW = -1;       // Immortal Snail: square of White's snail (it hunts White's king), -1 when there are no snails
+    this.snB = -1;       // ... and of Black's snail (it hunts Black's king)
+    this.pW = 50;        // Gamblite: the chance (%) White had of getting the turn at the last roll
+    this.kingTaken = 0;  // Gamblite: the colour whose king was captured (there is no check, a king is simply taken)
+    this.snailKilled = 0; // a snail reached a king: WHITE / BLACK = that side lost, WHITE|BLACK = both kings reached at once
     this.reset();
   }
 
@@ -63,6 +68,60 @@ class Chess {
     this.history = [];
     this.secretQueen = { [WHITE]: -1, [BLACK]: -1 };
     this.revealed = { [WHITE]: false, [BLACK]: false };
+    this.pW = 50;
+    this.kingTaken = 0;
+    // Immortal Snail: both snails start on the d-file in the middle (White's on d4, Black's on d5)
+    this.snailKilled = 0;
+    if (this.mode === 'snail') { this.snW = sq(3, 3); this.snB = sq(3, 4); }
+    else { this.snW = -1; this.snB = -1; }
+  }
+
+  /** Is a snail standing on this square? Snails are solid: nothing can land on them, pass through them or capture them. */
+  snailAt(s) { return s === this.snW || s === this.snB; }
+
+  /** Full moves left (counting the one being played) until the snails step: they move after Black's move 3, 6, 9... */
+  snailMoveNo() { return Math.ceil(this.fullmove / 3) * 3; }
+
+  /** One step of a snail towards a king: the most direct path, diagonal while it is off both the king's file and rank. */
+  _snailStep(from, king) {
+    const df = Math.sign(fileOf(king) - fileOf(from)), dr = Math.sign(rankOf(king) - rankOf(from));
+    return from + dr * 16 + df;
+  }
+
+  /** Where each snail will step next (or -1): { [WHITE]: square, [BLACK]: square }. */
+  snailNext() {
+    const out = { [WHITE]: -1, [BLACK]: -1 };
+    if (this.mode !== 'snail') return out;
+    const wk = this.kingSquare(WHITE), bk = this.kingSquare(BLACK);
+    if (this.snW >= 0 && wk >= 0 && this.snW !== wk) out[WHITE] = this._snailStep(this.snW, wk);
+    if (this.snB >= 0 && bk >= 0 && this.snB !== bk) out[BLACK] = this._snailStep(this.snB, bk);
+    return out;
+  }
+
+  /** The snails move one tile. Any piece on the new tile is eaten; a king on it loses. Records what happened in hist so it can be undone. */
+  _snailTick(hist) {
+    const nx = this.snailNext();
+    hist.sn = { w: this.snW, b: this.snB, kill: this.snailKilled, eaten: [] };
+    let killed = this.snailKilled;
+    for (const c of [WHITE, BLACK]) {
+      const to = nx[c];
+      if (to < 0) continue;
+      if (c === WHITE) this.snW = to; else this.snB = to;
+      const p = this.board[to];
+      if (!p) continue;
+      if ((p & TYPE_MASK) === KING) { killed |= (p & COLOR_MASK); continue; }   // the king is not removed, the game just ends
+      hist.sn.eaten.push([to, p]);
+      this.board[to] = EMPTY;
+      this.halfmove = 0;
+      this.ep = -1;
+      if (to === sq(0,0)) this.castling &= ~0b0010;
+      else if (to === sq(7,0)) this.castling &= ~0b0001;
+      else if (to === sq(0,7)) this.castling &= ~0b1000;
+      else if (to === sq(7,7)) this.castling &= ~0b0100;
+    }
+    this.snailKilled = killed;
+    hist.sn.nw = this.snW; hist.sn.nb = this.snB;   // where they ended up (for the slide animation)
+    if (this.ep >= 0 && this.snailAt(this.ep)) this.ep = -1;
   }
 
   pieceAt(s) { return this.board[s]; }
@@ -128,6 +187,7 @@ class Chess {
     for (const d of BISHOP_DIRS) {
       let s = sqTarget + d;
       while (!(s & 0x88)) {
+        if (s === this.snW || s === this.snB) break;
         const p = this.board[s];
         if (p) {
           const t = this.typeOf(p);
@@ -146,6 +206,7 @@ class Chess {
     for (const d of ROOK_DIRS) {
       let s = sqTarget + d;
       while (!(s & 0x88)) {
+        if (s === this.snW || s === this.snB) break;
         const p = this.board[s];
         if (p) {
           const t = this.typeOf(p);
@@ -163,10 +224,22 @@ class Chess {
     return false;
   }
 
-  inCheck(color) {
+  /** Is this side's king attacked right now? (always real, even in Gamblite) */
+  kingAttacked(color) {
     const k = this.kingSquare(color);
     if (k < 0) return false;
     return this.attacked(k, color === WHITE ? BLACK : WHITE);
+  }
+
+  /** Check. In Gamblite there is no check: the king can be left attacked, and capturing it wins. */
+  inCheck(color) {
+    if (this.mode === 'gamble') return false;
+    return this.kingAttacked(color);
+  }
+
+  /** Gamblite: the chance (%) White gets the next turn once `mover` has just moved. Every move shifts 5 points against the mover, kept between 5 and 95. */
+  oddsAfter(mover) {
+    return Math.max(5, Math.min(95, this.pW + (mover === WHITE ? -5 : 5)));
   }
 
   /** Generate pseudo-legal moves for a piece at s (ignoring self-check) */
@@ -194,6 +267,7 @@ class Chess {
 
     const add = (to, flags = 0) => {
       if (to & 0x88) return;
+      if (to === this.snW || to === this.snB) return;   // a snail is a wall
       const target = this.board[to];
       if (target && this.colorOf(target) === col) return;
       moves.push({ from: s, to, flags, promo: 0 });
@@ -205,7 +279,7 @@ class Chess {
       const promoRank = col === WHITE ? 7 : 0;
       // forward
       let to = s + dir;
-      if (!(to & 0x88) && !this.board[to]) {
+      if (!(to & 0x88) && !this.board[to] && to !== this.snW && to !== this.snB) {
         if (rankOf(to) === promoRank) {
           for (const pr of [QUEEN, ROOK, BISHOP, KNIGHT]) {
             moves.push({ from: s, to, flags: 0, promo: pr });
@@ -214,7 +288,7 @@ class Chess {
           add(to);
           if (rankOf(s) === startRank) {
             const to2 = s + dir * 2;
-            if (!this.board[to2]) add(to2, 1); // double push flag
+            if (!this.board[to2]) add(to2, 1); // double push flag (add() refuses a snail's square)
           }
         }
       }
@@ -228,7 +302,7 @@ class Chess {
               moves.push({ from: s, to, flags: 0, promo: pr });
             }
           } else add(to);
-        } else if (to === this.ep) {
+        } else if (to === this.ep && to !== this.snW && to !== this.snB) {
           moves.push({ from: s, to, flags: 2, promo: 0 }); // en passant
         }
       }
@@ -236,23 +310,26 @@ class Chess {
       for (const d of KNIGHT_DELTAS) add(s + d);
     } else if (type === KING) {
       for (const d of KING_DELTAS) add(s + d);
-      // Castling
+      // Castling (a snail on a square in between blocks it)
+      const fr = (q) => !this.board[q] && q !== this.snW && q !== this.snB;
+      const safe = this.mode === 'gamble';   // no check in Gamblite, so castling may pass through attacked squares
+      const att = (q, by) => !safe && this.attacked(q, by);
       if (col === WHITE) {
-        if ((this.castling & 1) && !this.board[sq(5,0)] && !this.board[sq(6,0)] &&
-            !this.attacked(sq(4,0), BLACK) && !this.attacked(sq(5,0), BLACK) && !this.attacked(sq(6,0), BLACK)) {
+        if ((this.castling & 1) && fr(sq(5,0)) && fr(sq(6,0)) &&
+            !att(sq(4,0), BLACK) && !att(sq(5,0), BLACK) && !att(sq(6,0), BLACK)) {
           moves.push({ from: s, to: sq(6,0), flags: 4, promo: 0 }); // O-O
         }
-        if ((this.castling & 2) && !this.board[sq(3,0)] && !this.board[sq(2,0)] && !this.board[sq(1,0)] &&
-            !this.attacked(sq(4,0), BLACK) && !this.attacked(sq(3,0), BLACK) && !this.attacked(sq(2,0), BLACK)) {
+        if ((this.castling & 2) && fr(sq(3,0)) && fr(sq(2,0)) && fr(sq(1,0)) &&
+            !att(sq(4,0), BLACK) && !att(sq(3,0), BLACK) && !att(sq(2,0), BLACK)) {
           moves.push({ from: s, to: sq(2,0), flags: 8, promo: 0 }); // O-O-O
         }
       } else {
-        if ((this.castling & 4) && !this.board[sq(5,7)] && !this.board[sq(6,7)] &&
-            !this.attacked(sq(4,7), WHITE) && !this.attacked(sq(5,7), WHITE) && !this.attacked(sq(6,7), WHITE)) {
+        if ((this.castling & 4) && fr(sq(5,7)) && fr(sq(6,7)) &&
+            !att(sq(4,7), WHITE) && !att(sq(5,7), WHITE) && !att(sq(6,7), WHITE)) {
           moves.push({ from: s, to: sq(6,7), flags: 4, promo: 0 });
         }
-        if ((this.castling & 8) && !this.board[sq(3,7)] && !this.board[sq(2,7)] && !this.board[sq(1,7)] &&
-            !this.attacked(sq(4,7), WHITE) && !this.attacked(sq(3,7), WHITE) && !this.attacked(sq(2,7), WHITE)) {
+        if ((this.castling & 8) && fr(sq(3,7)) && fr(sq(2,7)) && fr(sq(1,7)) &&
+            !att(sq(4,7), WHITE) && !att(sq(3,7), WHITE) && !att(sq(2,7), WHITE)) {
           moves.push({ from: s, to: sq(2,7), flags: 8, promo: 0 });
         }
       }
@@ -264,6 +341,7 @@ class Chess {
       for (const d of dirs) {
         let to = s + d;
         while (!(to & 0x88)) {
+          if (to === this.snW || to === this.snB) break;   // cannot pass through a snail
           if (this.board[to]) {
             if (this.colorOf(this.board[to]) === enemy) add(to);
             break;
@@ -329,6 +407,9 @@ class Chess {
     const captured = this.board[m.to];
     const hist = {
       move: m,
+      mover: col,
+      pW: this.pW,
+      kt: this.kingTaken,
       captured,
       castling: this.castling,
       ep: this.ep,
@@ -369,6 +450,8 @@ class Chess {
       this.board[capSq] = EMPTY;
       if (this.secretQueen[enemy] === capSq) this.secretQueen[enemy] = -1;
     }
+
+    if (this.mode === 'gamble' && captured && (captured & TYPE_MASK) === KING) this.kingTaken = captured & COLOR_MASK;
 
     // Move piece
     this.board[m.to] = this.board[m.from];
@@ -413,7 +496,15 @@ class Chess {
 
     if (col === BLACK) this.fullmove++;
 
-    this.turn = enemy;
+    // Immortal Snail: after Black's 3rd, 6th, 9th... move both snails take one step
+    if (this.mode === 'snail' && col === BLACK && (this.fullmove - 1) % 3 === 0) this._snailTick(hist);
+
+    if (this.mode === 'gamble') {
+      // the next turn is rolled by the caller and passed in as m.nx; searches leave it out and simply alternate
+      this.pW = this.oddsAfter(col);
+      this.turn = m.nx || enemy;
+      if (this.turn !== enemy) this.ep = -1;   // en passant only exists for the side that was just passed
+    } else this.turn = enemy;
     this.history.push(hist);
   }
 
@@ -423,7 +514,13 @@ class Chess {
     const m = hist.move;
     const col = this.colorOf(this.board[m.to]) || (this.turn === WHITE ? BLACK : WHITE);
     // Actually after make, turn has flipped, so the mover is the opposite of current turn
-    const mover = this.turn === WHITE ? BLACK : WHITE;
+    const mover = hist.mover || (this.turn === WHITE ? BLACK : WHITE);
+    this.pW = hist.pW; this.kingTaken = hist.kt;
+
+    if (hist.sn) {   // take the snails back a step and give back whatever they ate
+      for (const [s, p] of hist.sn.eaten) this.board[s] = p;
+      this.snW = hist.sn.w; this.snB = hist.sn.b; this.snailKilled = hist.sn.kill;
+    }
 
     this.castling = hist.castling;
     this.ep = hist.ep;

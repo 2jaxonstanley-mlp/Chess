@@ -38,6 +38,9 @@
   const ZCASTLE2 = new Int32Array(16).map(() => rnd());
   const ZEP = new Int32Array(128).map(() => rnd());
   const ZEP2 = new Int32Array(128).map(() => rnd());
+  const ZSNW = new Int32Array(128).map(() => rnd()), ZSNW2 = new Int32Array(128).map(() => rnd());   // Immortal Snail: where each snail is...
+  const ZSNB = new Int32Array(128).map(() => rnd()), ZSNB2 = new Int32Array(128).map(() => rnd());
+  const ZSNP = new Int32Array(3).map(() => rnd()), ZSNP2 = new Int32Array(3).map(() => rnd());       // ...and how far through the 3-move snail cycle we are
   let hash2 = 0;   // second, independent hash of the position last passed to hashOf (guards against index collisions)
 
   function hashOf(g) {
@@ -49,6 +52,10 @@
       if (p) { const i = p * 128 + s; h ^= Z[i]; k ^= Z2[i]; }
     }
     h ^= ZCASTLE[g.castling]; k ^= ZCASTLE2[g.castling];
+    if (g.mode === 'snail') {
+      const ph = (g.fullmove - 1) % 3;
+      h ^= ZSNW[g.snW & 127] ^ ZSNB[g.snB & 127] ^ ZSNP[ph]; k ^= ZSNW2[g.snW & 127] ^ ZSNB2[g.snB & 127] ^ ZSNP2[ph];
+    }
     if (g.ep >= 0) { h ^= ZEP[g.ep]; k ^= ZEP2[g.ep]; }
     hash2 = k | 0;
     return h | 0;
@@ -336,7 +343,7 @@
     const ph = phase > 24 ? 24 : phase;
     let score = (mg * ph + eg * (24 - ph)) / 24;
 
-    if (F.endg) {
+    if (F.endg && g.mode !== 'snail' && g.mode !== 'gamble') {
       if (pawnsW === 0 && pawnsB === 0) {
         const adv = matW - matB;
         if (matB === 0 && matW <= 335 || matW === 0 && matB <= 335) return 0;
@@ -356,7 +363,48 @@
         score += score > 0 ? k : -k;
       }
     }
+    if (snailW) score += snailW * snailTerm(g, wk, bk);
+    if (g.mode === 'gamble') score += gambleTerm(g);
     return g.turn === WHITE ? score : -score;
+  }
+
+  /**
+   * Immortal Snail evaluation, in centipawns from White's point of view.
+   *  - a king close to its own snail is in danger, more so the sooner the snails step
+   *  - pieces standing on the next few tiles of a snail's path will be eaten (whoever owns them), so they count as partly lost
+   */
+  const SN_DANGER = [900, 330, 100, 45, 20, 8, 0, 0];
+  function snailTerm(g, wk, bk) {
+    if (g.snailKilled) return 0;
+    const fm = g.fullmove, toTick = 2 * (Math.ceil(fm / 3) * 3 - fm) + (g.turn === WHITE ? 2 : 1);   // plies until the snails next step (1..6)
+    const urge = toTick <= 2 ? 1.3 : toTick <= 4 ? 1 : 0.75;
+    let sc = 0;
+    if (wk >= 0 && g.snW >= 0) sc -= SN_DANGER[Math.min(7, kDist(wk, g.snW))] * urge;
+    if (bk >= 0 && g.snB >= 0) sc += SN_DANGER[Math.min(7, kDist(bk, g.snB))] * urge;
+    const WGT = [0.6, 0.3, 0.15];
+    for (let side = 0; side < 2; side++) {
+      let at = side ? g.snB : g.snW;
+      const king = side ? bk : wk;
+      if (at < 0 || king < 0 || at === king) continue;
+      for (let i = 0; i < 3; i++) {
+        at += Math.sign((king >> 4) - (at >> 4)) * 16 + Math.sign((king & 15) - (at & 15));
+        if (at === king) break;
+        const p = g.board[at];
+        if (p && (p & 7) !== 6) { const v = VAL[p & 7] * WGT[i]; sc += (p & 24) === WHITE ? -v : v; }
+      }
+    }
+    return sc;
+  }
+
+  /**
+   * Gamblite evaluation (centipawns, White's point of view). There is no check, so an attacked king is a real danger:
+   * the opponent may get the next turn, or even two in a row. The side that just moved is penalised more than the side to move.
+   */
+  function gambleTerm(g) {
+    let sc = 0;
+    if (g.kingAttacked(WHITE)) sc -= g.turn === WHITE ? 90 : 260;
+    if (g.kingAttacked(BLACK)) sc += g.turn === BLACK ? 90 : 260;
+    return sc;
   }
 
   /* --------------------------------------------------------------------- search */
@@ -366,6 +414,7 @@
   const history = new Int32Array(128 * 128);
   let lastDepth = 0;
   let qRoot = 4;
+  let snailW = 0;   // Immortal Snail: how much this level understands the snails (0 = not at all)
   const pathH = new Int32Array(160);
   let gameHashes = new Map();
   let drawVal = 0;
@@ -437,9 +486,22 @@
     return false;
   }
 
+  /** Immortal Snail: a snail has reached a king. Score for the side to move at this node. */
+  function snailEnd(g, ply) {
+    if (g.snailKilled === 24) return drawScore(ply);
+    return g.snailKilled === g.turn ? -MATE + ply : MATE - ply;
+  }
+
+  /** Gamblite: a king has been captured. Score for the side to move at this node. */
+  function kingEnd(g, ply) {
+    return g.kingTaken === g.turn ? -MATE + ply : MATE - ply;
+  }
+
   function quiesce(g, alpha, beta, qd, ply) {
     tick();
     if (aborted) return 0;
+    if (g.snailKilled) return snailEnd(g, ply);
+    if (g.kingTaken) return kingEnd(g, ply);
     const col = g.turn;
     const inChk = g.inCheck(col);
     let stand = -INF;
@@ -494,6 +556,9 @@
   function negamax(g, depth, alpha, beta, ply, qd, allowNull) {
     tick();
     if (aborted) return 0;
+    if (g.snailKilled) return snailEnd(g, ply);
+    if (g.kingTaken) return kingEnd(g, ply);
+    const snl = snailW > 0 || g.mode === 'gamble';   // Immortal Snail: no speculative pruning, a king step away from a snail can be the only good move
     const col = g.turn;
     const inChk = g.inCheck(col);
     if (inChk && ply < 40) depth++;
@@ -530,9 +595,9 @@
 
     let stat = -INF;
     if (!inChk && depth <= 8 && (F.rfp || F.fut || F.nullv)) stat = evaluate(g);
-    if (F.rfp && !pv && !inChk && depth <= 4 && beta < MATE - 200 && stat - 85 * depth >= beta && hasPieces(g, col)) return stat - 85 * depth;
+    if (F.rfp && !snl && !pv && !inChk && depth <= 4 && beta < MATE - 200 && stat - 85 * depth >= beta && hasPieces(g, col)) return stat - 85 * depth;
 
-    if (allowNull && !inChk && depth >= 3 && beta < MATE - 200 && (!F.nullv || stat >= beta) && hasPieces(g, col)) {
+    if (allowNull && !snl && !inChk && depth >= 3 && beta < MATE - 200 && (!F.nullv || stat >= beta) && hasPieces(g, col)) {
       const ep = g.ep;
       g.turn ^= 24; g.ep = -1;
       const R = depth >= 6 ? 4 : 3;
@@ -542,7 +607,7 @@
       if (sc >= beta) return sc >= MATE - 200 ? beta : sc;
     }
 
-    const futile = F.fut && !pv && !inChk && depth <= 2 && alpha > -MATE + 500 && stat + 110 * depth + 40 <= alpha;
+    const futile = F.fut && !snl && !pv && !inChk && depth <= 2 && alpha > -MATE + 500 && stat + 110 * depth + 40 <= alpha;
     const foe = other(col);
     const moves = order(g, pseudo(g), ply, hashMove);
     let legal = 0, best = -INF, bestKey = 0;
@@ -551,7 +616,7 @@
       g.makeMove(m);
       if (g.inCheck(col)) { g.unmakeMove(); continue; }
       if (quiet && legal > 0 && !inChk && !pv) {
-        const prune = (futile) || (F.lmp && depth <= 3 && legal >= 3 + depth * depth);
+        const prune = (futile) || (F.lmp && !snl && depth <= 3 && legal >= 3 + depth * depth);
         if (prune && !g.inCheck(foe)) { g.unmakeMove(); legal++; continue; }
       }
       let sc;
@@ -608,12 +673,14 @@
       if (s & 0x88) { s += 7; continue; }
       k += String.fromCharCode(48 + g.board[s]);
     }
+    if (g.mode === 'snail') k += 's' + g.snW + ',' + g.snB + ',' + ((g.fullmove - 1) % 3);   // the snails are part of the position
     return k + g.turn + g.castling + g.ep;
   }
 
   function cloneForSearch(g, hideColor) {
     const c = new Chess();
     c.mode = g.mode;
+    c.snW = g.snW; c.snB = g.snB; c.snailKilled = g.snailKilled; c.pW = g.pW; c.kingTaken = g.kingTaken;
     c.board.set(g.board);
     c.turn = g.turn;
     c.castling = g.castling;
@@ -633,6 +700,7 @@
     const m = new Map();
     try {
       const r = new Chess();
+      r.mode = g.mode; r.reset();
       m.set(hashOf(r), 1);
       for (const h of g.history) { r.makeMove(h.move); const k = hashOf(r); m.set(k, (m.get(k) || 0) + 1); }
     } catch (e) { m.clear(); }
@@ -642,6 +710,7 @@
   /** Reset the per-search state; c is the private copy being searched, color the side to move. */
   function prepare(g, c, cfg) {
     qRoot = cfg.q || 0;
+    snailW = g.mode === 'snail' ? (cfg.snail == null ? 1 : cfg.snail) : 0;
     ttAge = (ttAge + 1) & 255;
     history.fill(0);
     killers.forEach((k) => { k[0] = 0; k[1] = 0; });
@@ -697,12 +766,12 @@
 
   const LEVELS = {
     dumb:    { worst: true },
-    easy:    { maxDepth: 1, time: 300,  q: 0, noise: 120, blunder: 0.18 },
-    medium:  { maxDepth: 2, time: 500,  q: 1, noise: 90,  blunder: 0.10 },        // about an average club beginner, roughly 1000
-    hard:    { maxDepth: 3, time: 700,  q: 2, noise: 40,  blunder: 0.03, book: true },  // a solid improving player, roughly 1500
-    insane:  { maxDepth: 30, time: 1800, q: 8, noise: 0,  blunder: 0, book: true, polish: true },   // plays book lines, then double-checks its move so it avoids labelled mistakes and goes for brilliant/best moves
+    easy:    { maxDepth: 1, time: 300,  q: 0, noise: 120, blunder: 0.18, snail: 0.35 },
+    medium:  { maxDepth: 2, time: 500,  q: 1, noise: 90,  blunder: 0.10, snail: 0.65 },        // about an average club beginner, roughly 1000
+    hard:    { maxDepth: 3, time: 700,  q: 2, noise: 40,  blunder: 0.03, book: true, snail: 0.95 },  // a solid improving player, roughly 1500
+    insane:  { maxDepth: 30, time: 1800, q: 8, noise: 0,  blunder: 0, book: true, polish: true, snail: 1.2 },   // plays book lines, then double-checks its move so it avoids labelled mistakes and goes for brilliant/best moves
     // Godly: searches 5 full moves (10 plies), keeps its 3 best moves and picks one at random 3/6, 2/6, 1/6
-    godly:   { maxDepth: 14, time: 2600, q: 8, noise: 0,  blunder: 0, multi: 5, pick: 3, weights: [3, 2, 1], castle: 120, guard: true, window: 70, mate: true },
+    godly:   { maxDepth: 14, time: 2600, q: 8, noise: 0,  blunder: 0, snail: 1.2, multi: 5, pick: 3, weights: [3, 2, 1], castle: 120, guard: true, window: 70, mate: true },
     hint:    { maxDepth: 30, time: 2200, q: 8, noise: 0,  blunder: 0, multi: 3, pick: 3 },   // TAS: the 3 best moves
   };
   window.__aiLevels = LEVELS;
@@ -771,7 +840,7 @@
       let list = top.map((t) => ({ m: t.m, sc: t.sc }));
       let castle = null;
       const isCastle = (m) => m.flags === 4 || m.flags === 8;
-      if (cfg.castle && list.length && list[0].sc < MATE - 100 && !list.some((t) => isCastle(t.m))) {
+      if (cfg.castle && g.mode !== 'snail' && g.mode !== 'gamble' && list.length && list[0].sc < MATE - 100 && !list.some((t) => isCastle(t.m))) {
         // castling didn't make the shortlist: score it separately so it still gets considered
         const cm = rootMoves.find(isCastle);
         if (cm) {
@@ -783,7 +852,7 @@
           aborted = false;
         }
       }
-      if (cfg.castle && list.length && list[0].sc < MATE - 100) {
+      if (cfg.castle && g.mode !== 'snail' && g.mode !== 'gamble' && list.length && list[0].sc < MATE - 100) {   // (no forced castling with snails: the king needs room to run)
         // castle whenever it is possible and doesn't cost more than `cfg.castle` centipawns against the best line
         castle = list.find((t) => (t.m.flags === 4 || t.m.flags === 8) && t.sc >= list[0].sc - cfg.castle) || null;
       }
@@ -898,7 +967,7 @@
         const all = g.legalMoves();
         out = all.length ? all[Math.floor(Math.random() * all.length)] : null;
       }
-      if (out && cfg.polish) out = polish(g, out);
+      if (out && cfg.polish && g.mode !== 'snail' && g.mode !== 'gamble') out = polish(g, out);   // (the move-strength labels know nothing about snails)
       cb(out);
     };
 
@@ -909,7 +978,7 @@
       multiSearch(g, cfg, color, seen, (list) => {
         if (!list.length) { finish(null); return; }
         const best = list[0].score;
-        let pool = list.filter((t, i) => i === 0 || cfg.window == null || t.score >= best - cfg.window);
+        let pool = list.filter((t, i) => i === 0 || cfg.window == null || t.score >= best - (g.mode === 'snail' ? Math.min(cfg.window, 25) : cfg.window));
         if (best > MATE - 100 || list[0].forced) pool = [list[0]];            // a forced mate is always played
         const w = pool.map((t, i) => (cfg.weights && cfg.weights[i]) || 1);
         let r = Math.random() * w.reduce((a, b) => a + b, 0), pick = pool[0];
@@ -1072,6 +1141,26 @@
     const spots = [];
     for (let f = 0; f < 8; f++) { spots.push(sq(f, front)); if (f !== 3 && f !== 4) spots.push(sq(f, back)); }
     return spots[Math.floor(Math.random() * spots.length)];
+  };
+
+  /**
+   * Guess Who Chess: score every legal move of position g with a fixed-depth search (no iterative deepening, no pruning of the root).
+   * Returns [{ m, sc }] from the side to move's point of view. Stops early (returning what it has) when `ms` runs out.
+   */
+  window.AIScoreAll = function (g, depth, ms, q) {
+    const c = cloneForSearch(g, 0);
+    const root = c.legalMoves();
+    prepare(g, c, { q: q == null ? 2 : q });
+    deadline = now() + (ms || 300); nodes = 0; aborted = false;
+    const out = [];
+    for (const m of order(c, root, 0, 0)) {
+      c.makeMove(m);
+      const sc = -negamax(c, Math.max(0, depth - 1), -INF, INF, 1, q == null ? 2 : q, true);
+      c.unmakeMove();
+      if (aborted) break;
+      out.push({ m, sc });
+    }
+    return out;
   };
 
   window.positionKey = boardKey;
