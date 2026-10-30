@@ -80,6 +80,11 @@
   let arrTypes = [];           // ... the one being edited right now
   let arrColor = 0;
   let gFirst = 0;              // Gamblite: the side the opening roll gave the first move to
+  let marks = { [WHITE]: {}, [BLACK]: {} };   // Guess Who: each side's private colour marks on enemy squares (square -> 'r' | 'b' | 'g' | 'y')
+  let markTool = '';           // Guess Who: the colour picked in the palette ('' = none, 'x' = rub out)
+  let gwStage = '';            // Guess Who: '' normal | 'guesspick' choosing the enemy piece to guess
+  let gwLast = '';             // Guess Who: what happened last (a question and its answer), shown to the next player
+  let pendingBotGuess = -1;    // Guess Who: the square the computer will guess after the move it is making
   let spawnSel = 0;            // Chess Royale: the piece type picked in the spawn tray (0 = none)
   let fsPlan = { [WHITE]: null, [BLACK]: null };   // Foresight: each side's secret planned move { from, to, promo }
   let fsStage = '';            // Foresight: '' idle | 'wait' a pause between steps | 'cover' a hand-off cover is up | 'plan' a human is choosing their plan | 'bot' the computer is planning
@@ -414,7 +419,7 @@
       const lm = legalSet.get(s);
       el.classList.toggle('legal', !!lm);
       el.classList.toggle('capture', !!lm && (!!p || lm.flags === 2));
-      el.classList.toggle('pickable', picking && !!p && (p & 24) === pickColor && (p & 7) !== KING && (p & 7) !== QUEEN);
+      el.classList.toggle('pickable', picking && !!p && (p & 24) === pickColor && (G.mode === 'guess' || ((p & 7) !== KING && (p & 7) !== QUEEN)));
       el.classList.toggle('secret', (phase === 'replay' && G.isSecretDisguised(s)) || s === qSq);
       const hf = hintMoves.some((m) => m.from === s), ht = hintMoves.some((m) => m.to === s);
       el.classList.toggle('hint-from', hf);
@@ -442,6 +447,12 @@
       let pe = el._piece;
       const hide = guessHide && !!p && (viewSide === -1 || (p & 24) !== viewSide) && !revealSet.has(s);
       const code = hide ? p + 1000 : p;
+      if (G.mode === 'guess') {   // the selected pieces: yours always, both at the end and in replays; and your colour marks on their pieces
+        const isSel = s === G.secretQueen[WHITE] || s === G.secretQueen[BLACK];
+        const mine = !!p && viewSide > 0 && (p & 24) === viewSide && phase !== 'replay';
+        el.classList.toggle('selpiece', isSel && !!p && (phase === 'replay' || (phase === 'over' && !hide) || (phase !== 'over' && mine) || (picking && mine)));
+        el.dataset.mk = guessHide && viewSide > 0 && p && (p & 24) !== viewSide ? (marks[viewSide][s] || '') : '';
+      } else if (el.classList.contains('selpiece')) { el.classList.remove('selpiece'); el.dataset.mk = ''; }
       if (!p) {
         if (pe) { pe.remove(); el._piece = null; el._code = 0; }
       } else if (el._code !== code) {
@@ -501,6 +512,7 @@
   }
 
   function animateMove(m, reverse) {
+    if (m.ask) return;
     if (m.spawn) { if (!reverse) popReveal(m.to); return; }
     const pairs = [[m.from, m.to]];
     if (m.flags === 4 || m.flags === 8) {
@@ -628,7 +640,6 @@
   function renderMoves(list, cur) {
     moveListEl.innerHTML = '';
     let pair = null;
-    if (mode === 'guess' && phase !== 'replay') list = list.map((_, i) => guessText(i));
     if (phase === 'replay' ? !!(replay && replay.data.mode === 'gamble') : mode === 'gamble') {
       // turns are rolled, so moves do not alternate: show them one by one in the colour of whoever played them
       const src = phase === 'replay' ? replay.data.moves : fullMoves;
@@ -782,6 +793,7 @@
     renderOdds();
     renderRoyale();
     renderForesight();
+    renderGuessBar();
   }
 
   /* ------------------------------------------------------------- menu/start */
@@ -888,6 +900,7 @@
     if (startFen) { if (game.loadFen(startFen)) startFen = null; else game.problems(); }
     clearInterval(revealTimer); revealSet = new Set(); revealAll = false; viewSide = 0; arrs = {};
     gFirst = 0;
+    marks = { [WHITE]: {}, [BLACK]: {} }; markTool = ''; gwStage = ''; gwLast = ''; pendingBotGuess = -1;
     spawnSel = 0; fsPlan = { [WHITE]: null, [BLACK]: null }; fsStage = ''; fsWho = 0; fsNeed = 0; fsDraft = null;
     if (m === 'gamble' && !startFen) { gFirst = Math.random() < 0.5 ? WHITE : BLACK; game.turn = gFirst; }   // even the first turn is a 50/50 roll
     G = game;
@@ -955,6 +968,7 @@
       moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
       clock: clock ? { w: clock[WHITE], b: clock[BLACK], inc: clock.inc, base: clock.base } : null,
       fen: startFen, at: moveAt.slice(), clk: moveClk.slice(), gfirst: gFirst || null,
+      gw: mode === 'guess' ? { marks: { w: marks[WHITE], b: marks[BLACK] }, last: gwLast } : null,
       fs: mode === 'foresight' ? { plan: { w: fsPlan[WHITE], b: fsPlan[BLACK] }, need: fsNeed } : null,
     });
   }
@@ -985,6 +999,7 @@
     viewPly = fullMoves.length;
     while (viewPly > d.viewPly) { game.unmakeMove(); viewPly--; }
     playBoth = !!d.playBoth;
+    if (d.gw) { marks = { [WHITE]: d.gw.marks.w || {}, [BLACK]: d.gw.marks.b || {} }; gwLast = d.gw.last || ''; }
     if (d.fs) { fsPlan = { [WHITE]: d.fs.plan.w || null, [BLACK]: d.fs.plan.b || null }; fsNeed = d.fs.need || 0; }
     if (d.clock) { clock = { [WHITE]: d.clock.w, [BLACK]: d.clock.b, inc: d.clock.inc, base: d.clock.base }; pendingTc = { base: d.clock.base / 1000, inc: d.clock.inc / 1000 }; } else clock = null;
     sidesCtx = ai ? { [ai.human === WHITE ? 'w' : 'b']: 'p1', [ai.human === WHITE ? 'b' : 'w']: 'p2' } : { w: 'p1', b: 'p2' };
@@ -1205,9 +1220,16 @@
     startFen = arrFen();
     game.loadFen(startFen);
     game.problems();
-    viewSide = bots ? 0 : ai ? ai.human : -1;
-    beginPlay();
-    if (!ai && !bots) guessHandoff(game.turn);
+    game.castling = 0;
+    if (bots) {   // two computers: each picks a piece at random
+      game.secretQueen[WHITE] = window.GuessBot.select(game, WHITE);
+      game.secretQueen[BLACK] = window.GuessBot.select(game, BLACK);
+      initialSecrets = { [WHITE]: game.secretQueen[WHITE], [BLACK]: game.secretQueen[BLACK] };
+      viewSide = 0;
+      beginPlay();
+      return;
+    }
+    pickHandoff(ai ? ai.human : WHITE);   // each player secretly selects one of their own pieces
   }
 
   /** The cover between turns in a two-player game: the board stays hidden until the next player says they are ready. */
@@ -1217,7 +1239,7 @@
     selected = -1; legalTargets = [];
     const other = color === WHITE ? BLACK : WHITE;
     coverEl.innerHTML = `<h2>${esc(nameOf(color))}, take your turn</h2>
-      <p>${esc(nameOf(other))}, look away.</p>
+      <p>${esc(nameOf(other))}, look away.</p>${gwLast ? `<p class="cv-last">${esc(gwLast)}</p>` : ''}
       <button class="btn primary" id="cover-ok">I'm ready</button>`;
     coverEl.classList.remove('hidden');
     renderBoard();
@@ -1226,6 +1248,7 @@
       setFlipped(color === BLACK, false);
       coverEl.classList.add('hidden');
       renderAll();
+      if (gwLast) setStatus(gwLast);
     };
   }
 
@@ -1250,20 +1273,12 @@
     return total + 300;
   }
 
-  /** The move list in Guess Who: squares only, so nothing says what the pieces are (check is not announced either). */
-  function guessText(i) {
-    const m = fullMoves[i], h = game.history[i];
-    if (!m) return '';
-    const mine = (i % 2 === 0 ? WHITE : BLACK) === viewSide;
-    const cap = h && (h.captured || h.epCaptured);
-    return alg(m.from) + (cap ? 'x' : '-') + alg(m.to) + (m.promo && mine ? '=' + 'xxnbrq'[m.promo] .toUpperCase() : m.promo ? '=?' : '');
-  }
-
   /* ------------------------------------------------ secret queen selection */
   function pickHandoff(color) {
     phase = color === WHITE ? 'pick-w' : 'pick-b';
     const other = color === WHITE ? BLACK : WHITE;
     pickSel = -1;
+    if (mode === 'guess') viewSide = color;   // only your own pieces show while you choose
     if (ai) {   // against the computer there is nobody to look away
       setFlipped(ai.human === BLACK, false);
       renderAll();
@@ -1276,7 +1291,7 @@
     renderAll();
     $('#pick-confirm').disabled = true;
     setStatus('');
-    coverEl.innerHTML = `<h2>${esc(nameOf(color))}, choose your Secret Queen</h2>
+    coverEl.innerHTML = `<h2>${esc(nameOf(color))}, choose your ${mode === 'guess' ? 'selected piece' : 'Secret Queen'}</h2>
       <p>${esc(nameOf(other))}, look away.</p>
       <button class="btn primary" id="cover-ok">I'm ready</button>`;
     coverEl.classList.remove('hidden');
@@ -1292,8 +1307,9 @@
     game.secretQueen[color] = pickSel;
     pickSel = -1;
     if (ai) {
-      game.secretQueen[ai.color] = pickSecretPawn(ai.color);
+      game.secretQueen[ai.color] = mode === 'guess' ? window.GuessBot.select(game, ai.color) : pickSecretPawn(ai.color);
       initialSecrets = { [WHITE]: game.secretQueen[WHITE], [BLACK]: game.secretQueen[BLACK] };
+      if (mode === 'guess') viewSide = ai.human;
       beginPlay();
       return;
     }
@@ -1302,6 +1318,7 @@
     } else {
       initialSecrets = { [WHITE]: game.secretQueen[WHITE], [BLACK]: game.secretQueen[BLACK] };
       beginPlay();
+      if (mode === 'guess') guessHandoff(game.turn);
     }
   });
 
@@ -1592,6 +1609,156 @@
     }, 20);
   }
 
+  /* ------------------------------------------------ Guess Who Chess: questions, marks and guesses */
+  const GCOL = { r: 'Red', b: 'Blue', g: 'Green', y: 'Yellow' };
+
+  /** Marks follow the pieces they were put on: a piece that moved takes its mark along, a captured one loses it. */
+  function moveMarks(m, mover) {
+    for (const c of [WHITE, BLACK]) {
+      const mk = marks[c];
+      if (c === mover) {   // my own piece took something: its mark is gone
+        delete mk[m.to];
+        if (m.flags === 2) delete mk[m.to + (mover === WHITE ? -16 : 16)];
+      } else {             // the enemy piece moved: its mark goes with it
+        const v = mk[m.from];
+        delete mk[m.from]; delete mk[m.to];
+        if (v) mk[m.to] = v;
+      }
+    }
+  }
+
+  function markTap(s) {
+    const c = viewSide, p = game.board[s];
+    if (c <= 0 || !p || (p & 24) === c) return;
+    if (markTool === 'x' || marks[c][s] === markTool) delete marks[c][s]; else marks[c][s] = markTool;
+    saveSession();
+    renderBoard();
+  }
+
+  /** The move is made. The mover may now guess (humans are asked, the computer decides on its own). */
+  function guessAfterMove(mover, h) {
+    const foe = otherOf(mover);
+    if (h.enemySecret >= 0 && game.secretQueen[foe] < 0) { endGame('gcapture', mover); clearSession(); return; }
+    if (isHumanSide(mover)) { guessPrompt(mover); return; }
+    const g = pendingBotGuess; pendingBotGuess = -1;
+    if (g >= 0 && game.board[g] && (game.board[g] & 24) === foe) {
+      setStatus(nameOf(mover) + ' is making a guess...');
+      setTimeout(() => { if (phase === 'play') resolveGuess(mover, g); }, 900);
+      return;
+    }
+    guessNext();
+  }
+
+  /** On to the next turn: save, and hand the device over in a two-player game. */
+  function guessNext() {
+    saveSession();
+    updateStatus();
+    if (gwLast && (ai || bots)) setStatus(gwLast);
+    maybeAI();
+    if (!ai && !bots) setTimeout(() => guessHandoff(game.turn), 500);
+    renderAll();
+  }
+
+  function guessPrompt(mover) {
+    openSheet(`<h2>Guess their piece?<span class="sub">Right and you win. Wrong and you lose.</span></h2>
+      <div class="stack"><button class="btn big primary" id="gw-yes">Make a guess</button><button class="btn big" id="gw-no">No guess, play on</button></div>`);
+    $('#gw-yes').onclick = () => { closeSheet(); gwStage = 'guesspick'; selected = -1; legalTargets = []; setStatus('Tap the enemy piece you think is their selected piece.'); renderAll(); };
+    $('#gw-no').onclick = () => { closeSheet(); guessNext(); };
+  }
+
+  function guessTap(s) {
+    const p = game.board[s], me = game.turn === WHITE ? BLACK : WHITE;   // (the mover has just moved, so the turn has passed)
+    if (!p || (p & 24) === me) return;
+    openSheet(`<h2>Guess this piece?<span class="sub">It is ${esc(alg(s))}. If it is not their selected piece, you lose immediately.</span></h2>
+      <div class="row"><button class="btn" id="gg-n">Back</button><button class="btn primary" id="gg-y">Guess it</button></div>`);
+    $('#gg-n').onclick = closeSheet;
+    $('#gg-y').onclick = () => { closeSheet(); gwStage = ''; resolveGuess(me, s); };
+  }
+
+  $('#gw-skip').addEventListener('click', () => { if (gwStage !== 'guesspick') return; gwStage = ''; guessNext(); });
+
+  /** `mover` guesses that the enemy piece on square s is the selected one. */
+  function resolveGuess(mover, s) {
+    const foe = otherOf(mover);
+    gwStage = '';
+    fullMoves[fullMoves.length - 1].gs = s;
+    sans[sans.length - 1] += ' (guess ' + alg(s) + ')';
+    renderMoves(sans, sans.length);
+    endGame(s === game.secretQueen[foe] ? 'gright' : 'gwrong', mover);
+    clearSession();
+  }
+
+  /** Ask a question about the other side's selected piece: it is answered truthfully and the turn is used up. */
+  function doAsk(id) {
+    if (phase !== 'play') return;
+    const mover = game.turn, foe = otherOf(mover);
+    const q = GuessQ.BY_ID[id];
+    const ans = GuessQ.answer(game, id, foe, game.secretQueen[foe], { askerSel: game.secretQueen[mover] });
+    const m = { from: -1, to: -1, flags: 32, promo: 0, ask: id, ans: ans ? 1 : 0 };
+    game.makeMove(m);
+    const text = 'Asked: ' + q.short + ' → ' + (ans ? 'Yes' : 'No');
+    sans.push(text);
+    fullMoves.push({ from: -1, to: -1, flags: 32, promo: 0, q: 0, ask: id, ans: ans ? 1 : 0 });
+    viewPly = sans.length;
+    { const nowT = Date.now(); if (!playStart) playStart = nowT; moveAt.push(nowT - playStart); moveClk.push(null); }
+    ratings[fullMoves.length - 1] = null;
+    posKeys.push(positionKey(game));
+    selected = -1; legalTargets = [];
+    gwLast = nameOf(mover) + ' asked: "' + q.text + '" → ' + (ans ? 'Yes' : 'No');
+    fx('move');
+    renderAll();
+    renderMoves(sans, sans.length);
+    if (isHumanSide(mover)) {
+      openSheet(`<h2>${ans ? 'Yes' : 'No'}<span class="sub">${esc(q.text)}</span></h2><button class="btn wide primary" id="gq-ok">Continue</button>`);
+      $('#gq-ok').onclick = () => { closeSheet(); guessNext(); };
+    } else guessNext();
+  }
+
+  function askSheet() {
+    if (phase !== 'play' || mode !== 'guess' || aiBusy || coverUp() || gwStage) return;
+    let html = '<h2>Ask a question<span class="sub">About their selected piece. Asking uses your turn.</span></h2><div class="gq-list">';
+    let grp = '';
+    for (const q of GuessQ.LIST) {
+      if (q.grp !== grp) { grp = q.grp; html += `<div class="gq-g">${esc(grp)}</div>`; }
+      html += `<button class="btn gq" data-q="${q.id}">${esc(q.text)}</button>`;
+    }
+    html += '</div><button class="btn wide" id="gq-x">Cancel</button>';
+    openSheet(html, true);
+    sheet.querySelectorAll('.gq').forEach((b) => { b.onclick = () => { closeSheet(); doAsk(+b.dataset.q); }; });
+    $('#gq-x').onclick = closeSheet;
+  }
+  $('#gw-ask').addEventListener('click', askSheet);
+
+  function showGuessRules() {
+    openSheet(`<h2>Guess Who Chess<span class="sub">Find their piece before they find yours.</span></h2>
+      <div class="sn-rules">
+        <p>Arrange your pieces, then <b>secretly select one of your own pieces</b>. Enemy pieces show as plain boxes.</p>
+        <p>You win by <b>capturing</b> their selected piece, or by <b>guessing</b> it right. You lose if yours is captured, they guess it, or you guess wrong.</p>
+        <p>On your turn either <b>ask a yes/no question</b> about their piece (it is answered truthfully), or <b>make a move</b>. After a move you may <b>guess</b> which enemy piece is theirs.</p>
+        <p>There is no check or checkmate. Capturing a king does nothing special.</p>
+        <p>Use the colour dots to mark enemy pieces for yourself. Only you see them: red = no, blue = maybe, green = likely, yellow = unsure.</p>
+      </div>
+      <button class="btn wide primary" id="gwr-ok">Got it</button>`, true);
+    $('#gwr-ok').onclick = closeSheet;
+  }
+  $('#gw-rules').addEventListener('click', showGuessRules);
+  document.querySelectorAll('#gw-marks .mk').forEach((b) => {
+    b.addEventListener('click', () => { markTool = markTool === b.dataset.mk ? '' : b.dataset.mk; renderAll(); });
+  });
+
+  /** The Guess Who strip under the board: ask a question, colour marks, rules. */
+  function renderGuessBar() {
+    const bar = $('#gw-bar');
+    const on = mode === 'guess' && G === game && phase === 'play' && viewSide > 0 && !coverUp() && !aiBusy && !bots;
+    bar.classList.toggle('hidden', !on);
+    if (!on) { if (markTool && phase !== 'play') markTool = ''; return; }
+    const pick = gwStage === 'guesspick';
+    $('#gw-ask').classList.toggle('hidden', pick);
+    $('#gw-marks').classList.toggle('hidden', pick);
+    $('#gw-skip').classList.toggle('hidden', !pick);
+    document.querySelectorAll('#gw-marks .mk').forEach((b) => b.classList.toggle('on', b.dataset.mk === markTool));
+  }
+
   /* ----------------------------------------------------------- the computer */
   function thinkingStatus() {
     setStatus('', 'dim', 'Thinking<span class="dots"><i>.</i><i>.</i><i>.</i></span>');
@@ -1632,10 +1799,13 @@
         setTimeout(() => {
           if (token !== aiToken) return;
           aiBusy = false;
-          if (m) doMove(m); else updateControls();
+          if (m && m.ask) doAsk(m.ask);
+          else if (m && m.move) { pendingBotGuess = m.guess; doMove(m.move); }
+          else if (m) doMove(m);
+          else updateControls();
         }, Math.max(0, minWait - (Date.now() - t0)));
       };
-      if (mode === 'guess' && window.GuessBot) window.GuessBot.choose(game, fullMoves, startFen, level, game.turn, done);   // it only knows what it has seen
+      if (mode === 'guess' && window.GuessBot) window.GuessBot.choose(game, fullMoves, startFen, level, game.turn, done, initialSecrets[game.turn]);   // it only knows what it has seen
       else searchMove(game, level, game.turn, seen, done, maxMs);
     }, 20);
   }
@@ -1647,7 +1817,11 @@
 
   function onSquare(s) {
     if (isArr()) { arrTap(s); return; }
-    if (mode === 'guess' && phase === 'play' && coverUp()) return;
+    if (mode === 'guess' && phase === 'play') {
+      if (coverUp() || !sheetBg.classList.contains('hidden')) return;
+      if (gwStage === 'guesspick') { guessTap(s); return; }
+      if (markTool && !aiBusy) { markTap(s); return; }
+    }
     if (mode === 'foresight' && phase === 'play') {
       if (coverUp() || pendingPromo) return;
       if (fsStage === 'plan') { fsTap(s); return; }
@@ -1657,7 +1831,7 @@
       if (!coverEl.classList.contains('hidden')) return;
       const color = phase === 'pick-w' ? WHITE : BLACK;
       const pc = game.board[s];
-      if (pc && (pc & 24) === color && (pc & 7) !== KING && (pc & 7) !== QUEEN) {
+      if (pc && (pc & 24) === color && (mode === 'guess' || ((pc & 7) !== KING && (pc & 7) !== QUEEN))) {
         pickSel = pickSel === s ? -1 : s;
         $('#pick-confirm').disabled = pickSel < 0;
         setStatus(pickSel < 0 ? `${nameOf(color)}: tap one of your pieces` : 'Tap Confirm to lock it in');
@@ -1740,6 +1914,7 @@
     const bookMove = !isTas() && !isTwist() && !!(window.MoveRating && window.MoveRating.isBook && window.MoveRating.isBook(game, m));   // only book moves are labelled while you play; everything else comes from Analyze game
     const san = game.moveToSan(m);
     const mover = game.turn;
+    const capBefore = mode === 'guess' ? (game.board[m.to] || m.flags === 2) : 0;
     if (!bots && window.LP.rewards && (game.board[m.to] || m.flags === 2)) window.LP.rewards.event('capture', 1);
     if (mode === 'gamble') m.nx = Math.random() * 100 < game.oddsAfter(mover) ? WHITE : BLACK;   // roll who moves next
     game.makeMove(m);
@@ -1751,7 +1926,8 @@
     const check = game.inCheck(game.turn);
     const gcheck = check && mode !== 'guess';   // Guess Who does not announce check
     const canMove = game.hasLegalMove();
-    const full = san + (check ? (canMove ? '+' : '#') : '');
+    let full = san + (check ? (canMove ? '+' : '#') : '');
+    if (mode === 'guess') full = alg(m.from) + (capBefore ? 'x' : '-') + alg(m.to) + (m.promo ? '=?' : '');   // squares only: nothing says what the pieces are
     sans.push(full);
     fullMoves.push({ from: m.from, to: m.to, flags: m.flags, promo: m.promo || 0, q: m.q || 0 });
     if (m.spawn) fullMoves[fullMoves.length - 1].spawn = m.spawn;
@@ -1773,6 +1949,7 @@
     fx(!canMove && check ? 'win' : gcheck ? 'check' : h.captured || h.epCaptured || (h.sn && h.sn.eaten.length) ? 'capture' : m.flags === 4 || m.flags === 8 ? 'castle' : 'move');
     if (h.sn) animateSnails(h, false);
 
+    if (mode === 'guess') { moveMarks(m, mover); gwLast = ''; guessAfterMove(mover, h); return; }
     let end = null;
     if (game.snailKilled) end = 'snail';
     else if (game.kingTaken) end = 'king';
@@ -1787,9 +1964,6 @@
       saveSession();
       setStatus(nameOf(mover) + ' played ' + fmt(full));
       fsLater(bots ? 500 : 800, fsDrive);
-    } else if (mode === 'guess') {
-      saveSession(); updateStatus(); maybeAI();
-      if (!ai && !bots) setTimeout(() => guessHandoff(game.turn), 500);   // hand the device over
     } else { saveSession(); updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
   }
 
@@ -1820,17 +1994,19 @@
   /* --------------------------------------------------------------- end game */
   function endGame(type, mover) {
     phase = 'over';
-    fsStage = ''; fsNeed = 0; fsDraft = null; spawnSel = 0;
+    fsStage = ''; fsNeed = 0; fsDraft = null; spawnSel = 0; gwStage = ''; markTool = '';
     coverEl.classList.add('hidden');
     clearTimeout(flipTimer);
-    const why = { stalemate: 'Stalemate', material: 'Insufficient material', fifty: '50-move rule', repeat: 'Threefold repetition', snail: 'Both snails reached a king' };
+    const why = { gcapture: 'Selected piece captured', gright: 'Guessed the selected piece', gwrong: 'Guessed the wrong piece', stalemate: 'Stalemate', material: 'Insufficient material', fifty: '50-move rule', repeat: 'Threefold repetition', snail: 'Both snails reached a king' };
     let winner = type === 'mate' || type === 'resign' || type === 'time' ? mover : null;   // mover = the side that won (or that gave the mate)
     if (type === 'king') winner = game.kingTaken === WHITE ? BLACK : WHITE;
+    if (type === 'gcapture' || type === 'gright') winner = mover;
+    if (type === 'gwrong') winner = mover === WHITE ? BLACK : WHITE;
     if (type === 'snail') winner = game.snailKilled === 24 ? null : game.snailKilled === WHITE ? BLACK : WHITE;   // the side whose snail reached its king loses
     const loser = winner === WHITE ? BLACK : WHITE;
     if (type === 'resign') resigned = loser;
     over = winner != null
-      ? { title: nameOf(winner) + ' wins', sub: type === 'mate' ? 'Checkmate' : type === 'snail' ? nameOf(loser) + "'s snail reached their king" : type === 'king' ? nameOf(loser) + "'s king was captured" : type === 'resign' ? nameOf(loser) + ' forfeited' : nameOf(loser) + ' ran out of time', result: winner === WHITE ? '1-0' : '0-1' }
+      ? { title: nameOf(winner) + ' wins', sub: type === 'mate' ? 'Checkmate' : type === 'gcapture' ? nameOf(loser) + "'s selected piece was captured" : type === 'gright' ? nameOf(winner) + ' guessed the selected piece' : type === 'gwrong' ? nameOf(loser) + ' guessed the wrong piece' : type === 'snail' ? nameOf(loser) + "'s snail reached their king" : type === 'king' ? nameOf(loser) + "'s king was captured" : type === 'resign' ? nameOf(loser) + ' forfeited' : nameOf(loser) + ' ran out of time', result: winner === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
     const lb = type === 'mate' && !startFen ? recordWin(mover) : null;
     const Pf = window.LP.profile;

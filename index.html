@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=42">
+  <link rel="stylesheet" href="styles.css?v=43">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -115,7 +115,7 @@
             <span class="mode-ic" aria-hidden="true"><i class="ic-guess"></i></span>
             <span class="mode-text">
               <span class="mode-name">Guess Who Chess</span>
-              <span class="mode-desc">You can't see their pieces. Arrange yours, bluff, guess.</span>
+              <span class="mode-desc">Hidden pieces. Ask questions and find their secret piece.</span>
             </span>
             <span class="mode-go" aria-hidden="true">&rsaquo;</span>
           </button>
@@ -317,6 +317,20 @@
             </button>
             <div id="ry-tray" class="ry-tray"></div>
             <div id="ry-hint" class="ry-hint"></div>
+          </div>
+
+          <!-- Guess Who: ask a question, colour marks -->
+          <div id="gw-bar" class="gw-bar hidden">
+            <button id="gw-ask" class="btn primary">Ask a question</button>
+            <button id="gw-skip" class="btn hidden">Skip guess</button>
+            <span id="gw-marks" class="gw-marks" role="group" aria-label="Colour marks for enemy pieces">
+              <button class="mk" data-mk="r" aria-label="Red: not the piece"></button>
+              <button class="mk" data-mk="b" aria-label="Blue: could be the piece"></button>
+              <button class="mk" data-mk="g" aria-label="Green: strong suspicion"></button>
+              <button class="mk" data-mk="y" aria-label="Yellow: uncertain"></button>
+              <button class="mk" data-mk="x" aria-label="Clear a mark">&times;</button>
+            </span>
+            <button id="gw-rules" class="btn icon" aria-label="Guess Who rules">?</button>
           </div>
 
           <!-- Foresight: lock in the planned move -->
@@ -556,10 +570,11 @@
     </div>
   </div>
 
-  <script src="chess.js?v=28"></script>
+  <script src="chess.js?v=29"></script>
+  <script src="guessq.js?v=1"></script>
   <script src="ai.js?v=35"></script>
-  <script src="guessbot.js?v=2"></script>
-  <script src="app.js?v=35"></script>
+  <script src="guessbot.js?v=3"></script>
+  <script src="app.js?v=36"></script>
   <script src="export.js?v=2"></script>
   <script src="prefs.js?v=1"></script>
   <script src="history.js?v=7"></script>

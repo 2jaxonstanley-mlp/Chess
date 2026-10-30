@@ -1,13 +1,14 @@
 /**
- * Guess Who Chess computer opponent.
+ * Guess Who Chess computer opponent (the "selected piece" version).
  *
  * The computer never looks at your piece types. It works out what it can from what it has seen:
  *   - which enemy piece moved where (a piece that slid 4 squares cannot be a knight or a king),
- *   - the pieces it captured (their type is shown to the captor).
- * From that it keeps, for every enemy piece, the set of types it could still be, draws several believable
- * "worlds" that fit the 16 pieces every side starts with, searches every move in each world and plays the move that
- * does best on average. The higher levels also bluff: among moves that are about as good they pick the one that
- * could have been made by the most different piece types, so a queen creeps along one square at a time like a king.
+ *   - the pieces it captured (their type is shown to the captor),
+ *   - the answers to the questions it asked about your selected piece.
+ * From that it draws believable "worlds" (a type for every enemy piece that fits the 16 pieces each side starts with),
+ * keeps, for each enemy piece, how many worlds could have it as the selected piece, and turns that into a chance.
+ * It then picks between asking the most useful question, or moving (taking likely targets, keeping its own piece safe),
+ * and guesses after a move only when it is sure enough. Lower levels forget things, ask at random and guess wildly.
  */
 (() => {
   'use strict';
@@ -17,19 +18,33 @@
   const other = (c) => (c === WHITE ? BLACK : WHITE);
   const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
-  /* what each level does: samples = worlds searched, depth = plies, forget = ignores how pieces moved, bluff = { win, w } */
+  /**
+   * What each level does:
+   *   worlds    how many believable worlds it considers
+   *   forget    ignores how enemy pieces moved, and only remembers the last answer it got
+   *   guess     chance it needs before it dares to guess (>1 = never)
+   *   ask       how keen it is to ask a question instead of moving (0..1)
+   *   safe      how much it cares about keeping its own piece out of reach (0..1)
+   *   noise     randomness in its move choice
+   *   qrank     it picks its question at random from this many of the best ones
+   */
   const LV = {
-    dumb:   { random: true },
-    easy:   { samples: 1, depth: 1, ms: 120, forget: true, bluff: null },
-    medium: { samples: 3, depth: 2, ms: 160, forget: false, bluff: null },
-    hard:   { samples: 5, depth: 3, ms: 220, forget: false, bluff: { win: 25, w: 6 } },
-    godly:  { samples: 8, depth: 3, ms: 240, forget: false, bluff: { win: 45, w: 10 } },
-    insane: { samples: 10, depth: 4, ms: 300, forget: false, bluff: { win: 60, w: 12 } },
+    dumb:   { random: true, guess: 9 },
+    easy:   { worlds: 6,  forget: true,  guess: 0.8,  ask: 0.35, safe: 0.4, noise: 80, qrank: 9 },
+    medium: { worlds: 12, forget: false, guess: 0.85, ask: 0.45, safe: 0.7, noise: 40, qrank: 7, memory: 3 },
+    hard:   { worlds: 20, forget: false, guess: 0.82, ask: 0.5,   safe: 0.9, noise: 15, qrank: 3 },
+    godly:  { worlds: 28, forget: false, guess: 0.75, ask: 0.5, safe: 1,   noise: 6, qrank: 2 },
+    insane: { worlds: 36, forget: false, guess: 0.7, ask: 0.5,   safe: 1,   noise: 0, qrank: 1 },
   };
 
-  /** A starting arrangement for the computer: 16 piece types, back rank a-h then front rank a-h. */
-  function arrange(color, level) {
-    return shuffle(STD.slice());   // every level: all 16 pieces shuffled randomly over the two ranks
+  /** A starting arrangement for the computer: all 16 pieces shuffled over the two ranks (back rank a-h, then the front rank). */
+  function arrange() { return shuffle(STD.slice()); }
+
+  /** The computer's own selected piece: a random one of its pieces. */
+  function select(g, color) {
+    const mine = [];
+    for (let s = 0; s < 128; s++) { if (s & 0x88) { s += 7; continue; } const p = g.board[s]; if (p && colorOf(p) === color) mine.push(s); }
+    return mine[Math.floor(Math.random() * mine.length)];
   }
 
   /** Does a piece of type t standing on m.from have move m? (pseudo-legal, using only who stands where) */
@@ -48,22 +63,37 @@
     return ok;
   }
 
-  /** Replay the game from `me`'s point of view. Returns the enemy pieces still on the board with the types they could be. */
-  function infer(startFen, moves, me, forget) {
+  /**
+   * Replay the game from `me`'s point of view. Returns every enemy piece (alive or captured) with the types it could be,
+   * and a snapshot for every question `me` asked.
+   */
+  function infer(startFen, moves, me, mySel, forget) {
     const g = new Chess();
     g.mode = 'guess'; g.reset();
     if (startFen) g.loadFen(startFen);
+    g.secretQueen[me] = mySel;
     const foe = other(me);
     const id = new Int16Array(128);
     const info = [null];
     for (let s = 0; s < 128; s++) {
       if (s & 0x88) { s += 7; continue; }
       const p = g.board[s];
-      if (p && colorOf(p) === foe) { id[s] = info.length; info.push({ sq: s, poss: [0, 1, 1, 1, 1, 1, 1], alive: true, promoted: false }); }
+      if (p && colorOf(p) === foe) { id[s] = info.length; info.push({ pid: info.length, sq: s, poss: [0, 1, 1, 1, 1, 1, 1], alive: true, promoted: false, type: 0, moved: false }); }
     }
     const left = COUNTS.slice();
     let promotedCount = 0;
+    const asks = [];
     for (const m of moves) {
+      if (m.ask) {
+        if (g.turn === me) {
+          asks.push({
+            id: m.ask, ans: !!m.ans, askerSel: g.secretQueen[me], board: new Uint8Array(g.board),
+            pieces: info.filter((x) => x && x.alive).map((x) => ({ pid: x.pid, sq: x.sq, moved: x.moved })),
+          });
+        }
+        g.makeMove(m);
+        continue;
+      }
       const p = g.board[m.from];
       if (!p) break;
       if (colorOf(p) === foe) {
@@ -73,6 +103,7 @@
             for (let t = 1; t <= 6; t++) if (inf.poss[t] && !canMake(g, m, t)) inf.poss[t] = 0;
           }
           if (m.promo) { inf.promoted = true; promotedCount++; inf.poss = [0, 0, 1, 1, 1, 1, 0]; }
+          inf.moved = true;
           id[m.from] = 0; id[m.to] = pid; inf.sq = m.to;
         }
       } else {
@@ -83,17 +114,18 @@
         if (capSq >= 0 && id[capSq]) {
           const inf = info[id[capSq]];
           inf.alive = false;
-          if (!inf.promoted) left[g.board[capSq] & 7]--;
+          inf.type = g.board[capSq] & 7;
+          if (!inf.promoted) left[inf.type]--;
           id[capSq] = 0;
         }
       }
       g.makeMove(m);
     }
     left[1] -= promotedCount;     // a promoted piece used up one of the pawns
-    return { pieces: info.filter((x) => x && x.alive), left, game: g };
+    return { all: info.filter((x) => x), pieces: info.filter((x) => x && x.alive), left, game: g, asks };
   }
 
-  /** Draw one believable assignment of types to the enemy pieces: a Map piece -> type. */
+  /** Draw one believable assignment of types to the enemy pieces still alive: a Map pid -> type. */
   function sample(b) {
     const free = b.pieces.filter((x) => !x.promoted);
     const pool = b.left.slice();
@@ -103,7 +135,6 @@
     const pick = (p) => {
       const opts = [];
       for (let t = 1; t <= 6; t++) if (p.poss[t] && pool[t] > 0) opts.push(t);
-      // weighted order: a type that is more common among what is left is tried first
       const res = [];
       while (opts.length) {
         let tot = 0; for (const t of opts) tot += pool[t];
@@ -118,83 +149,163 @@
       if (++steps > 3000) return false;
       const p = order[i];
       for (const t of pick(p)) {
-        pool[t]--; out.set(p, t);
+        pool[t]--; out.set(p.pid, t);
         if (bt(i + 1)) return true;
-        pool[t]++; out.delete(p);
+        pool[t]++; out.delete(p.pid);
       }
       return false;
     };
     if (!bt(0)) {
-      // the constraints could not be met (should not happen): fall back to filling from what is left
+      // the constraints could not be met (should not happen): fall back to anything the piece could be
       out.clear();
-      const bag = [];
-      for (let t = 1; t <= 6; t++) for (let k = 0; k < Math.max(0, b.left[t]); k++) bag.push(t);
-      shuffle(bag);
-      for (const p of free) out.set(p, bag.pop() || 1);
+      for (const p of free) { const o = []; for (let t = 1; t <= 6; t++) if (p.poss[t]) o.push(t); out.set(p.pid, o.length ? o[Math.floor(Math.random() * o.length)] : 1); }
     }
-    for (const p of b.pieces) if (p.promoted) {
-      const ts = []; for (let t = 2; t <= 5; t++) if (p.poss[t]) ts.push(t === 5 ? [5, 5, 5] : [t]);
-      const flat = [].concat(...ts);
-      out.set(p, flat.length ? flat[Math.floor(Math.random() * flat.length)] : 5);
-    }
+    for (const p of b.pieces) if (p.promoted) { const o = []; for (let t = 2; t <= 5; t++) if (p.poss[t]) o.push(t); out.set(p.pid, o.length ? o[Math.floor(Math.random() * o.length)] : 5); }
+    for (const p of b.all) if (!p.alive) out.set(p.pid, p.type || 1);
     return out;
   }
 
-  function world(real, b, assign, foe) {
-    const c = new Chess();
-    c.mode = 'guess';
-    c.board.set(real.board);
-    c.turn = real.turn; c.castling = 0; c.ep = real.ep; c.halfmove = real.halfmove; c.fullmove = real.fullmove;
-    for (const [p, t] of assign) c.board[p.sq] = foe | t;
-    c.history = [];
-    return c;
+  /** The position at the time of a question, with the enemy pieces typed according to one world. */
+  function worldBoard(tmp, ask, world) {
+    tmp.board.set(ask.board);
+    for (const x of ask.pieces) tmp.board[x.sq] = (colorOf(tmp.board[x.sq])) | world.get(x.pid);
+    return tmp;
   }
 
-  const key = (m) => m.from * 128 + m.to + (m.promo || 0) * 16384;
-
-  /** How many different piece types could have made move m? The more, the better it hides what the piece is. */
-  function ambiguity(g, m) {
-    let n = 0;
-    for (let t = 1; t <= 6; t++) if (canMake(g, m, t)) n++;
-    const dx = Math.abs((m.to & 15) - (m.from & 15)), dy = Math.abs((m.to >> 4) - (m.from >> 4));
-    return n + (Math.max(dx, dy) === 1 ? 0.8 : 0);
-  }
-
-  /** Choose a move for the side to move in `game`. cb(move) gets a legal move object of the real game. */
-  function choose(game, moves, startFen, level, me, cb) {
-    const cfg = LV[level] || LV.medium;
-    const real = game.legalMoves();
-    if (!real.length) { cb(null); return; }
-    if (cfg.random || real.length === 1) { cb(real[Math.floor(Math.random() * real.length)]); return; }
+  /**
+   * How likely each living enemy piece is to be the selected one: Map pid -> chance, plus the worlds used.
+   * A piece counts in a world when every answer it was given would have been the same for that piece in that world.
+   */
+  function beliefs(b, me, cfg) {
     const foe = other(me);
-    const b = infer(startFen, moves, me, cfg.forget);
-    const scores = new Map(real.map((m) => [key(m), []]));
-    for (let i = 0; i < cfg.samples; i++) {
-      const w = world(game, b, sample(b), foe);
-      let res = [];
-      try { res = window.AIScoreAll(w, cfg.depth, cfg.ms, 2); } catch (e) { res = []; }
-      for (const r of res) { const a = scores.get(key(r.m)); if (a) a.push(r.sc); }
-    }
-    const agg = real.map((m) => {
-      const a = scores.get(key(m));
-      if (!a.length) return { m, v: -200 };
-      const mean = a.reduce((x, y) => x + y, 0) / a.length;
-      return { m, v: 0.7 * mean + 0.3 * Math.min(...a) + (cfg.forget ? (Math.random() - 0.5) * 80 : 0) + (Math.random() - 0.5) * 6 };
-    });
-    agg.sort((x, y) => y.v - x.v);
-    let pick = agg[0];
-    if (cfg.bluff) {
-      const cands = agg.filter((x) => x.v >= agg[0].v - cfg.bluff.win);
-      if (cands.length > 1) {
-        let best = -Infinity;
-        for (const x of cands) {
-          const sc = ambiguity(game, x.m) * cfg.bluff.w + (x.v - agg[0].v) * 0.3 + Math.random() * 3;
-          if (sc > best) { best = sc; pick = x; }
+    const tmp = new Chess();
+    tmp.mode = 'guess'; tmp.reset();
+    tmp.castling = 0;
+    const asks = cfg.forget ? b.asks.slice(-1) : cfg.memory ? b.asks.slice(-cfg.memory) : b.asks;   // weaker levels remember fewer answers
+    const score = new Map(b.pieces.map((p) => [p.pid, 0]));
+    const worlds = [];
+    for (let w = 0; w < cfg.worlds; w++) {
+      const world = sample(b);
+      worlds.push(world);
+      const boards = asks.map((a) => worldBoard(tmp, a, world).board.slice());
+      for (const p of b.pieces) {
+        let ok = true;
+        for (let k = 0; k < asks.length && ok; k++) {
+          const a = asks[k], at = a.pieces.find((x) => x.pid === p.pid);
+          if (!at) continue;
+          tmp.board.set(boards[k]);
+          if (GuessQ.answer(tmp, a.id, foe, at.sq, { type: world.get(p.pid), moved: at.moved, askerSel: a.askerSel }) !== a.ans) ok = false;
         }
+        if (ok) score.set(p.pid, score.get(p.pid) + 1);
       }
     }
-    cb(pick.m);
+    let tot = 0;
+    for (const v of score.values()) tot += v;
+    const prob = new Map();
+    for (const p of b.pieces) prob.set(p.pid, tot ? score.get(p.pid) / tot : 1 / b.pieces.length);
+    return { prob, worlds, tot };
   }
 
-  window.GuessBot = { arrange, choose, infer, sample, STD, LV };
+  /** The question that splits the likely candidates best: { id, score } (score 0..0.5), judged in the first world. */
+  function bestQuestion(b, bel, g, me, cfg) {
+    const foe = other(me);
+    const world = bel.worlds[0];
+    if (!world) return null;
+    const tmp = new Chess();
+    tmp.mode = 'guess'; tmp.reset(); tmp.castling = 0;
+    tmp.board.set(g.board);
+    for (const p of b.pieces) tmp.board[p.sq] = foe | world.get(p.pid);
+    const mySel = g.secretQueen[me];
+    const list = [];
+    for (const q of GuessQ.LIST) {
+      let yes = 0, tot = 0;
+      for (const p of b.pieces) {
+        const w = bel.prob.get(p.pid);
+        if (!w) continue;
+        tot += w;
+        if (GuessQ.answer(tmp, q.id, foe, p.sq, { type: world.get(p.pid), moved: p.moved, askerSel: mySel })) yes += w;
+      }
+      if (!tot) continue;
+      const sc = Math.min(yes, tot - yes) / tot + Math.random() * 0.01;
+      list.push({ id: q.id, score: sc });
+    }
+    list.sort((a, c) => c.score - a.score);
+    return list.length ? list[Math.floor(Math.random() * Math.min(cfg.qrank || 1, list.length))] : null;   // weaker levels often settle for a less useful question
+  }
+
+  /** The best move: takes likely targets, pressures them, keeps the selected piece out of reach. */
+  function bestMove(g, b, bel, me, cfg) {
+    const foe = other(me);
+    const moves = g.legalMoves();
+    if (!moves.length) return null;
+    if (cfg.random) return moves[Math.floor(Math.random() * moves.length)];
+    const bySq = new Map(b.pieces.map((p) => [p.sq, p]));
+    const sel = g.secretQueen[me];
+    let best = null, bestSc = -Infinity;
+    for (const m of moves) {
+      let sc = 0;
+      let cap = bySq.get(m.to);
+      if (!cap && m.flags === 2) cap = bySq.get(m.to + (me === WHITE ? -16 : 16));
+      if (cap) sc += 1000 * bel.prob.get(cap.pid) + 40;
+      g.makeMove(m);
+      // pressure: chance mass of the enemy pieces my pieces could take next move
+      const hit = new Set();
+      for (let s = 0; s < 128; s++) {
+        if (s & 0x88) { s += 7; continue; }
+        const p = g.board[s];
+        if (!p || colorOf(p) !== me) continue;
+        for (const x of g._gen(s, p & 7)) if (g.board[x.to] && colorOf(g.board[x.to]) === foe) hit.add(x.to);
+      }
+      for (const sq of hit) { const e = bySq.get(sq); if (e && sq !== m.to) sc += 90 * bel.prob.get(e.pid); else if (e) sc += 90 * bel.prob.get(e.pid) * 0.5; }
+      // danger: can an enemy piece take my selected piece next move?
+      const mySq = g.secretQueen[me];
+      if (mySq >= 0 && g.attacked(mySq, foe)) sc -= 450 * cfg.safe;
+      if (m.from === sel && cfg.safe >= 0.9) sc -= 12;          // moving it shows how it moves
+      // a loose ordinary piece is a small loss
+      if (g.attacked(m.to, foe) && !g.attacked(m.to, me) && m.to !== mySq) sc -= 8;
+      g.unmakeMove();
+      sc += (Math.random() - 0.5) * 2 * (cfg.noise || 0);
+      if (sc > bestSc) { bestSc = sc; best = m; }
+    }
+    return best;
+  }
+
+  /**
+   * Decide what the computer does on its turn. cb({ ask: id }) to ask a question, or cb({ move, guess }) with the move to make
+   * and the square of the enemy piece to guess afterwards (-1 for no guess).
+   */
+  function choose(game, fullMoves, startFen, level, color, cb, mySel0) {
+    const cfg = LV[level] || LV.medium;
+    const g = game;
+    const play = (move, guess) => cb({ move, guess: guess == null ? -1 : guess });
+    if (cfg.random) {
+      const mv = g.legalMoves();
+      const m = mv.length ? mv[Math.floor(Math.random() * mv.length)] : null;
+      const foes = [];
+      for (let s = 0; s < 128; s++) { if (s & 0x88) { s += 7; continue; } if (g.board[s] && colorOf(g.board[s]) === other(color)) foes.push(s); }
+      if (!m || Math.random() < 0.3) { cb({ ask: GuessQ.LIST[Math.floor(Math.random() * GuessQ.LIST.length)].id }); return; }
+      play(m, Math.random() < 0.06 && foes.length ? foes[Math.floor(Math.random() * foes.length)] : -1);
+      return;
+    }
+    const b = infer(startFen, fullMoves, color, mySel0 != null ? mySel0 : g.secretQueen[color], cfg.forget);
+    const bel = beliefs(b, color, cfg);
+    let top = null, topP = 0;
+    for (const p of b.pieces) { const pr = bel.prob.get(p.pid); if (pr > topP) { topP = pr; top = p; } }
+    const canMove = g.legalMoves().length > 0;
+    const q = bestQuestion(b, bel, g, color, cfg);
+    const mySq = g.secretQueen[color];
+    const threatened = mySq >= 0 && g.attacked(mySq, other(color));
+    let ask = false;
+    if (!canMove) ask = true;
+    else if (q && q.score >= 0.12 && topP < cfg.guess && !threatened) ask = Math.random() < cfg.ask + (q.score - 0.2);
+    if (ask && q) { cb({ ask: q.id }); return; }
+    const m = bestMove(g, b, bel, color, cfg);
+    if (!m) { cb({ ask: GuessQ.LIST[0].id }); return; }
+    // after the move: where would the most likely piece stand? (a piece that is taken by the move ends the game anyway)
+    let guess = -1;
+    if (top && topP >= cfg.guess) guess = (m.from === top.sq) ? m.to : top.sq;
+    play(m, guess);
+  }
+
+  window.GuessBot = { arrange, select, choose, infer, sample, beliefs, STD, LV };
 })();

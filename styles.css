@@ -1581,3 +1581,24 @@ body[data-bd="doodle"] .board { border-radius: 1.4% 0.7% 1.8% 0.9% / 0.9% 1.8% 0
 .ry-tray button.sel { border-color: #d27bff; background: rgba(190,90,240,.28); }
 .ry-tray button:disabled { opacity: .35; cursor: default; }
 .ry-hint { color: var(--muted, #9a9a9a); font-size: .76rem; min-height: 1em; }
+
+/* ---- Guess Who Chess: selected piece, questions, marks ---- */
+.square.selpiece { box-shadow: inset 0 0 0 4px rgba(255, 196, 40, .95); }
+.gw-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .5rem; padding: .3rem 0 .5rem; }
+.gw-bar.hidden, .gw-bar .hidden { display: none; }
+.gw-bar .btn.primary { flex: 1 1 8rem; }
+.gw-marks { display: flex; gap: .35rem; align-items: center; }
+.gw-marks .mk { width: 2rem; height: 2rem; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: #333; color: #fff; font-size: 1.1rem; line-height: 1; padding: 0; cursor: pointer; }
+.gw-marks .mk[data-mk="r"] { background: #e5484d; }
+.gw-marks .mk[data-mk="b"] { background: #3b82f6; }
+.gw-marks .mk[data-mk="g"] { background: #34c759; }
+.gw-marks .mk[data-mk="y"] { background: #f5c518; }
+.gw-marks .mk.on { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.35); transform: scale(1.12); }
+.square[data-mk="r"] .piece.blind { background: #e5484d; }
+.square[data-mk="b"] .piece.blind { background: #3b82f6; }
+.square[data-mk="g"] .piece.blind { background: #34c759; }
+.square[data-mk="y"] .piece.blind { background: #f5c518; }
+.gq-list { display: flex; flex-direction: column; gap: .4rem; max-height: 60vh; overflow-y: auto; margin: .4rem 0 .8rem; }
+.gq-g { margin-top: .5rem; font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted, #9a9a9a); font-weight: 800; text-align: left; }
+.gq { text-align: left; white-space: normal; }
+.cover .cv-last { margin-top: .6rem; padding: .5rem .7rem; border: 1px solid rgba(255,255,255,.2); border-radius: .6rem; font-size: .95rem; }

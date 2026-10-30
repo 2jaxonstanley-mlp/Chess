@@ -249,7 +249,7 @@ class Chess {
 
   /** Check. In Gamblite there is no check: the king can be left attacked, and capturing it wins. */
   inCheck(color) {
-    if (this.mode === 'gamble') return false;
+    if (this.mode === 'gamble' || this.mode === 'guess') return false;   // Gamblite and Guess Who have no check
     return this.kingAttacked(color);
   }
 
@@ -468,6 +468,7 @@ class Chess {
 
   makeMove(m) {
     if (m.spawn) return this._makeSpawn(m);
+    if (m.ask) return this._makeAsk(m);
     const p = this.board[m.from];
     const col = this.colorOf(p);
     const captured = this.board[m.to];
@@ -501,7 +502,7 @@ class Chess {
     // Update secret queen square if the secret piece moves
     if (this.secretQueen[col] === m.from) {
       // a secret pawn that promotes is just a normal piece afterwards
-      this.secretQueen[col] = m.promo ? -1 : m.to;
+      this.secretQueen[col] = m.promo && this.mode !== 'guess' ? -1 : m.to;   // (Guess Who: a promoted piece is still the selected piece)
     }
 
     // Clear captured secret if any
@@ -595,12 +596,25 @@ class Chess {
     this.history.push(hist);
   }
 
+  /** Guess Who: asking a question uses up the turn without moving anything (the record is { ask: question id, ans: the answer }). */
+  _makeAsk(m) {
+    const col = this.turn, enemy = col === WHITE ? BLACK : WHITE;
+    this.history.push({
+      move: m, mover: col, pW: this.pW, kt: this.kingTaken, captured: 0, castling: this.castling, ep: this.ep, halfmove: this.halfmove,
+      secretFrom: this.secretQueen[col], enemySecret: this.secretQueen[enemy], revealed: this.revealed[col], wasSecretMove: false,
+      elW: this.el[WHITE], elB: this.el[BLACK],
+    });
+    this.ep = -1;
+    if (col === BLACK) this.fullmove++;
+    this.turn = enemy;
+  }
+
   unmakeMove() {
     const hist = this.history.pop();
     if (!hist) return;
     const m = hist.move;
-    if (m.spawn) {
-      this.board[m.to] = EMPTY;
+    if (m.spawn || m.ask) {
+      if (m.spawn) this.board[m.to] = EMPTY;
       this.el[WHITE] = hist.elW; this.el[BLACK] = hist.elB;
       this.pW = hist.pW; this.kingTaken = hist.kt;
       this.castling = hist.castling; this.ep = hist.ep; this.halfmove = hist.halfmove;
@@ -669,6 +683,7 @@ class Chess {
   }
 
   moveToSan(m) {
+    if (m.ask) return '?';
     if (m.spawn) return ({ [PAWN]: 'P', [KNIGHT]: 'N', [BISHOP]: 'B', [ROOK]: 'R', [QUEEN]: 'Q' })[m.spawn] + '@' + alg(m.to);
     const p = this.board[m.from]; // before make
     // We call this before making the move
