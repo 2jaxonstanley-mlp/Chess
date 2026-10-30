@@ -1635,7 +1635,7 @@
     renderBoard();
   }
 
-  /** The move is made. The mover may now guess (humans are asked, the computer decides on its own). */
+  /** The move is made. The mover now asks a question (or, if they dare, guesses). The computer decides on its own. */
   function guessAfterMove(mover, h) {
     const foe = otherOf(mover);
     if (h.enemySecret >= 0 && game.secretQueen[foe] < 0) { endGame('gcapture', mover); clearSession(); return; }
@@ -1646,12 +1646,17 @@
       setTimeout(() => { if (phase === 'play') resolveGuess(mover, g); }, 900);
       return;
     }
-    guessNext();
+    const level = bots ? bots[mover] : ai.level;
+    setTimeout(() => {
+      if (phase !== 'play') return;
+      doAsk(window.GuessBot.question(game, fullMoves, startFen, level, mover, initialSecrets[mover]), mover);
+    }, 350);
   }
 
   /** On to the next turn: save, and hand the device over in a two-player game. */
   function guessNext() {
     saveSession();
+    if (!game.hasLegalMove()) { endGame('stalemate', game.turn); clearSession(); return; }   // nothing left to move: a draw
     updateStatus();
     if (gwLast && (ai || bots)) setStatus(gwLast);
     maybeAI();
@@ -1659,11 +1664,20 @@
     renderAll();
   }
 
+  /** After your move: pick a question to ask, or (at the top) guess their piece. */
   function guessPrompt(mover) {
-    openSheet(`<h2>Guess their piece?<span class="sub">Right and you win. Wrong and you lose.</span></h2>
-      <div class="stack"><button class="btn big primary" id="gw-yes">Make a guess</button><button class="btn big" id="gw-no">No guess, play on</button></div>`);
-    $('#gw-yes').onclick = () => { closeSheet(); gwStage = 'guesspick'; selected = -1; legalTargets = []; setStatus('Tap the enemy piece you think is their selected piece.'); renderAll(); };
-    $('#gw-no').onclick = () => { closeSheet(); guessNext(); };
+    gwStage = '';
+    let html = '<h2>Ask a question<span class="sub">About their selected piece. You must ask one after every move.</span></h2><div class="gq-list">';
+    html += '<button class="btn primary gq-guess" id="gq-guess">Guess their piece (win or lose)</button>';
+    let grp = '';
+    for (const q of GuessQ.LIST) {
+      if (q.grp !== grp) { grp = q.grp; html += `<div class="gq-g">${esc(grp)}</div>`; }
+      html += `<button class="btn gq" data-q="${q.id}">${esc(q.text)}</button>`;
+    }
+    html += '</div>';
+    openSheet(html);
+    sheet.querySelectorAll('.gq').forEach((b) => { b.onclick = () => { closeSheet(); doAsk(+b.dataset.q, mover); }; });
+    $('#gq-guess').onclick = () => { closeSheet(); gwStage = 'guesspick'; selected = -1; legalTargets = []; setStatus('Tap the enemy piece you think is their selected piece.'); renderAll(); };
   }
 
   function guessTap(s) {
@@ -1675,7 +1689,7 @@
     $('#gg-y').onclick = () => { closeSheet(); gwStage = ''; resolveGuess(me, s); };
   }
 
-  $('#gw-skip').addEventListener('click', () => { if (gwStage !== 'guesspick') return; gwStage = ''; guessNext(); });
+  $('#gw-skip').addEventListener('click', () => { if (gwStage !== 'guesspick') return; gwStage = ''; guessPrompt(otherOf(game.turn)); });
 
   /** `mover` guesses that the enemy piece on square s is the selected one. */
   function resolveGuess(mover, s) {
@@ -1688,23 +1702,20 @@
     clearSession();
   }
 
-  /** Ask a question about the other side's selected piece: it is answered truthfully and the turn is used up. */
-  function doAsk(id) {
+  /** `mover` asks a question about the other side's selected piece, straight after their move. It is answered truthfully. */
+  function doAsk(id, mover) {
     if (phase !== 'play') return;
-    const mover = game.turn, foe = otherOf(mover);
+    const foe = otherOf(mover);
     const q = GuessQ.BY_ID[id];
     const ans = GuessQ.answer(game, id, foe, game.secretQueen[foe], { askerSel: game.secretQueen[mover] });
-    const m = { from: -1, to: -1, flags: 32, promo: 0, ask: id, ans: ans ? 1 : 0 };
-    game.makeMove(m);
-    const text = 'Asked: ' + q.short + ' → ' + (ans ? 'Yes' : 'No');
-    sans.push(text);
-    fullMoves.push({ from: -1, to: -1, flags: 32, promo: 0, q: 0, ask: id, ans: ans ? 1 : 0 });
+    game.makeMove({ from: -1, to: -1, flags: 32, promo: 0, ask: id, ans: ans ? 1 : 0, by: mover });
+    sans.push('Asked: ' + q.short + ' \u2192 ' + (ans ? 'Yes' : 'No'));
+    fullMoves.push({ from: -1, to: -1, flags: 32, promo: 0, q: 0, ask: id, ans: ans ? 1 : 0, by: mover });
     viewPly = sans.length;
     { const nowT = Date.now(); if (!playStart) playStart = nowT; moveAt.push(nowT - playStart); moveClk.push(null); }
     ratings[fullMoves.length - 1] = null;
     posKeys.push(positionKey(game));
-    selected = -1; legalTargets = [];
-    gwLast = nameOf(mover) + ' asked: "' + q.text + '" → ' + (ans ? 'Yes' : 'No');
+    gwLast = nameOf(mover) + ' asked: "' + q.text + '" \u2192 ' + (ans ? 'Yes' : 'No');
     fx('move');
     renderAll();
     renderMoves(sans, sans.length);
@@ -1714,27 +1725,12 @@
     } else guessNext();
   }
 
-  function askSheet() {
-    if (phase !== 'play' || mode !== 'guess' || aiBusy || coverUp() || gwStage) return;
-    let html = '<h2>Ask a question<span class="sub">About their selected piece. Asking uses your turn.</span></h2><div class="gq-list">';
-    let grp = '';
-    for (const q of GuessQ.LIST) {
-      if (q.grp !== grp) { grp = q.grp; html += `<div class="gq-g">${esc(grp)}</div>`; }
-      html += `<button class="btn gq" data-q="${q.id}">${esc(q.text)}</button>`;
-    }
-    html += '</div><button class="btn wide" id="gq-x">Cancel</button>';
-    openSheet(html, true);
-    sheet.querySelectorAll('.gq').forEach((b) => { b.onclick = () => { closeSheet(); doAsk(+b.dataset.q); }; });
-    $('#gq-x').onclick = closeSheet;
-  }
-  $('#gw-ask').addEventListener('click', askSheet);
-
   function showGuessRules() {
     openSheet(`<h2>Guess Who Chess<span class="sub">Find their piece before they find yours.</span></h2>
       <div class="sn-rules">
         <p>Arrange your pieces, then <b>secretly select one of your own pieces</b>. Enemy pieces show as plain boxes.</p>
         <p>You win by <b>capturing</b> their selected piece, or by <b>guessing</b> it right. You lose if yours is captured, they guess it, or you guess wrong.</p>
-        <p>On your turn either <b>ask a yes/no question</b> about their piece (it is answered truthfully), or <b>make a move</b>. After a move you may <b>guess</b> which enemy piece is theirs.</p>
+        <p>Each turn you <b>make a move</b>, then <b>ask a yes/no question</b> about their piece (answered truthfully). Instead of a question you may <b>guess</b> which enemy piece is theirs.</p>
         <p>There is no check or checkmate. Capturing a king does nothing special.</p>
         <p>Use the colour dots to mark enemy pieces for yourself. Only you see them: red = no, blue = maybe, green = likely, yellow = unsure.</p>
       </div>
@@ -1749,11 +1745,11 @@
   /** The Guess Who strip under the board: ask a question, colour marks, rules. */
   function renderGuessBar() {
     const bar = $('#gw-bar');
-    const on = mode === 'guess' && G === game && phase === 'play' && viewSide > 0 && !coverUp() && !aiBusy && !bots;
+    const on = mode === 'guess' && G === game && phase === 'play' && viewSide > 0 && !coverUp() && !aiBusy && !bots && sheetBg.classList.contains('hidden');
     bar.classList.toggle('hidden', !on);
     if (!on) { if (markTool && phase !== 'play') markTool = ''; return; }
     const pick = gwStage === 'guesspick';
-    $('#gw-ask').classList.toggle('hidden', pick);
+    $('#gw-ask').classList.add('hidden');
     $('#gw-marks').classList.toggle('hidden', pick);
     $('#gw-skip').classList.toggle('hidden', !pick);
     document.querySelectorAll('#gw-marks .mk').forEach((b) => b.classList.toggle('on', b.dataset.mk === markTool));
@@ -1799,8 +1795,7 @@
         setTimeout(() => {
           if (token !== aiToken) return;
           aiBusy = false;
-          if (m && m.ask) doAsk(m.ask);
-          else if (m && m.move) { pendingBotGuess = m.guess; doMove(m.move); }
+          if (m && m.move) { pendingBotGuess = m.guess; doMove(m.move); }
           else if (m) doMove(m);
           else updateControls();
         }, Math.max(0, minWait - (Date.now() - t0)));

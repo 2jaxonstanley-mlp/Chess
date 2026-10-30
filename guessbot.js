@@ -85,7 +85,7 @@
     const asks = [];
     for (const m of moves) {
       if (m.ask) {
-        if (g.turn === me) {
+        if (m.by === me) {
           asks.push({
             id: m.ask, ans: !!m.ans, askerSel: g.secretQueen[me], board: new Uint8Array(g.board),
             pieces: info.filter((x) => x && x.alive).map((x) => ({ pid: x.pid, sq: x.sq, moved: x.moved })),
@@ -278,34 +278,34 @@
     const cfg = LV[level] || LV.medium;
     const g = game;
     const play = (move, guess) => cb({ move, guess: guess == null ? -1 : guess });
+    const mv = g.legalMoves();
+    if (!mv.length) { cb({ move: null, guess: -1 }); return; }
     if (cfg.random) {
-      const mv = g.legalMoves();
-      const m = mv.length ? mv[Math.floor(Math.random() * mv.length)] : null;
       const foes = [];
       for (let s = 0; s < 128; s++) { if (s & 0x88) { s += 7; continue; } if (g.board[s] && colorOf(g.board[s]) === other(color)) foes.push(s); }
-      if (!m || Math.random() < 0.3) { cb({ ask: GuessQ.LIST[Math.floor(Math.random() * GuessQ.LIST.length)].id }); return; }
-      play(m, Math.random() < 0.06 && foes.length ? foes[Math.floor(Math.random() * foes.length)] : -1);
+      play(mv[Math.floor(Math.random() * mv.length)], Math.random() < 0.06 && foes.length ? foes[Math.floor(Math.random() * foes.length)] : -1);
       return;
     }
     const b = infer(startFen, fullMoves, color, mySel0 != null ? mySel0 : g.secretQueen[color], cfg.forget);
     const bel = beliefs(b, color, cfg);
     let top = null, topP = 0;
     for (const p of b.pieces) { const pr = bel.prob.get(p.pid); if (pr > topP) { topP = pr; top = p; } }
-    const canMove = g.legalMoves().length > 0;
-    const q = bestQuestion(b, bel, g, color, cfg);
-    const mySq = g.secretQueen[color];
-    const threatened = mySq >= 0 && g.attacked(mySq, other(color));
-    let ask = false;
-    if (!canMove) ask = true;
-    else if (q && q.score >= 0.12 && topP < cfg.guess && !threatened) ask = Math.random() < cfg.ask + (q.score - 0.2);
-    if (ask && q) { cb({ ask: q.id }); return; }
     const m = bestMove(g, b, bel, color, cfg);
-    if (!m) { cb({ ask: GuessQ.LIST[0].id }); return; }
     // after the move: where would the most likely piece stand? (a piece that is taken by the move ends the game anyway)
     let guess = -1;
     if (top && topP >= cfg.guess) guess = (m.from === top.sq) ? m.to : top.sq;
     play(m, guess);
   }
 
-  window.GuessBot = { arrange, select, choose, infer, sample, beliefs, STD, LV };
+  /** After its move (game g is the position after it), the question the computer asks: the most useful one for its level. Returns a question id. */
+  function question(game, fullMoves, startFen, level, color, mySel0) {
+    const cfg = LV[level] || LV.medium;
+    if (cfg.random) return GuessQ.LIST[Math.floor(Math.random() * GuessQ.LIST.length)].id;
+    const b = infer(startFen, fullMoves, color, mySel0 != null ? mySel0 : game.secretQueen[color], cfg.forget);
+    const bel = beliefs(b, color, cfg);
+    const q = bestQuestion(b, bel, game, color, cfg);
+    return q ? q.id : GuessQ.LIST[0].id;
+  }
+
+  window.GuessBot = { arrange, select, choose, question, infer, sample, beliefs, STD, LV };
 })();

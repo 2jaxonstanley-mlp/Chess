@@ -596,25 +596,19 @@ class Chess {
     this.history.push(hist);
   }
 
-  /** Guess Who: asking a question uses up the turn without moving anything (the record is { ask: question id, ans: the answer }). */
+  /** Guess Who: a question asked after a move (the record is { ask: question id, ans: the answer, by: who asked }). */
   _makeAsk(m) {
-    const col = this.turn, enemy = col === WHITE ? BLACK : WHITE;
-    this.history.push({
-      move: m, mover: col, pW: this.pW, kt: this.kingTaken, captured: 0, castling: this.castling, ep: this.ep, halfmove: this.halfmove,
-      secretFrom: this.secretQueen[col], enemySecret: this.secretQueen[enemy], revealed: this.revealed[col], wasSecretMove: false,
-      elW: this.el[WHITE], elB: this.el[BLACK],
-    });
-    this.ep = -1;
-    if (col === BLACK) this.fullmove++;
-    this.turn = enemy;
+    // a question comes right after the asker's move: nothing on the board changes and the turn does not pass (m.by = who asked)
+    this.history.push({ move: m, mover: m.by, ask: true });
   }
 
   unmakeMove() {
     const hist = this.history.pop();
     if (!hist) return;
     const m = hist.move;
-    if (m.spawn || m.ask) {
-      if (m.spawn) this.board[m.to] = EMPTY;
+    if (m.ask) return;
+    if (m.spawn) {
+      this.board[m.to] = EMPTY;
       this.el[WHITE] = hist.elW; this.el[BLACK] = hist.elB;
       this.pW = hist.pW; this.kingTaken = hist.kt;
       this.castling = hist.castling; this.ep = hist.ep; this.halfmove = hist.halfmove;
