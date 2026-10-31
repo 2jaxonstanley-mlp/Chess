@@ -608,8 +608,27 @@
   }
 
   /** Time-sliced generation. onDone(puzzle). Loosens the rules the longer it takes so it always ends. */
+  /** A realistic mate puzzle from the bank (puzzlebank.js): one you have not had lately, randomly mirrored left-right. */
+  function fromBank(diff) {
+    const bank = root.PuzzleBank;
+    if (!bank || !bank.length) return null;
+    const want = diff === 'easy' ? 1 : diff === 'normal' ? 2 : (Math.random() < 0.2 ? 2 : 3);
+    const ids = []; bank.forEach((b, i) => { if (b.n === want) ids.push(i); });
+    if (!ids.length) return null;
+    let seen = [];
+    try { seen = JSON.parse(localStorage.getItem('localPieces.bankSeen')) || []; } catch (e) { seen = []; }
+    let fresh = ids.filter((i) => !seen.includes(i));
+    if (!fresh.length) { seen = seen.filter((i) => !ids.includes(i)); fresh = ids; }
+    const i = fresh[Math.floor(Math.random() * fresh.length)];
+    try { seen.push(i); localStorage.setItem('localPieces.bankSeen', JSON.stringify(seen)); } catch (e) { /* ignore */ }
+    const b = bank[i], mir = Math.random() < 0.5;
+    const f = (sq) => (mir ? (sq & 0x70) | (7 - (sq & 7)) : sq);
+    return { type: 'mate', n: b.n, diff, pos: b.pos.map(([sq, pc]) => [f(sq), pc]), sol: b.sol.map((m) => ({ f: f(m.f), t: f(m.t), p: m.p })) };
+  }
+
   function make(type, diff, onDone) {
     const t0 = Date.now();
+    if (type === 'mate') { const b = fromBank(diff); if (b) { setTimeout(() => onDone(b), 0); return; } }
     let n = 1;
     if (type === 'mate') n = diff === 'easy' ? 1 : diff === 'normal' ? (Math.random() < 0.5 ? 1 : 2) : (Math.random() < 0.45 ? 2 : 3);
     const step = () => {
@@ -631,5 +650,5 @@
     setTimeout(step, 0);
   }
 
-  root.PuzzleGen = { setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, mateFirsts, canMate, forcedWithin, findMateMove, bestDefence, isCapture, checkPath, isSafeCheck, sanPath, sanOf, tryMate, tryCheck, tryBest, trySac, trySacMate, uniq };
+  root.PuzzleGen = { setBudget, isBlown: () => blown, setHorizon: (v) => { horizon = v; }, nega, qs, bestAt, rivalWithin, evalSide, MATE, make, fromPos, posOf, blank, isMate, mateMoves, forcedMate2, mateFirsts, canMate, forcedWithin, findMateMove, bestDefence, isCapture, checkPath, isSafeCheck, sanPath, sanOf, tryMate, tryCheck, tryBest, trySac, trySacMate, uniq };
 })();

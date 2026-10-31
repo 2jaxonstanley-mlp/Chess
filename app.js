@@ -91,6 +91,7 @@
   let fsWho = 0;               // Foresight: the side choosing a plan right now
   let fsNeed = 0;              // Foresight: the side that has just moved and still has to plan
   let fsDraft = null;          // Foresight: the plan being chosen (not locked in yet)
+  let pz = null;               // a Popular puzzle being played: { id, name, goal, n } (n = moves to mate, 0 = just win)
   let startFen = null;         // a custom starting position (FEN) from the position editor, or null for the normal start
   let moveAt = [];             // when each move was played, in ms since the first move (timed replays)
   let moveClk = [];            // both clocks after each move (timed games)
@@ -103,6 +104,7 @@
   // standard notation: pawn moves have no letter (e4, exd5), pieces have one (Nf3, Bxc6)
   const fmt = (san) => String(san || '');
   const isTas = () => mode === 'tas';
+  const branch = () => mode === 'tas' || !!pz;   // TAS and puzzles let you undo, then play something else from there
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
   const engineMode = (m) => (m === 'secret' ? 'secret' : m === 'snail' ? 'snail' : m === 'gamble' ? 'gamble' : m === 'guess' ? 'guess' : m === 'royale' ? 'royale' : 'basic');
   const isTwist = () => mode === 'snail' || mode === 'gamble' || mode === 'guess' || mode === 'royale' || mode === 'foresight';   // custom rules the move-strength labels, Analyze and Export know nothing about
@@ -713,7 +715,7 @@
     let cls = '';
     if (G.inCheck(G.turn) && G.mode !== 'guess') { text += ' — check'; cls = 'check'; }
     const h = G.history[G.history.length - 1];
-    if (G === game && !isTas() && viewPly < sans.length) {
+    if (G === game && !branch() && viewPly < sans.length) {
       setStatus(viewPly ? `Viewing move ${viewPly} of ${sans.length} (${fmt(sans[viewPly - 1])})` : 'Viewing the start position', 'dim');
       return;
     }
@@ -801,7 +803,7 @@
     b.addEventListener('click', () => chooseMode(b.dataset.mode));
   });
 
-  function chooseMode(m) { startFen = null; guardSlots(() => chooseMode2(m)); }
+  function chooseMode(m) { startFen = null; pz = null; guardSlots(() => chooseMode2(m)); }
   function chooseMode2(m) {
     if (m === 'tas') { pendingTc = null; askDifficulty(m); return; }   // TAS is single player only
     if (m === 'bullet' || m === 'rapid') { askClock(m); return; }
@@ -936,7 +938,7 @@
     sidesCtx = { w: 'p1', b: 'p2' };
     coverEl.classList.add('hidden');
     document.documentElement.classList.toggle('is-tas', m === 'tas');
-    $('#mode-title').textContent = startFen && m !== 'guess' ? 'Custom position' : MODE_LABEL[m];
+    $('#mode-title').textContent = pz ? pz.name + ' · ' + pz.goal : startFen && m !== 'guess' ? 'Custom position' : MODE_LABEL[m];
   }
 
   function startGame(m, keepNames, level) {
@@ -967,7 +969,7 @@
       opts: { autoFlip: opts.autoFlip, hints: opts.hints, ratings: opts.ratings }, ratings: ratings.slice(), secrets: initialSecrets,
       moves: fullMoves.map((m) => Object.assign({}, m)), sans: sans.slice(), viewPly, playBoth, date: Date.now(),
       clock: clock ? { w: clock[WHITE], b: clock[BLACK], inc: clock.inc, base: clock.base } : null,
-      fen: startFen, at: moveAt.slice(), clk: moveClk.slice(), gfirst: gFirst || null,
+      fen: startFen, pz: pz, at: moveAt.slice(), clk: moveClk.slice(), gfirst: gFirst || null,
       gw: mode === 'guess' ? { marks: { w: marks[WHITE], b: marks[BLACK] }, last: gwLast } : null,
       fs: mode === 'foresight' ? { plan: { w: fsPlan[WHITE], b: fsPlan[BLACK] }, need: fsNeed } : null,
     });
@@ -977,6 +979,7 @@
   function resumeChess(d) {
     closeSheet();
     startFen = d.fen || null;
+    pz = d.pz || null;
     freshGame(d.mode);
     session.use(d.id);
     if (d.gfirst) { gFirst = d.gfirst; game.turn = gFirst; }
@@ -1773,7 +1776,7 @@
   function botMove() {
     const level = bots ? bots[game.turn] : (ai && !playBoth && game.turn === ai.color ? ai.level : null);
     if (!level || phase !== 'play' || paused) return;
-    if (!isTas() && viewPly < sans.length) return;
+    if (!branch() && viewPly < sans.length) return;
     const token = ++aiToken;
     aiBusy = true;
     hintMoves = [];
@@ -1835,13 +1838,14 @@
       return;
     }
     if (bots && phase === 'play') return;   // nobody to move for: the computers are playing
-    if (phase === 'play' && !isTas() && viewPly < sans.length) {
+    if (phase === 'play' && !branch() && viewPly < sans.length) {
       showToast('You are viewing an earlier move. Press Redo to get back to the current position before playing.');
       return;
     }
     if (phase !== 'play' || pendingPromo || aiBusy) return;
     if (ai && !humanTurn()) {
       if (isTas()) showToast("It's the computer's move here. Press Redo, or switch on Both sides to play it yourself.", false);
+      else if (pz) showToast("It's the computer's move here. Press Undo once more to take your move back.", false);
       return;
     }
 
@@ -1892,8 +1896,8 @@
   }
 
   function doMove(m) {
-    if (isTas() && viewPly < sans.length) {
-      // TAS: playing from an earlier point throws away the old future (redo is off until you undo again)
+    if (branch() && viewPly < sans.length) {
+      // TAS and puzzles: playing from an earlier point throws away the old future (redo is off until you undo again)
       sans.length = viewPly;
       fullMoves.length = viewPly;
       moveAt.length = Math.min(moveAt.length, viewPly); moveClk.length = Math.min(moveClk.length, viewPly);
@@ -1954,12 +1958,27 @@
     else if (posKeys.filter((k) => k === posKeys[viewPly]).length >= 3) end = 'repeat';
 
     if (end) { endGame(end, mover); clearSession(); }
+    else if (pzSpent(mover)) { saveSession(); }
     else if (mode === 'foresight') {   // the mover now has to plan their next move, then the other side's turn comes
       fsNeed = mover;
       saveSession();
       setStatus(nameOf(mover) + ' played ' + fmt(full));
       fsLater(bots ? 500 : 800, fsDrive);
     } else { saveSession(); updateStatus(); syncFlip(true, 380); maybeAI(); refreshHint(); }
+  }
+
+  /** Popular puzzle: you have played your last move for the mate and it was not mate, so stop and offer undo / retry. */
+  function pzSpent(mover) {
+    if (!pz || !pz.n || !ai || mover !== ai.human) return false;
+    const mine = fullMoves.filter((_, i) => (i % 2 === 0) === (ai.human === WHITE)).length;
+    if (mine < pz.n) return false;
+    aiToken++; aiBusy = false;
+    setStatus('Out of moves');
+    openSheet(`<h2>Not solved<span class="sub">The mate has to come within ${pz.n} move${pz.n === 1 ? '' : 's'}.</span></h2>
+      <div class="row"><button class="btn" id="pz-u">Undo move</button><button class="btn primary" id="pz-r">Try again</button></div>`, true);
+    $('#pz-u').onclick = () => { closeSheet(); navigate(-1); };
+    $('#pz-r').onclick = () => { closeSheet(); session.clear(); startGame(mode, true); };
+    return true;
   }
 
   function showPromotion(move, cb, color) {
@@ -2003,6 +2022,11 @@
     over = winner != null
       ? { title: nameOf(winner) + ' wins', sub: type === 'mate' ? 'Checkmate' : type === 'gcapture' ? nameOf(loser) + "'s selected piece was captured" : type === 'gright' ? nameOf(winner) + ' guessed the selected piece' : type === 'gwrong' ? nameOf(loser) + ' guessed the wrong piece' : type === 'snail' ? nameOf(loser) + "'s snail reached their king" : type === 'king' ? nameOf(loser) + "'s king was captured" : type === 'resign' ? nameOf(loser) + ' forfeited' : nameOf(loser) + ' ran out of time', result: winner === WHITE ? '1-0' : '0-1' }
       : { title: 'Draw', sub: why[type], result: '1/2-1/2' };
+    if (pz) {
+      const won = winner != null && !!ai && winner === ai.human;
+      over = { title: won ? 'Puzzle solved!' : 'Not solved', sub: won ? pz.name : type === 'mate' ? 'You were checkmated' : type === 'resign' ? 'You gave up' : winner != null ? 'The computer won' : (why[type] || 'Drawn') + ', the puzzle needs a win', result: over.result };
+      if (won && window.LP.popular) window.LP.popular.done(pz.id);
+    }
     const lb = type === 'mate' && !startFen ? recordWin(mover) : null;
     const Pf = window.LP.profile;
     if (Pf && ai && !bots && !playBoth && !startFen && Pf.MODES[mode]) over.elo = Pf.record(mode, ai.level, winner != null ? (winner === ai.human ? 1 : 0) : 0.5);
@@ -2018,7 +2042,7 @@
     updateControls();
     overStatus();
     fx(winner == null ? 'draw' : ai && !bots && winner !== ai.human ? 'lose' : 'win');
-    if (window.LP.history && fullMoves.length) { try { const d = buildReplayData(); window.LP.history.add({ kind: 'chess', id: d.id, mode: d.mode2 || mode, modeLabel: startFen && mode !== 'guess' ? 'Custom position' : MODE_LABEL[mode], names: d.names, level: d.level, bots: !!bots, human: d.human, result: d.result, winner: d.winner, dur: Math.round((Date.now() - (playStart || Date.now())) / 1000) || 0, moves: Math.ceil(fullMoves.length / 2), timed: !!clock, payload: d }); } catch (e) { /* history is best effort */ } }
+    if (window.LP.history && fullMoves.length) { try { const d = buildReplayData(); window.LP.history.add({ kind: 'chess', id: d.id, mode: d.mode2 || mode, modeLabel: pz ? 'Puzzle · ' + pz.name : startFen && mode !== 'guess' ? 'Custom position' : MODE_LABEL[mode], names: d.names, level: d.level, bots: !!bots, human: d.human, result: d.result, winner: d.winner, dur: Math.round((Date.now() - (playStart || Date.now())) / 1000) || 0, moves: Math.ceil(fullMoves.length / 2), timed: !!clock, payload: d }); } catch (e) { /* history is best effort */ } }
     const revealMs = mode === 'guess' ? guessReveal() : 0;
     setTimeout(() => {
       if (phase !== 'over' || !sheetBg.classList.contains('hidden')) return;
@@ -2059,7 +2083,7 @@
 
   function overStatus() {
     const quick = !window.LP.prefs || window.LP.prefs.get('quick');
-    setStatus('', '', `${esc(over.title)} · ${esc(over.sub)} <button id="st-opts">Options</button>${quick ? ' <button id="st-again">Rematch</button>' : ''}`);
+    setStatus('', '', `${esc(over.title)} · ${esc(over.sub)} <button id="st-opts">Options</button>${quick ? ' <button id="st-again">' + (pz ? 'Retry' : 'Rematch') + '</button>' : ''}`);
     $('#st-opts').onclick = () => showOverSheet();
     if (quick) $('#st-again').onclick = () => startGame(mode, true);
   }
@@ -2070,7 +2094,8 @@
       <div class="stack">
         ${noAn ? '' : '<button class="btn primary" id="ov-analyze">Analyze game</button>'}
         ${exportable() ? '<button class="btn" id="ov-export">Export match</button>' : ''}
-        <div class="row"><button class="btn" id="ov-new">Rematch</button><button class="btn" id="ov-close">Close</button></div>
+        <div class="row"><button class="btn" id="ov-new">${pz ? 'Try again' : 'Rematch'}</button><button class="btn" id="ov-close">Close</button></div>
+        ${pz ? '<button class="btn" id="ov-list">Puzzle list</button>' : ''}
       </div>
       ${over.elo ? `<p class="elo-line ${over.elo.delta >= 0 ? 'up' : 'down'}"><span>${MODE_LABEL[mode]} rating</span><b>${over.elo.after}</b><em>${over.elo.delta >= 0 ? '+' : '\u2212'}${Math.abs(over.elo.delta)}</em></p>` : ''}
       <p class="note">${over.note ? esc(over.note) + '<br>' : ''}${tas ? 'TAS is a sandbox, so it is not saved or analysed.' : isTwist() ? MODE_LABEL[mode] + ' games are saved in History, but Analyze does not support them.' : 'Analyzing saves the game. You can open it again any time from Analyze in the Train section.'}</p>`);
@@ -2087,6 +2112,8 @@
     if (ex) ex.onclick = () => window.LP.exporter.matchSheet(buildReplayData(), showOverSheet);
     $('#ov-new').onclick = () => { closeSheet(); startGame(mode, true); };
     $('#ov-close').onclick = closeSheet;
+    const pl = $('#ov-list');
+    if (pl) pl.onclick = () => { closeSheet(); backToMenu(); if (window.LP.popular) window.LP.popular.open(); };
   }
   /** Export match is for Classic and the timed games (not Secret Queen or TAS). */
   function exportable() { return !!(window.LP.exporter && over && sans.length && window.LP.exporter.canExport(buildReplayData())); }
@@ -2435,10 +2462,39 @@
     const probe = new Chess();
     if (probe.loadFen(fen)) return;
     startFen = fen;
+    pz = null;
     pendingTc = null;
     guardSlots(() => { if (players === 2) { startGame('basic', false, null); } else askDifficulty('basic'); });
   }
-  window.LP = { levelMenu, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session, applySettings, sides: () => sidesCtx, setSides: (m) => { sidesCtx = m || { w: 'p1', b: 'p2' }; }, fmt,
+  /** A Popular puzzle: you are forced to the side to move, the computer is always Insane. */
+  function playPopular(p) {
+    const probe = new Chess();
+    if (probe.loadFen(p.fen)) return;
+    guardSlots(() => {
+      startFen = p.fen;
+      pz = { id: p.id, name: p.name, goal: p.goal, n: p.n || 0 };
+      pendingTc = null;
+      freshGame('basic');
+      const me = p.fen.split(' ')[1] === 'b' ? BLACK : WHITE;
+      ai = { level: 'insane', color: me === WHITE ? BLACK : WHITE, human: me };
+      bots = null;
+      const nm = (window.LP.profile && window.LP.profile.name()) || 'Player';
+      names = { [me]: nm, [ai.color]: 'Computer (Insane)' };
+      viewNames = names;
+      sidesCtx = { [me === WHITE ? 'w' : 'b']: 'p1', [me === WHITE ? 'b' : 'w']: 'p2' };
+      phase = 'names';
+      showPage('game');
+      buildBoard();
+      renderAll();
+      renderMoves([], 0);
+      setStatus('');
+      closeSheet();
+      loadOptsFromSettings();
+      opts.autoFlip = false;
+      afterNames();
+    });
+  }
+  window.LP = { levelMenu, playPopular, openSheet, closeSheet, showPage, esc, LEVEL_LABEL, store, renderSavedList, session, applySettings, sides: () => sidesCtx, setSides: (m) => { sidesCtx = m || { w: 'p1', b: 'p2' }; }, fmt,
     resumeChess, startReplay, playPosition, MODE_LABEL, confirmSheet, MAX_SLOTS };
   // Profile loads after app.js; pick up saved settings once it is ready
   setTimeout(loadOptsFromSettings, 0);

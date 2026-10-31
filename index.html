@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=44">
+  <link rel="stylesheet" href="styles.css?v=45">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Carlito is the open Calibri look-alike, used when Calibri isn't installed -->
@@ -164,6 +164,14 @@
         <section class="mgrp closed" data-g="train">
           <button class="mgrp-h" type="button" aria-expanded="false"><span class="mgrp-t">Train</span><span class="mgrp-s">Get better</span><i class="mgrp-chev" aria-hidden="true"></i></button>
           <div class="mgrp-b"><div class="modes">
+          <button class="mode" data-mode="popular" style="--accent:#ffb347">
+            <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:4"></i></span>
+            <span class="mode-text">
+              <span class="mode-name">Popular puzzles</span>
+              <span class="mode-desc">Famous positions to solve against the Insane computer.</span>
+            </span>
+            <span class="mode-go" aria-hidden="true">&rsaquo;</span>
+          </button>
           <button class="mode" data-mode="puzzle" style="--accent:#f2c45a">
             <span class="mode-ic" aria-hidden="true"><i class="ic-sp" style="--i:0"></i></span>
             <span class="mode-text">
@@ -515,6 +523,19 @@
       </div>
     </section>
 
+    <!-- POPULAR PUZZLES -->
+    <section id="popular" class="page">
+      <header class="game-header">
+        <button id="pp-back" class="text-btn" aria-label="Back to menu">&larr; Menu</button>
+        <span class="mode-title">Popular puzzles</span>
+        <span class="header-spacer"></span>
+      </header>
+      <div class="pp-wrap">
+        <p class="pp-lead">You play the side to move. The computer is always Insane.</p>
+        <div id="pp-list" class="pp-list"></div>
+      </div>
+    </section>
+
     <!-- DAILY TASKS -->
     <section id="tasks" class="page">
       <header class="game-header">
@@ -574,20 +595,22 @@
   <script src="guessq.js?v=1"></script>
   <script src="ai.js?v=35"></script>
   <script src="guessbot.js?v=4"></script>
-  <script src="app.js?v=37"></script>
+  <script src="app.js?v=38"></script>
   <script src="export.js?v=2"></script>
   <script src="prefs.js?v=1"></script>
   <script src="history.js?v=7"></script>
-  <script src="saves.js?v=5"></script>
+  <script src="saves.js?v=6"></script>
   <script src="leaderboard.js?v=30"></script>
   <script src="profile.js?v=24"></script>
   <script src="hats.js?v=2"></script>
   <script src="shop.js?v=35"></script>
     <script src="stats.js?v=33"></script>
   <script src="rush.js?v=25"></script>
-  <script src="puzzlegen.js?v=30"></script>
+  <script src="puzzlegen.js?v=31"></script>
+  <script src="puzzlebank.js?v=1"></script>
   <script src="ratings.js?v=30"></script>
-  <script src="puzzles.js?v=32"></script>
+  <script src="puzzles.js?v=33"></script>
+  <script src="popular.js?v=1"></script>
   <script src="analyzecore.js?v=1"></script>
   <script src="explain.js?v=1"></script>
   <script src="analyze.js?v=7"></script>

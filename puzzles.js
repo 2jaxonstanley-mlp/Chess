@@ -599,7 +599,7 @@
   ];
   // what each level means for each kind of puzzle (shown in the level picker)
   const SUBS = {
-    mate: { easy: 'Mate in 1. Clear and straightforward.', normal: 'Mate in 1 or 2 with a busier board.', hard: 'Mate in 2 or 3 on a crowded board.' },
+    mate: { easy: 'Mate in 1. Clear and straightforward.', normal: 'Mate in 2, in a game-like position.', hard: 'Mate in 3 (sometimes 2), in a game-like position.' },
     check: { easy: 'A safe check, a couple of moves at most.', normal: 'More pieces defending, up to 3 moves.', hard: 'A crowded board: the safe check takes 3 moves.' },
     best: { easy: 'Win something clear.', normal: 'The best move is not the obvious capture.', hard: 'A deep tactic that a short look misses.' },
     sac: { easy: 'A simple sacrifice that wins quickly.', normal: 'A sacrifice that leads to mate or a bigger win.', hard: 'A big sacrifice and a deep combination.' },
