@@ -104,7 +104,7 @@
   // standard notation: pawn moves have no letter (e4, exd5), pieces have one (Nf3, Bxc6)
   const fmt = (san) => String(san || '');
   const isTas = () => mode === 'tas';
-  const branch = () => mode === 'tas' || !!pz;   // TAS and puzzles let you undo, then play something else from there
+  const branch = () => mode === 'tas';   // TAS lets you undo, then play something else from there
   const humanTurn = () => !ai || playBoth || game.turn === ai.human;
   const engineMode = (m) => (m === 'secret' ? 'secret' : m === 'snail' ? 'snail' : m === 'gamble' ? 'gamble' : m === 'guess' ? 'guess' : m === 'royale' ? 'royale' : 'basic');
   const isTwist = () => mode === 'snail' || mode === 'gamble' || mode === 'guess' || mode === 'royale' || mode === 'foresight';   // custom rules the move-strength labels, Analyze and Export know nothing about
@@ -1845,7 +1845,6 @@
     if (phase !== 'play' || pendingPromo || aiBusy) return;
     if (ai && !humanTurn()) {
       if (isTas()) showToast("It's the computer's move here. Press Redo, or switch on Both sides to play it yourself.", false);
-      else if (pz) showToast("It's the computer's move here. Press Undo once more to take your move back.", false);
       return;
     }
 
@@ -1897,7 +1896,7 @@
 
   function doMove(m) {
     if (branch() && viewPly < sans.length) {
-      // TAS and puzzles: playing from an earlier point throws away the old future (redo is off until you undo again)
+      // TAS: playing from an earlier point throws away the old future (redo is off until you undo again)
       sans.length = viewPly;
       fullMoves.length = viewPly;
       moveAt.length = Math.min(moveAt.length, viewPly); moveClk.length = Math.min(moveClk.length, viewPly);
@@ -1975,8 +1974,8 @@
     aiToken++; aiBusy = false;
     setStatus('Out of moves');
     openSheet(`<h2>Not solved<span class="sub">The mate has to come within ${pz.n} move${pz.n === 1 ? '' : 's'}.</span></h2>
-      <div class="row"><button class="btn" id="pz-u">Undo move</button><button class="btn primary" id="pz-r">Try again</button></div>`, true);
-    $('#pz-u').onclick = () => { closeSheet(); navigate(-1); };
+      <div class="row"><button class="btn" id="pz-c">Close</button><button class="btn primary" id="pz-r">Try again</button></div>`, true);
+    $('#pz-c').onclick = closeSheet;
     $('#pz-r').onclick = () => { closeSheet(); session.clear(); startGame(mode, true); };
     return true;
   }

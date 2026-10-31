@@ -1368,8 +1368,8 @@ body[data-bd="doodle"] .board { border-radius: 1.4% 0.7% 1.8% 0.9% / 0.9% 1.8% 0
 .sv-facts { display: grid; gap: .3rem; margin: .7rem 0; }
 .sv-fact { display: flex; justify-content: space-between; gap: 1rem; font-size: .95rem; }
 .sv-fact span:first-child { color: var(--muted); }
-.mb { display: grid; grid-template-columns: repeat(8, 1fr); width: min(260px, 70%); margin: .7rem auto 0; border-radius: 6px; overflow: hidden; aspect-ratio: 1; }
-.mb i { display: grid; place-items: center; font-style: normal; font-size: clamp(.8rem, 4vw, 1.3rem); line-height: 1; }
+.mb { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); width: min(260px, 70%); margin: .7rem auto 0; border-radius: 6px; overflow: hidden; aspect-ratio: 1; }
+.mb i { min-width: 0; min-height: 0; overflow: hidden; display: grid; place-items: center; font-style: normal; font-size: clamp(.8rem, 4vw, 1.3rem); line-height: 1; }
 .mb i.l { background: var(--light-sq, #eeeed2); } .mb i.d { background: var(--dark-sq, #769656); }
 .mb b { font-weight: 400; } .mb b.w { color: #fff; text-shadow: 0 0 2px #000, 0 0 1px #000; } .mb b.b { color: #111; }
 
@@ -1612,8 +1612,8 @@ body[data-bd="doodle"] .board { border-radius: 1.4% 0.7% 1.8% 0.9% / 0.9% 1.8% 0
 .pp-b { display: flex; gap: .85rem; align-items: center; text-align: left; width: 100%; background: var(--panel-2); border: 2px solid transparent; border-radius: 14px; padding: .6rem; color: inherit; font: inherit; cursor: pointer; }
 .pp-b:hover { border-color: #fff; }
 .pp-b:active { transform: scale(.985); }
-.pp-mb.mb { flex: none; width: 128px; margin: 0; }
-.pp-mb.mb i { font-size: .72rem; }
+.pp-mb.mb { flex: none; width: 128px; height: 128px; margin: 0; }
+.pp-mb.mb i { font-size: 12px; }
 .pp-t { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
 .pp-n { font-size: 1.1rem; }
 .pp-tags { display: flex; flex-wrap: wrap; gap: .35rem; }
